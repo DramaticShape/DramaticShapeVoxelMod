@@ -41,6 +41,8 @@ local VoxelScene = V.require("VoxelScene")
 local BattleCam = V.require("BattleCam")
 local BattleBillboard = V.require("BattleBillboard")
 local VoxelGrid = V.require("VoxelGrid")
+local Voxel = V.require("VoxelState")
+local WorldCurve = V.require("WorldCurve")
 local PaletteFX = require("src.render.PaletteFX")
 
 local BattleScene = {}
@@ -289,7 +291,48 @@ end
 BattleScene.FLASH_COLOR = { 1, 1, 1 }
 BattleScene.FLASH_STRENGTH = 0.5
 
-function BattleScene.render(state, arena, textures, token)
+local function pitchFor(cam)
+  local ex = cam.eye[1] - cam.focus[1]
+  local ey = cam.eye[2] - cam.focus[2]
+  local ez = cam.eye[3] - cam.focus[3]
+  return math.atan2(math.sqrt(ex * ex + ez * ez), math.max(1e-3, ey))
+end
+
+-- The exact placed-camera equivalent of Voxel3D's ordinary orbit. Captured
+-- when the encounter begins, this is what lets a transition start on the
+-- frame the player was actually looking at instead of on a canned overview.
+function BattleScene.freeCamera(state)
+  if not (state and state.camera) then return nil end
+  local renderer = require("src.core.Game").renderer
+  local vw, vh = 160, 144
+  if renderer and renderer.worldViewSize then
+    local ok, rw, rh = pcall(renderer.worldViewSize, renderer)
+    if ok and rw and rh and rw > 0 and rh > 0 then vw, vh = rw, rh end
+  end
+  local cx = state.camera.x + vw / 2
+  local cy = state.camera.y + vh / 2
+  local dist = Voxel.FOCAL * vh
+  local angle = Voxel.angle or 0
+  return {
+    eye = { cx, dist * math.cos(angle), cy + dist * math.sin(angle) },
+    focus = { cx, 0, cy },
+    fov = 2 * math.atan(1 / (2 * Voxel.FOCAL)),
+    curve = WorldCurve.k(vh),
+  }
+end
+
+function BattleScene.battleCamera(state, arena)
+  if not (state and state.map and arena) then return nil end
+  local host = arena.map or state.map
+  local groundY = BattleScene.groundY(host, arena)
+  local cam = BattleCam.rig(arena, groundY)
+  local _, _, s, _, ph = BattleScene.letterbox()
+  if not (ph and ph > 0 and s and s > 0) then return nil end
+  cam.fov = BattleScene.letterboxFov(cam.fov, ph, s)
+  return cam
+end
+
+function BattleScene.render(state, arena, textures, token, cameraOverride)
   if not (state and state.map and arena) then return nil end
   if not Voxel3D.available() then return nil end
 
@@ -312,8 +355,11 @@ function BattleScene.render(state, arena, textures, token)
   end
 
   local groundY = BattleScene.groundY(host, arena)
-  local cam, pitch = BattleCam.rig(arena, groundY)
-  cam.fov = BattleScene.letterboxFov(cam.fov, ph, s)
+  local cam = cameraOverride or BattleCam.rig(arena, groundY)
+  if not cameraOverride then
+    cam.fov = BattleScene.letterboxFov(cam.fov, ph, s)
+  end
+  local pitch = pitchFor(cam)
 
   local cx, cy = arena.mid[1], arena.mid[2]
   -- the world extents the sun frustum is fitted to; the camera itself is

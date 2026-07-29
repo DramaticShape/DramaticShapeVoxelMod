@@ -42,6 +42,7 @@ local ModSetting = V.require("ModSetting")
 local BattleArena = V.require("BattleArena")
 local BattleCam = V.require("BattleCam")
 local BattleScene = V.require("BattleScene")
+local BattleSweep = V.require("BattleSweep")
 local BattleDOF = V.require("BattleDOF")
 local BattleHud = V.require("BattleHud")
 local BattlePics = V.require("BattlePics")
@@ -189,8 +190,11 @@ function OverworldBattle.begin(state, battle)
                           state.player.surfing)
   if not (ok and arena) then return false end
 
-  session = { state = state, arena = arena, battle = battle, shot = nil,
-              armed = false, token = 0 }
+  session = {
+    state = state, arena = arena, battle = battle, shot = nil,
+    armed = false, token = 0, phase = "waiting", transitionT = 0,
+    freeCamera = BattleScene.freeCamera(state),
+  }
   cullCast(state)
   BattleCam.reset()
   return true
@@ -225,6 +229,28 @@ function OverworldBattle.finish()
   Voxel3D.camera = nil
 end
 
+function OverworldBattle.transitioning(battle)
+  return session and not session.broken and session.battle == battle
+     and (session.phase == "waiting"
+       or session.phase == "enter"
+       or session.phase == "exit")
+end
+
+-- Delay the engine's destructive finish until the camera has reached the
+-- walking view. Repeated calls while the move is running are consumed.
+function OverworldBattle.requestFinish(battle, callback)
+  if not (session and session.battle == battle and not session.broken) then
+    return false
+  end
+  if session.phase == "exit" then return true end
+  if not session.camera then return false end
+  session.phase = "exit"
+  session.transitionT = 0
+  session.exitFrom = session.camera
+  session.finishCallback = callback
+  return true
+end
+
 -- ------- per-frame
 --
 -- Driven from the voxel pipeline's update hook, which the engine ticks every
@@ -253,10 +279,33 @@ function OverworldBattle.update(dt)
     return
   end
 
-  BattleCam.update(dt)
   -- the battle only exists once it has been pushed; a session opened at
   -- pushBattle time has it, one opened from battle.started was handed it
   session.battle = session.battle or (top ~= ow and top or nil)
+
+  if top == session.battle then
+    if session.phase == "waiting" then
+      session.phase = "enter"
+      session.transitionT = 0
+    elseif session.phase == "enter" or session.phase == "exit" then
+      session.transitionT = math.min(
+        1, session.transitionT + (tonumber(dt) or 0) / BattleSweep.DURATION)
+    elseif session.phase == "battle" then
+      BattleCam.update(dt)
+    end
+  end
+
+  local battleCamera = BattleScene.battleCamera(session.state, session.arena)
+  if session.phase == "enter" then
+    session.camera = BattleSweep.camera(
+      session.freeCamera or battleCamera, battleCamera, session.transitionT)
+  elseif session.phase == "exit" then
+    session.camera = BattleSweep.camera(
+      session.exitFrom or battleCamera,
+      session.freeCamera or battleCamera, session.transitionT)
+  else
+    session.camera = battleCamera
+  end
   -- the world pass is hidden behind the battle, so mesh builds get the wide
   -- slice: nothing visible can hitch on them
   ChunkMesher.pump(true)
@@ -264,11 +313,16 @@ function OverworldBattle.update(dt)
   -- The mons' textures are rendered HERE, with no canvas bound, for the same
   -- reason the scene is: the pics layer binds its own targets, and doing that
   -- inside somebody else's frame means putting the frame back afterwards.
-  local okTex, textures = pcall(OverworldBattle.textures, session.battle)
+  local textures = nil
+  local wantTextures = session.phase == "battle" or session.phase == "exit"
+  local okTex = true
+  if wantTextures then
+    okTex, textures = pcall(OverworldBattle.textures, session.battle)
+  end
   if not okTex then textures = nil end
   session.token = (session.token or 0) + 1
   local ok, shot = pcall(BattleScene.render, session.state, session.arena,
-                         textures, session.token)
+                         textures, session.token, session.camera)
   if not ok then
     -- One failure retires the arena for THIS battle and nothing else: the
     -- battle screen carries on as the engine's own, the free-roam pipeline
@@ -279,9 +333,18 @@ function OverworldBattle.update(dt)
     session.broken = true
     V.mod.log:warn("overworld battle scene failed: %s -- this battle draws "
                    .. "on the plain battle background", tostring(shot))
+    -- A rendering fallback must never become a gameplay lock. Entry simply
+    -- resumes as a plain battle; exit performs the engine teardown now.
+    if session.phase == "exit" then
+      local callback = session.finishCallback
+      session.finishCallback = nil
+      if callback then callback() end
+    elseif session.phase == "enter" then
+      session.phase = "battle"
+    end
     return
   end
-  if shot and shot.canvas then
+  if shot and shot.canvas and session.phase == "battle" then
     -- the depth of field is measured off the two marks: the slab in focus is
     -- the one the mons are standing in, at whatever the drift has done to
     -- where that lands
@@ -297,6 +360,14 @@ function OverworldBattle.update(dt)
     pcall(BattleHud.build, shot.canvas)
   end
   session.shot = shot
+
+  if session.phase == "enter" and session.transitionT >= 1 then
+    session.phase = "battle"
+  elseif session.phase == "exit" and session.transitionT >= 1 then
+    local callback = session.finishCallback
+    session.finishCallback = nil
+    if callback then callback() end
+  end
 end
 
 -- The finished shot for this frame, or nil when there is none and the battle
@@ -605,8 +676,29 @@ function OverworldBattle.install()
     -- the white letterbox exists so the window matches the white battle
     -- canvas; there is a world out to the window edges now
     self.letterboxWhite = false
+    -- During the move the world is the whole shot. The battle furniture and
+    -- flat UI arrive only after the entry camera has landed, and disappear
+    -- before the return camera leaves, eliminating the hard state cut.
+    if OverworldBattle.transitioning(self) then return end
     OverworldBattle.drawHudPanels(self)
     withoutBackgroundFill(self, innerDraw)
+  end
+
+  local innerUpdate = BattleState.update
+  function BattleState:update(dt)
+    if OverworldBattle.transitioning(self) then return end
+    return innerUpdate(self, dt)
+  end
+
+  local innerFinish = BattleState.finish
+  function BattleState:finish()
+    -- Pay Day's first finish call only queues its payout message; it is not
+    -- an exit and must remain immediate.
+    if self.payDay and self.result == "win" then return innerFinish(self) end
+    if OverworldBattle.requestFinish(self, function() innerFinish(self) end) then
+      return
+    end
+    return innerFinish(self)
   end
 
   -- The mons are geometry standing on the map now, drawn in the 3D pass
