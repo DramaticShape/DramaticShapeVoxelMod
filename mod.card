@@ -11,6 +11,7 @@ return {
       "with VOXEL on, the overworld draws as 3D geometry instead of flat tiles",
       "occlusion comes from a depth buffer rather than a y-sort, so buildings really hide what is behind them",
       "with 3D-BTL on, a battle draws over the map's nearest clear ground instead of over a white field",
+      "the camera sweeps from the live overworld view into the battle rig and back out before control returns",
       "the map's NPCs are culled for the length of a battle, so the wipe plays over an empty map",
       "a battle's letterbox voids go black rather than white, because the battle canvas is no longer white",
       "VOXEL and the engine's TILT are mutually exclusive -- turning one on switches the other off",

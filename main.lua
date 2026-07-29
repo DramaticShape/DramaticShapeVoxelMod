@@ -620,7 +620,7 @@ mod.events:on("battle.ended", function()
   OverworldBattle.finish()
 end)
 
-mod.exports.version = "1.1.1"
+mod.exports.version = "1.1.3"
 -- exposed so a companion mod can pin its own tiles' shapes or read the
 -- camera without reaching into this mod's file layout
 mod.exports.lib = V
