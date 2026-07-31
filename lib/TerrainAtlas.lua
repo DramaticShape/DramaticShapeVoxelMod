@@ -33,6 +33,7 @@ local V = ...
 local Assets = require("src.render.Assets")
 local TileRenderer = require("src.render.TileRenderer")
 local PaletteFX = require("src.render.PaletteFX")
+local ImageCache = V.require("ImageCache")
 
 local TerrainAtlas = {}
 
@@ -92,7 +93,7 @@ local function staticAtlas(map, colors)
 
   local data
   local ok, img = pcall(function()
-    local src = Assets.imageData(path)
+    local src = ImageCache.get(path)
     local w, h = src:getDimensions()
     local out = love.image.newImageData(w, h)
     for y = 0, h - 1 do
@@ -169,7 +170,7 @@ local function patch(out, entry, spec, step)
   elseif spec.kind == "frames" then
     local path = spec.images[spec.sequence[step % #spec.sequence + 1]]
     if not path then return end
-    local ok, frame = pcall(Assets.imageData, path)
+    local ok, frame = pcall(ImageCache.get, path)
     if not ok or not frame then return end
     local shades = entry.shades and entry.shades[tile]
     -- a `cut` tile is the flower billboard's slot (Structures'
@@ -320,7 +321,7 @@ local function gbcPixels(map)
   local ok, out = pcall(function()
     local groupColors = PaletteFX.worldGroupColors(data, tileset.id, map.id, nil)
     if not groupColors then return nil end
-    local src = Assets.imageData(tileset.image)
+    local src = ImageCache.get(tileset.image)
     local iw, ih = src:getDimensions()
     local perRow = tileset.tilesPerRow or 16
     local total = (iw / 8) * (ih / 8)
@@ -387,7 +388,7 @@ local function rendererPixels(map)
   if renderer.gbcAtlas then
     return gbcPixels(map) or readback(renderer.image)
   end
-  local ok, data = pcall(Assets.imageData, map.tileset.image)
+  local ok, data = pcall(ImageCache.get, map.tileset.image)
   return ok and data or nil
 end
 
@@ -476,7 +477,7 @@ local function newEntry(map, base, baked)
     -- tile each one stands in for, so they land on the same colours
     local recolored = baked or (map.renderer and map.renderer.gbcAtlas)
     if recolored and not tileset.trueColor then
-      local raw = Assets.imageData(tileset.image)
+      local raw = ImageCache.get(tileset.image)
       e.shades = {}
       for _, spec in ipairs(specs) do
         if spec.kind == "frames" then
@@ -495,7 +496,7 @@ local function newEntry(map, base, baked)
     for _, spec in ipairs(specs) do
       if spec.kind == "frames" then
         local okCut, isFlower = pcall(function()
-          local okA, art = pcall(Assets.imageData, tileset.image)
+          local okA, art = pcall(ImageCache.get, tileset.image)
           if not (okA and art and art.getPixel) then return false end
           local sh = V.require("TileShape").forMap(map)[spec.tile]
           return sh ~= nil and sh.class == "flower"
@@ -595,7 +596,7 @@ function TerrainAtlas.forSprite(path, colors)
   if cache[key] ~= nil then return cache[key] or nil end
 
   local ok, img = pcall(function()
-    local src = Assets.imageData(path)
+    local src = ImageCache.get(path)
     local w, h = src:getDimensions()
     local out = love.image.newImageData(w, h)
     for y = 0, h - 1 do

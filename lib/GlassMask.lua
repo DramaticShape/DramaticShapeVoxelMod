@@ -30,7 +30,7 @@
 -- the mod namespace (see main.lua): V.require loads a sibling module
 local V = ...
 
-local Assets = require("src.render.Assets")
+local ImageCache = V.require("ImageCache")
 
 local GlassMask = {}
 
@@ -99,7 +99,7 @@ local function entry(tileset)
   if not path then return nil end
   local hit = cache[path]
   if hit then return hit end
-  local ok, data = pcall(Assets.imageData, path)
+  local ok, data = pcall(ImageCache.get, path)
   if not (ok and data) then
     -- unreadable art is a verdict for the session, not a retry loop
     cache[path] = { rects = {}, texture = false }

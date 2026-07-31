@@ -49,6 +49,7 @@ local Map = require("src.world.Map")
 local Buildings = V.require("Buildings")
 local TileShape = V.require("TileShape")
 local Budget = V.require("BuildBudget")
+local ImageCache = V.require("ImageCache")
 
 local Structures = {}
 
@@ -93,7 +94,7 @@ local atlasData = {}
 local function pixels(tileset)
   local path = tileset.image
   if atlasData[path] == nil then
-    local ok, data = pcall(Assets.imageData, path)
+    local ok, data = pcall(ImageCache.get, path)
     atlasData[path] = (ok and data and data.getPixel) and data or false
   end
   return atlasData[path] or nil
@@ -3524,7 +3525,7 @@ local function flowerFrames(tileset, tileId)
   for _, spec in ipairs(type(declared) == "table" and declared or {}) do
     if spec.kind == "frames" and spec.tile == tileId then
       for _, path in pairs(spec.images or {}) do
-        local okF, frame = pcall(Assets.imageData, path)
+        local okF, frame = pcall(ImageCache.get, path)
         if okF and frame then out[#out + 1] = frame end
       end
     end
