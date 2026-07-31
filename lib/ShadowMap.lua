@@ -180,7 +180,9 @@ end
 local function getCanvas(res)
   if canvas == false then return nil end
   if canvas and canvasRes == res then return canvas end
-  local ok, c = pcall(love.graphics.newCanvas, res, res)
+  -- pixel-exact: `res` IS the texel count the filter's sunTexel is derived
+  -- from, so the texture must be exactly that big (see lib/PixelCanvas.lua)
+  local ok, c = V.require("PixelCanvas").new(res, res)
   if not (ok and c) then
     canvas = false
     return nil

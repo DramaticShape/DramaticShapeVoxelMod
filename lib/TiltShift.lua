@@ -25,6 +25,9 @@
 -- failure -- headless, no shader support) apply() hands the canvas back
 -- untouched, so every other path is byte-for-byte what it always was.
 
+-- the mod namespace (see main.lua): V.require loads a sibling module
+local V = ...
+
 local TiltShift = {}
 
 TiltShift.level = 0
@@ -85,9 +88,12 @@ end
 
 local function getCanvases(w, h)
   if not ping or cw ~= w or ch ~= h then
-    local ok, a = pcall(love.graphics.newCanvas, w, h)
+    -- pixel-exact: w and h come from the scene canvas this pass was handed,
+    -- which is already counted in framebuffer pixels (see lib/PixelCanvas.lua)
+    local PixelCanvas = V.require("PixelCanvas")
+    local ok, a = PixelCanvas.new(w, h)
     if not ok then return nil end
-    local okB, b = pcall(love.graphics.newCanvas, w, h)
+    local okB, b = PixelCanvas.new(w, h)
     if not okB then return nil end
     -- the gaussian's fractional tap offsets need linear filtering
     a:setFilter("linear", "linear")
