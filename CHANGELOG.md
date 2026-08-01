@@ -1,6 +1,41 @@
 # Changelog
 
-## 1.4.0
+## Unreleased
+
+### Changed
+
+- **Ledges are cliffs now.** A ledge used to be taken at face value: a 6px
+  speed bump extruded out of a flat world. But the drawing is the game
+  telling you about terrain -- the side you hop FROM is higher ground --
+  so the world now has real elevation: everything above a hop-down edge
+  stands one ledge-height (6px) up, the lip sits flush with the plateau it
+  rims, and its south face is the cliff drop wearing the same cropped lip
+  art it always wore. Stack ledges and the tiers stack; Pallet Town is the
+  sea-level datum at 0, and the terrain tops out 22px up.
+
+  The subtlety is that ledges do not enclose anything -- every one can be
+  walked around through a gap, so a plateau flood fill would meet itself
+  across its own ledge line and contradict. Instead a least-squares field
+  is solved over the whole connected overworld at once (lib/Elevation.lua):
+  every ledge is a hard one-tier step with the direction the game's own
+  hop table gives it, every body of water is hard-tied to one level, and
+  everywhere else adjacent cells prefer to be level -- so the missing tier
+  through a bypass gap is paid off as a gentle ramp of 2px terrace treads,
+  and far from any ledge the rounding snaps the world flat. The solve is
+  global and anchored at Pallet, so two connected maps never disagree
+  about a seam; it runs once, inside the build budget, in ~0.15s for all
+  43k cells of Kanto, with zero contradictions in the shipped ledge data.
+
+  Everything that stands on the ground rides it: characters and NPCs
+  (including ghosts on neighbour maps), grass tufts, flowers, props,
+  buildings (each on one flattened pad -- no terraced floorboards), tree
+  hulls, battle arenas and their camera rig, cast shadows (the sun
+  frustum grows by the tallest base), and the free-roam camera's focus,
+  which eases after the player's ground height instead of pinning to the
+  old flat plane. Cliff skirts fall out of the mesher's own
+  neighbour-difference rule, banded in cell-local height so every crop
+  the flat world drew is byte-identical there. Interiors and any map not
+  connected to Pallet keep the classic flat reading, ledge bumps and all.
 
 ### Added
 

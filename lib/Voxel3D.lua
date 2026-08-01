@@ -509,8 +509,13 @@ function Voxel3D.viewProjection(cx, cy, vw, vh)
   local fov = 2 * math.atan(1 / (2 * focal))
   Voxel3D.fovY = fov
 
-  local focus = { cx, 0, cy }
-  local eye = { cx, dist * math.cos(a), cy + dist * math.sin(a) }
+  -- The height the orbit looks AT -- the smoothed ground under the
+  -- player's feet (VoxelScene tracks it), so climbing a terrace does not
+  -- slide the walker up the screen at a pitched camera. Zero on flat
+  -- terrain, which is the framing this rig always had.
+  local fy = Voxel3D.focusY or 0
+  local focus = { cx, fy, cy }
+  local eye = { cx, fy + dist * math.cos(a), cy + dist * math.sin(a) }
   -- exposed for camera-facing billboards (VoxelScene yaws sprites at it)
   Voxel3D.eye = eye
   Voxel3D.focus = focus

@@ -242,13 +242,19 @@ end
 -- Whether both mons would be in plain view from the battle camera.
 function BattleArena.clearance(map, arena)
   local BattleCam = V.require("BattleCam")
-  local ok, rig = pcall(BattleCam.rig, arena, 0)
+  -- rig and rays at the arena's OWN floor height: on solved terrain a
+  -- fight on a plateau stands (and is judged) that many pixels up, or
+  -- the raised ground itself would read as an obstacle over every mon
+  local gy = heightAt(map, arena.player[1], arena.player[2])
+  local ok, rig = pcall(BattleCam.rig, arena, gy)
   if not (ok and rig and rig.eye) then return true end
   local eye = rig.eye
   local H = BattleArena.MON_H
   for _, mark in ipairs({ arena.player, arena.enemy }) do
     for _, hy in ipairs({ 1, H * 0.5, H }) do
-      if not lineClear(map, eye, mark[1], hy, mark[2]) then return false end
+      if not lineClear(map, eye, mark[1], gy + hy, mark[2]) then
+        return false
+      end
     end
   end
   return true

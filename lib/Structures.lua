@@ -49,6 +49,7 @@ local Map = require("src.world.Map")
 local Buildings = V.require("Buildings")
 local TileShape = V.require("TileShape")
 local Budget = V.require("BuildBudget")
+local Elevation = V.require("Elevation")
 
 local Structures = {}
 
@@ -208,6 +209,38 @@ function Structures.forMap(map)
     end
   end
 
+  -- ---- the terrain's base elevation under every tile ----
+  --
+  -- Elevation solves the ledge-bounded terrain once, globally, at CELL
+  -- granularity (see lib/Elevation.lua); here it lands per TILE so the
+  -- mesher and every quad emitter below read one table. Two wrinkles:
+  --
+  --   * a ledge tile's box KEEPS its authored height but sinks by it --
+  --     base + h then puts the lip's top flush with the high plateau it
+  --     is the rim of, and its exposed south face is exactly the tier
+  --     drop wearing the same cropped lip art it always wore;
+  --   * ring tiles read through baseAtTile's edge clamp, so the border
+  --     apron continues the body's elevation instead of cliffing to 0.
+  --
+  -- Maps without a field (every interior) get no table at all, and every
+  -- consumer's `S.base and ...` guard keeps the classic flat path.
+  local base = nil
+  if Elevation.fieldFor(map.id) then
+    base = {}
+    for ty = y0, y1 do
+      for tx = x0, x1 do
+        Budget.tick()
+        local k = keyOf(tx, ty)
+        if tileAt[k] then
+          local b = Elevation.baseAtTile(map, tx, ty)
+          local s = shapeAt[k]
+          if s and s.class == "ledge" then b = b - (s.h or 0) end
+          if b ~= 0 then base[k] = b end
+        end
+      end
+    end
+  end
+
   -- ---- buildings: whole sprites voxelized band by band ----
   --
   -- Before anything else looks at this grid. A profiled building is a
@@ -222,7 +255,7 @@ function Structures.forMap(map)
   -- still overdraws a walker's feet even though characters stamp over
   -- terrain.)
   S = { shapeAt = shapeAt, tileAt = tileAt, outdoor = Map.isOutdoor(def),
-        hideBareRing = hullRingOnly or nil,
+        hideBareRing = hullRingOnly or nil, base = base,
         runs = {}, skip = {}, ground = {}, doorFold = {}, objectQuads = {},
         grassQuads = {}, flowerQuads = {}, roundStamps = {}, figures = {} }
   Buildings.build(S, map, pixels(tileset), perRow)
@@ -1002,7 +1035,7 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
             ground = tpl.bg or false
             S.roundStamps[#S.roundStamps + 1] =
               { quads = tpl.quads, mx = cx * 16 + 16, mz = cy * 16 + 16,
-                r = 16 }
+                r = 16, my = S.base and S.base[keyOf(cx * 2, cy * 2)] or 0 }
           end
           for dy = 0, 3 do
             for dx = 0, 3 do
@@ -1035,7 +1068,8 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
           end
           ground = tpl.bg or false
           S.roundStamps[#S.roundStamps + 1] =
-            { quads = tpl.quads, mx = cx * 16 + 8, mz = cy * 16 + 8 }
+            { quads = tpl.quads, mx = cx * 16 + 8, mz = cy * 16 + 8,
+              my = S.base and S.base[keyOf(cx * 2, cy * 2)] or 0 }
         end
         -- headless (no pixels): no hull, but still claim the tiles so
         -- the volume path never boxes a pinned cell. Ground is the
@@ -1135,6 +1169,8 @@ function Structures.buildRelief(S, map, region, data, perRow, h)
 
   local quads = S.objectQuads
   local wx0, wz0 = region.minX * 8, region.minY * 8
+  -- a relief lies ON the terrain, so the whole slab rides the region's base
+  local by = S.base and S.base[keyOf(region.minX, region.minY)] or 0
   for py = 0, bh - 1 do
     for px = 0, bw - 1 do
       if on(px, py) then
@@ -1142,26 +1178,27 @@ function Structures.buildRelief(S, map, region, data, perRow, h)
         local u = (srcU[i] + 0.5) / atlasW
         local v = (srcV[i] + 0.5) / atlasH
         local x, z = wx0 + px, wz0 + py
+        local y0, y1 = by, by + h
         local function quad(c1, c2, c3, c4, shade)
           quads[#quads + 1] = { c1, c2, c3, c4, u = u, v = v, shade = shade }
         end
-        quad({ x, h, z }, { x + 1, h, z }, { x + 1, h, z + 1 },
-             { x, h, z + 1 }, RELIEF_SHADE.top)
+        quad({ x, y1, z }, { x + 1, y1, z }, { x + 1, y1, z + 1 },
+             { x, y1, z + 1 }, RELIEF_SHADE.top)
         if not on(px, py + 1) then
-          quad({ x, 0, z + 1 }, { x + 1, 0, z + 1 }, { x + 1, h, z + 1 },
-               { x, h, z + 1 }, RELIEF_SHADE.south)
+          quad({ x, y0, z + 1 }, { x + 1, y0, z + 1 }, { x + 1, y1, z + 1 },
+               { x, y1, z + 1 }, RELIEF_SHADE.south)
         end
         if not on(px, py - 1) then
-          quad({ x + 1, 0, z }, { x, 0, z }, { x, h, z },
-               { x + 1, h, z }, RELIEF_SHADE.north)
+          quad({ x + 1, y0, z }, { x, y0, z }, { x, y1, z },
+               { x + 1, y1, z }, RELIEF_SHADE.north)
         end
         if not on(px - 1, py) then
-          quad({ x, 0, z }, { x, 0, z + 1 }, { x, h, z + 1 },
-               { x, h, z }, RELIEF_SHADE.side)
+          quad({ x, y0, z }, { x, y0, z + 1 }, { x, y1, z + 1 },
+               { x, y1, z }, RELIEF_SHADE.side)
         end
         if not on(px + 1, py) then
-          quad({ x + 1, 0, z + 1 }, { x + 1, 0, z }, { x + 1, h, z },
-               { x + 1, h, z + 1 }, RELIEF_SHADE.side)
+          quad({ x + 1, y0, z + 1 }, { x + 1, y0, z }, { x + 1, y1, z },
+               { x + 1, y1, z + 1 }, RELIEF_SHADE.side)
         end
       end
     end
@@ -1208,10 +1245,11 @@ local function bookcaseRank(S, map, tx, northTy, frontTy, capTile)
     return ns ~= nil and ns.art == "bookcase"
   end
 
+  local by = S.base and S.base[keyOf(tx, frontTy)] or 0
   for band = 0, bands - 1 do
     local tile = band < size and map:tileAt(tx, frontTy - band) or capTile
     local u0, u1, v0, v1 = uvRect(tile)
-    local y0, y1 = band * 8, band * 8 + 8
+    local y0, y1 = by + band * 8, by + band * 8 + 8
     quads[#quads + 1] = { { x0, y0, z1 }, { x1, y0, z1 },
       { x1, y1, z1 }, { x0, y1, z1 },
       uv = { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } },
@@ -1330,6 +1368,7 @@ local function stairCell(S, map, data, cx, cy, s)
   local atlasW = map.tileset.imageWidth or 128
   local atlasH = map.tileset.imageHeight or 48
   local quads = S.objectQuads
+  local q0 = #quads
   local down = s.class == "stair_down_e" or s.class == "stair_down_w"
   local east = s.class == "stair_e" or s.class == "stair_down_e"
   local mx, mz = cx * 16, cy * 16
@@ -1464,6 +1503,16 @@ local function stairCell(S, map, data, cx, cy, s)
                cax, 0, cax + 1.2, 16, STAIR_SHADE.cap)
         end
       end
+    end
+  end
+
+  -- the whole flight was built from y=0; a raised base lifts it after
+  -- the fact so the geometry above stays in the cell's own space
+  local by = S.base and S.base[keyOf(cx * 2, cy * 2)] or 0
+  if by ~= 0 then
+    for i = q0 + 1, #quads do
+      local q = quads[i]
+      for c = 1, 4 do q[c][2] = q[c][2] + by end
     end
   end
 end
@@ -2028,6 +2077,8 @@ function Structures.buildObject(S, map, region, cluster,
       baseY, support = bs.h, bs
     end
   end
+  -- and whatever it stands on, it stands on it at the terrain's base
+  baseY = baseY + (S.base and S.base[keyOf(cluster.minX, cluster.maxY)] or 0)
   local atlasW = map.tileset.imageWidth or 128
   local atlasH = map.tileset.imageHeight or 48
   local quads = S.objectQuads
@@ -2291,7 +2342,7 @@ local function buildFigure(S, map, fig, tx, ty, perRow)
     quads = quads,
     wx = tx * 8 + minX,
     wz = ty * 8 + math.floor(lowY / 8) * 8 + 4,
-    y = baseY,
+    y = baseY + (S.base and S.base[keyOf(tx, ty + fig.h - 1)] or 0),
   }
 
   -- What each covered tile wears now that he is off it.  Only the ART
@@ -2436,12 +2487,13 @@ function Structures.buildGrass(S, map, x0, x1, y0, y1, data)
           templates[tileId] = tpl
         end
         local wx, wz = tx * 8, ty * 8
+        local wy = S.base and S.base[k] or 0
         for _, q in ipairs(tpl) do
           quads[#quads + 1] = {
-            { q[1][1] + wx, q[1][2], q[1][3] + wz },
-            { q[2][1] + wx, q[2][2], q[2][3] + wz },
-            { q[3][1] + wx, q[3][2], q[3][3] + wz },
-            { q[4][1] + wx, q[4][2], q[4][3] + wz },
+            { q[1][1] + wx, q[1][2] + wy, q[1][3] + wz },
+            { q[2][1] + wx, q[2][2] + wy, q[2][3] + wz },
+            { q[3][1] + wx, q[3][2] + wy, q[3][3] + wz },
+            { q[4][1] + wx, q[4][2] + wy, q[4][3] + wz },
             uv = q.uv, shade = q.shade,
           }
         end
@@ -2635,12 +2687,13 @@ function Structures.buildFlowers(S, map, tw, th, x0, x1, y0, y1, data)
             templates[tileId] = tpl
           end
           local wx, wz = tx * 8, ty * 8
+          local wy = S.base and S.base[k] or 0
           for _, q in ipairs(tpl) do
             quads[#quads + 1] = {
-              { q[1][1] + wx, q[1][2], q[1][3] + wz },
-              { q[2][1] + wx, q[2][2], q[2][3] + wz },
-              { q[3][1] + wx, q[3][2], q[3][3] + wz },
-              { q[4][1] + wx, q[4][2], q[4][3] + wz },
+              { q[1][1] + wx, q[1][2] + wy, q[1][3] + wz },
+              { q[2][1] + wx, q[2][2] + wy, q[2][3] + wz },
+              { q[3][1] + wx, q[3][2] + wy, q[3][3] + wz },
+              { q[4][1] + wx, q[4][2] + wy, q[4][3] + wz },
               uv = q.uv, shade = q.shade,
             }
           end

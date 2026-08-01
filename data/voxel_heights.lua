@@ -98,6 +98,10 @@ return {
     ground = 0,
     water = -2,
     void = 0,
+    -- doubles as the terrain TIER: on the connected overworld the ground
+    -- above a hop-down edge stands this many pixels up (lib/Elevation.lua)
+    -- and the lip's box sinks by the same amount to sit flush as its rim,
+    -- so retuning it retunes the cliffs with the faces that clothe them
     ledge = 6,
     fence = 10,
     sign = 12,

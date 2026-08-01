@@ -701,12 +701,19 @@ function Buildings.stamp(S, map, quads, tx, ty, bw, bh)
     vote(tx + bw, ty + r)
   end
 
+  -- One building, ONE base: the model is rigid, so it stands at the
+  -- elevation under its door row and the pad beneath is flattened to
+  -- match -- a house near a ramp must not have terraced floorboards.
+  local my = S.base
+             and S.base[keyOf(tx + math.floor(bw / 2), ty + bh - 1)] or 0
+
   for r = 0, bh - 1 do
     for c = 0, bw - 1 do
       local k = keyOf(tx + c, ty + r)
       S.shapeAt[k] = shape
       S.skip[k] = true
       S.ground[k] = best or false
+      if S.base then S.base[k] = my ~= 0 and my or nil end
     end
   end
 
@@ -714,10 +721,10 @@ function Buildings.stamp(S, map, quads, tx, ty, bw, bh)
   local out = S.objectQuads
   for _, q in ipairs(quads) do
     out[#out + 1] = {
-      { q[1][1] + mx, q[1][2], q[1][3] + mz },
-      { q[2][1] + mx, q[2][2], q[2][3] + mz },
-      { q[3][1] + mx, q[3][2], q[3][3] + mz },
-      { q[4][1] + mx, q[4][2], q[4][3] + mz },
+      { q[1][1] + mx, q[1][2] + my, q[1][3] + mz },
+      { q[2][1] + mx, q[2][2] + my, q[2][3] + mz },
+      { q[3][1] + mx, q[3][2] + my, q[3][3] + mz },
+      { q[4][1] + mx, q[4][2] + my, q[4][3] + mz },
       uv = q.uv, shade = q.shade,
       -- placements only ever scan the BODY, so a building is always this
       -- map's own structure: the mesher's edge keep-rules must not eat

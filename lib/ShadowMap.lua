@@ -29,6 +29,7 @@ local V = ...
 
 local Mat4 = V.require("Mat4")
 local Voxel = V.require("VoxelState")
+local Elevation = V.require("Elevation")
 
 local ShadowMap = {}
 
@@ -295,7 +296,10 @@ local function fit(cx, cy, vw, vh)
   local f = sunDir()
   local view = Mat4.lookAt({ 0, 0, 0 }, f, { 0, 0, -1 })
 
-  local reach = ShadowMap.HEIGHT
+  -- the tallest thing that can cast: the fixed geometry ceiling plus the
+  -- terrain base it may be standing on (0 wherever no elevation solved)
+  local top = ShadowMap.HEIGHT + Elevation.maxBase()
+  local reach = top
                 * math.max(math.abs(ShadowMap.KX), math.abs(ShadowMap.KZ)) + 24
   local north = groundReach(vh)
   -- the view widens with distance, so the far ground spans more than the
@@ -303,7 +307,7 @@ local function fit(cx, cy, vw, vh)
   -- frustum's true spread and costs a good deal less resolution
   local spread = north * 0.5
   local xs = { cx - vw / 2 - spread, cx + vw / 2 + spread + reach }
-  local ys = { -32, ShadowMap.HEIGHT }         -- -32 covers recessed water
+  local ys = { -32, top }                      -- -32 covers recessed water
   local zs = { cy - north, cy + vh / 2 + reach }
 
   local l, r, b, t, zn, zf

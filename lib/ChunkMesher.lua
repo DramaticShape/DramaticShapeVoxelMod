@@ -239,13 +239,22 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
   local atlasW = tileset.imageWidth or (perRow * 8)
   local atlasH = tileset.imageHeight or 48
 
+  -- The terrain's base elevation under a tile (0 on a map without a
+  -- solved field -- every interior), and the ABSOLUTE height of what
+  -- stands there: base + the shape's own extrusion. Side faces are
+  -- derived from neighbour height differences, so once every height is
+  -- measured from the same datum the cliff skirt under a raised cell
+  -- falls out of the same band loop that has always clothed walls.
+  local baseAt = S.base and function(k) return S.base[k] or 0 end
+                 or function() return 0 end
+
   local function heightAt(tx, ty)
     local k = keyOf(tx, ty)
-    if S.skip[k] then return 0 end
+    if S.skip[k] then return baseAt(k) end
     local run = S.runs[k]
-    if run then return run.h end
+    if run then return baseAt(k) + run.h end
     local s = S.shapeAt[k]
-    return s and s.h or 0
+    return baseAt(k) + (s and s.h or 0)
   end
 
   -- one atlas-rect UV, optionally cropped to art rows [vTop, vBot] of 8
@@ -344,13 +353,17 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
   -- blocks half the sky, so the closer a voxel sits to it the less ambient
   -- light reaches it -- which is what plants a prop on the floor instead
   -- of leaving it looking pasted over the top.
+  -- `floor` is the terrain base the prop stands on: contact darkening
+  -- measures height above the prop's OWN ground, not above the world
+  -- datum, or every plant on a plateau would lose its feet.
   local aoProp = { 0, 0, 0, 0 }
-  local function groundShades(c, shade)
+  local function groundShades(c, shade, floor)
     if type(shade) == "table" then return shade end
+    floor = floor or 0
     local y1, y2, y3, y4 = c[1][2], c[2][2], c[3][2], c[4][2]
-    if math.min(y1, y2, y3, y4) >= AO_RISE then return shade end
+    if math.min(y1, y2, y3, y4) - floor >= AO_RISE then return shade end
     for i = 1, 4 do
-      local t = c[i][2] / AO_RISE
+      local t = (c[i][2] - floor) / AO_RISE
       aoProp[i] = shade * (t >= 1 and 1 or (1 - AO_GROUND * (1 - t)))
     end
     return aoProp
@@ -456,28 +469,32 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
         -- prebuilt prism quads (appended below) carry the art
         local g = S.ground[k]
         if g then
-          topQuad(tx * 8, ty * 8, 0, g, 1)
-          -- the claimed tile is still ground at height 0, and water next
+          local b = baseAt(k)
+          topQuad(tx * 8, ty * 8, b, g, 1)
+          -- the claimed tile is still ground at its base, and water next
           -- door still recesses below it: without the same below-ground
           -- side bands ordinary ground emits, the two-pixel shoreline
           -- face is a slit into the sky behind the mesh -- which is
           -- exactly what a building plot or a sign standing at the
           -- waterline showed. Same bands, cut from the synthesized
-          -- ground's own art
+          -- ground's own art. Bands run in CELL-LOCAL height (world
+          -- minus base), so the crop is the one the flat world always
+          -- drew, translated up with the terrain.
           for _, side in ipairs(SIDES) do
             local nh = heightAt(tx + side[1], ty + side[2])
-            if nh < 0 then
+            if nh < b then
               local d = side[3]
               local lat = LATERAL[d]
               local hl = lat and heightAt(tx + lat[1], ty + lat[2]) or 0
               local hr = lat and heightAt(tx + lat[3], ty + lat[4]) or 0
-              for band = math.floor(nh / 8), -1 do
-                local y0 = math.max(nh, band * 8)
-                local y1 = math.min(0, band * 8 + 8)
-                if y1 > y0 then
-                  sideQuad(d, tx * 8, ty * 8, y0, y1, g,
-                           (band * 8 + 8) - y1, (band * 8 + 8) - y0,
-                           sideShades(hl, hr, y0, y1, y0 <= nh,
+              local nl = nh - b
+              for band = math.floor(nl / 8), -1 do
+                local ly0 = math.max(nl, band * 8)
+                local ly1 = math.min(0, band * 8 + 8)
+                if ly1 > ly0 then
+                  sideQuad(d, tx * 8, ty * 8, b + ly0, b + ly1, g,
+                           (band * 8 + 8) - ly1, (band * 8 + 8) - ly0,
+                           sideShades(hl, hr, b + ly0, b + ly1, ly0 <= nl,
                                       Voxel3D.FACE_SHADE[d]))
                 end
               end
@@ -486,7 +503,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
         end
       elseif s then
         local run = S.runs[k]
-        local h = run and run.h or s.h
+        local b = baseAt(k)
+        -- h is ABSOLUTE (base + extrusion), matching heightAt; hLocal is
+        -- the extrusion alone, which is the space the art bands live in
+        local hLocal = run and run.h or s.h
+        local h = b + hLocal
         local x0, z0 = tx * 8, ty * 8
 
         -- top face. A roofed volume gets a GABLE segment: the roof rises
@@ -502,9 +523,10 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
         -- everything else its own art.
         if run and run.rise > 0 then
           local mid = run.extent / 2
+          local runTop = b + run.h                 -- the facade top, absolute
           local function gableH(d)     -- d = rows north of the south eave
             local t = d <= mid and d / mid or (run.extent - d) / (run.extent - mid)
-            return run.h + run.rise * math.max(0, math.min(1, t))
+            return runTop + run.rise * math.max(0, math.min(1, t))
           end
           local d0 = run.front - ty                -- rows from the south edge
           local hS = gableH(d0)
@@ -515,13 +537,13 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
                                math.floor((1 - rel) * run.roofRows))
           local roofTile = map:tileAt(tx, run.north + idx)
           local swY, seY, neY, nwY = hS, hS, hN, hN
-          if heightAt(tx - 1, ty) < run.h then     -- west flank: hip
-            swY = math.max(run.h, hS - 8)
-            nwY = math.max(run.h, hN - 8)
+          if heightAt(tx - 1, ty) < runTop then    -- west flank: hip
+            swY = math.max(runTop, hS - 8)
+            nwY = math.max(runTop, hN - 8)
           end
-          if heightAt(tx + 1, ty) < run.h then     -- east flank: hip
-            seY = math.max(run.h, hS - 8)
-            neY = math.max(run.h, hN - 8)
+          if heightAt(tx + 1, ty) < runTop then    -- east flank: hip
+            seY = math.max(runTop, hS - 8)
+            neY = math.max(runTop, hN - 8)
           end
           local u0, u1, v0, v1 = uvRect(roofTile, 0, 8)
           push({ { x0, swY, z0 + 8 }, { x0 + 8, seY, z0 + 8 },
@@ -558,7 +580,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
                 break
               end
             end
-            local row = math.min(ty, front - math.floor(h / 8))
+            local row = math.min(ty, front - math.floor(hLocal / 8))
             if row < north then
               -- the whole run folded onto the face: top with the drawn
               -- row just above it when that row is furniture too (a
@@ -583,6 +605,14 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
         -- sides: 8px bands wherever the neighbour is lower. Band k spans
         -- heights [8k, 8k+8) and shows one full tile of art; a partial
         -- band crops the art rows to match, so nothing ever stretches.
+        -- Bands count in CELL-LOCAL height (world minus this cell's base):
+        -- the fold starts at the cell's own feet wherever the terrain
+        -- raised them, and the crop a 6px lip face has always worn stays
+        -- byte-identical on a flat map. Negative bands are the SKIRT a
+        -- raised cell shows a lower neighbour -- terrain that had no face
+        -- at all before elevation -- and they wear the cell's own art
+        -- from its top row down, the same convention the recessed-water
+        -- shoreline bands established below zero.
         for _, side in ipairs(SIDES) do
           local nh = heightAt(tx + side[1], ty + side[2])
           if nh < h then
@@ -593,9 +623,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
             local lat = LATERAL[d]
             local hl = lat and heightAt(tx + lat[1], ty + lat[2]) or 0
             local hr = lat and heightAt(tx + lat[3], ty + lat[4]) or 0
-            for band = math.floor(nh / 8), math.ceil(h / 8) - 1 do
-              local y0 = math.max(nh, band * 8)
-              local y1 = math.min(h, band * 8 + 8)
+            local nl = nh - b
+            for band = math.floor(nl / 8), math.ceil(hLocal / 8) - 1 do
+              local ly0 = math.max(nl, band * 8)
+              local ly1 = math.min(hLocal, band * 8 + 8)
+              local y0, y1 = b + ly0, b + ly1
               if y1 > y0 then
                 local src, shade = tile, Voxel3D.FACE_SHADE[d]
                 if run then
@@ -639,7 +671,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
                   end
                 end
                 sideQuad(d, x0, z0, y0, y1, src,
-                         (band * 8 + 8) - y1, (band * 8 + 8) - y0,
+                         (band * 8 + 8) - ly1, (band * 8 + 8) - ly0,
                          sideShades(hl, hr, y0, y1, y0 <= nh, shade))
               end
             end
@@ -716,7 +748,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
     -- the neighbour will ever draw that geometry
     if q.own or outwardOnEdge(q, x0, z0, x1, z1)
        or keepQuad(x0, z0, x1, z1) then
-      push({ q[1], q[2], q[3], q[4] }, quadUV(q), groundShades(q, q.shade))
+      local fl = S.base
+                 and baseAt(keyOf(math.floor(q[1][1] / 8),
+                                  math.floor(q[1][3] / 8))) or 0
+      push({ q[1], q[2], q[3], q[4] }, quadUV(q),
+           groundShades(q, q.shade, fl))
     end
   end
 
@@ -760,7 +796,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
         for i = 1, 4 do
           local c, s2 = q[i], sc[i]
           s2[1] = c[1] + mx
-          s2[2] = c[2]
+          s2[2] = c[2] + (st.my or 0)
           s2[3] = c[3] + mz
         end
         local ok = keepAll
@@ -772,7 +808,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
           ok = keepQuad(x0, z0, x1, z1)
         end
         if ok then
-          push(sc, quadUV(q), groundShades(sc, q.shade))
+          push(sc, quadUV(q), groundShades(sc, q.shade, st.my))
         end
       end
     end

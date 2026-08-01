@@ -24,10 +24,14 @@ local Sky = V.require("Sky")
 local Water = V.require("Water")
 local VoxelGrid = V.require("VoxelGrid")
 local DayNight = V.require("DayNight")
+local Elevation = V.require("Elevation")
 local PaletteFX = require("src.render.PaletteFX")
 local Map = require("src.world.Map")
 
 local VoxelScene = {}
+
+-- the camera's smoothed focus height (see render); nil until first framed
+local focusHeight = nil
 
 -- What the active display mode actually paints with.
 --
@@ -166,24 +170,33 @@ local YAW = {
 -- top of it rather than sunk into it. Uses the same bottom-left collision
 -- tile the engine walks on (Map:cellTile).
 local function groundAt(map, cellX, cellY)
+  -- The terrain's base under the cell -- 0 wherever no elevation field
+  -- exists (every interior), so the flat world keeps its old answers.
+  local b = Elevation.baseAt(map, cellX, cellY)
   -- Off the map, cellTile border-extends into the map's borderBlock --
   -- which on maps ringed with trees is a RAISED tile. The only entity
   -- ever standing off-map is the player mid seam-step (placed one cell
   -- before the connection entry), and the ground actually rendered
-  -- there is the departed neighbour's flat walkway: height 0. Without
-  -- this, crossing into such a map hoisted the walker tree-high for
-  -- exactly one step -- the "hops like a ledge" seam bug.
-  if not map:inBounds(cellX, cellY) then return 0 end
+  -- there is the departed neighbour's flat walkway: the border apron's
+  -- own base (baseAt clamps to the nearest body cell, which is how the
+  -- apron is meshed). Without this, crossing into such a map hoisted
+  -- the walker tree-high for exactly one step -- the "hops like a
+  -- ledge" seam bug.
+  if not map:inBounds(cellX, cellY) then return b end
   local shapes = TileShape.forMap(map)
   local s = shapes[map:cellTile(cellX, cellY)]
-  if not s then return 0 end
+  if not s then return b end
   -- a recessed class (water) still supports whatever stands on it; only
   -- raised ground lifts the model.  Stairs never do: the class height is
   -- the flight's TALL end, but the player enters at floor level and the
   -- warp fires as they step in -- lifting them onto the geometry read as
   -- climbing an invisible block
-  if s.art == "stair" then return 0 end
-  return s.h > 0 and s.h or 0
+  if s.art == "stair" then return b end
+  -- on solved terrain a ledge is the high plateau's rim, its lip flush
+  -- with the ground it belongs to: the solver's base IS its top. On a
+  -- flat map it is still the classic 6px bump you stand on top of.
+  if s.class == "ledge" and Elevation.fieldFor(map.id) then return b end
+  return b + (s.h > 0 and s.h or 0)
 end
 
 VoxelScene.YAW = YAW
@@ -775,6 +788,18 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   local posed, me = posesOf(state, spriteColors)
   castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh, atlasFor,
               water, nbWater)
+
+  -- The camera's focus height chases the ground under the player's feet,
+  -- eased so a 2px terrace tread is a glide rather than a pop; a WARP-
+  -- sized jump (raised route -> interior at 0) snaps instead of swooping
+  -- the whole frame through the floor.
+  local targetY = me and me.gh or 0
+  if focusHeight == nil or math.abs(targetY - focusHeight) > 24 then
+    focusHeight = targetY
+  else
+    focusHeight = focusHeight + (targetY - focusHeight) * 0.12
+  end
+  Voxel3D.focusY = focusHeight
 
   if not Voxel3D.beginScene(w, h, cx, cy, vw, vh, skyFor(state.map)) then
     return nil
