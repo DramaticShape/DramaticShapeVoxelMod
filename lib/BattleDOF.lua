@@ -98,9 +98,10 @@ end
 -- would reallocate both every time a battle started or ended.
 local function getCanvases(w, h)
   if not ping or cw ~= w or ch ~= h then
-    local ok, a = pcall(love.graphics.newCanvas, w, h)
+    -- dpiscale 1: pixel-sized buffers, like TiltShift's (see Voxel3D.newDepth)
+    local ok, a = pcall(love.graphics.newCanvas, w, h, { dpiscale = 1 })
     if not ok then return nil end
-    local okB, b = pcall(love.graphics.newCanvas, w, h)
+    local okB, b = pcall(love.graphics.newCanvas, w, h, { dpiscale = 1 })
     if not okB then return nil end
     -- the gaussian's fractional tap offsets need linear filtering
     a:setFilter("linear", "linear")

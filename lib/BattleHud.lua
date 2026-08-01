@@ -79,7 +79,8 @@ local function getShader()
 end
 
 local function canvasOf(w, h, filter)
-  local ok, c = pcall(love.graphics.newCanvas, w, h)
+  -- dpiscale 1: pixel-sized buffers (see Voxel3D.newDepth for the trap)
+  local ok, c = pcall(love.graphics.newCanvas, w, h, { dpiscale = 1 })
   if not ok then return nil end
   c:setFilter(filter or "linear", filter or "linear")
   return c

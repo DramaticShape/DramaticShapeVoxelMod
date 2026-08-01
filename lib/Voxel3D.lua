@@ -308,8 +308,15 @@ local function newDepth(w, h)
   if not (love.graphics and love.graphics.newCanvas) then return nil end
   local c = nil
   for _, format in ipairs(DEPTH_FORMATS) do
+    -- dpiscale 1: `w`/`h` are already PIXELS. Left to default, a highdpi
+    -- surface (iOS, Android -- see conf.lua) multiplies the canvas by the
+    -- display density AGAIN -- the same trap TerrainAtlas and BattlePics
+    -- already step around -- and a nominally window-sized buffer comes out
+    -- density^2 the screen's area (9x at 3x). Everywhere a canvas here is
+    -- sized from pixel dimensions gets the same option, so no pair of them
+    -- can disagree about what a coordinate means.
     local ok, made = pcall(love.graphics.newCanvas, w, h,
-                           { format = format, readable = true })
+                           { format = format, readable = true, dpiscale = 1 })
     if ok and made then c = made break end
   end
   if not c then return nil end
@@ -640,7 +647,8 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
   local name = slot or "world"
   local slotHeld = slots[name]
   if not (slotHeld and slotHeld.w == w and slotHeld.h == h) then
-    local ok, c = pcall(love.graphics.newCanvas, w, h)
+    -- dpiscale 1, like the depth canvas (see newDepth for the why)
+    local ok, c = pcall(love.graphics.newCanvas, w, h, { dpiscale = 1 })
     if not ok then return false end
     c:setFilter("nearest", "nearest")
     if slotHeld then releaseSlot(slotHeld) end
@@ -876,7 +884,9 @@ end
 function Voxel3D.beginWater(paint)
   if not (active and canvas and held and held.depth) then return nil end
   if not held.mirror then
-    local ok, c = pcall(love.graphics.newCanvas, held.w, held.h)
+    -- dpiscale 1, like the scene canvas it mirrors (see newDepth)
+    local ok, c = pcall(love.graphics.newCanvas, held.w, held.h,
+                        { dpiscale = 1 })
     if not (ok and c) then return nil end
     pcall(c.setFilter, c, "nearest", "nearest")
     pcall(c.setWrap, c, "clamp", "clamp")

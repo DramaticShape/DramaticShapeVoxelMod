@@ -85,9 +85,12 @@ end
 
 local function getCanvases(w, h)
   if not ping or cw ~= w or ch ~= h then
-    local ok, a = pcall(love.graphics.newCanvas, w, h)
+    -- dpiscale 1: `w`/`h` came off the input canvas in pixels, and a
+    -- highdpi default would multiply by the display density again (see
+    -- Voxel3D.newDepth) -- two gaussian passes at 9x the pixels
+    local ok, a = pcall(love.graphics.newCanvas, w, h, { dpiscale = 1 })
     if not ok then return nil end
-    local okB, b = pcall(love.graphics.newCanvas, w, h)
+    local okB, b = pcall(love.graphics.newCanvas, w, h, { dpiscale = 1 })
     if not okB then return nil end
     -- the gaussian's fractional tap offsets need linear filtering
     a:setFilter("linear", "linear")
