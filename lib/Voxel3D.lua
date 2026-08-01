@@ -33,6 +33,7 @@ local WorldCurve = V.require("WorldCurve")
 local Sky = V.require("Sky")
 local DayNight = V.require("DayNight")
 local GlassMask = V.require("GlassMask")
+local PixelCanvas = V.require("PixelCanvas")
 
 local Voxel3D = {}
 
@@ -640,7 +641,7 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
   local name = slot or "world"
   local slotHeld = slots[name]
   if not (slotHeld and slotHeld.w == w and slotHeld.h == h) then
-    local ok, c = pcall(love.graphics.newCanvas, w, h)
+    local ok, c = PixelCanvas.new(w, h)
     if not ok then return false end
     c:setFilter("nearest", "nearest")
     if slotHeld then releaseSlot(slotHeld) end
