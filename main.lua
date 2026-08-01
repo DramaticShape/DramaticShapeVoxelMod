@@ -700,6 +700,23 @@ mod.events:on("map.reloaded", function(payload)
   if mapId then ChunkMesher.invalidate(mapId) end
 end)
 
+-- ------- the terrain solver needs the whole map registry
+--
+-- lib/Elevation.lua cuts the connected overworld into plateaus, which
+-- takes every map's blocks and connections at once -- not just the one
+-- being walked. The engine keeps that registry in main.lua's `Game`,
+-- which is a LOCAL there and reachable from no mod, so it arrives here
+-- instead: `mods.loaded` carries the merged dataset, and it is the only
+-- moment the whole of it is handed over. Without this the solver found
+-- no data, answered "no field" for every map, and the world stayed as
+-- flat as it ever was -- silently, which is the part that cost a while.
+mod.events:on("mods.loaded", function(payload)
+  local data = payload and payload.data
+  if data and data.maps then
+    V.require("Elevation").install(data)
+  end
+end)
+
 -- ------- rows come and go, so the menu has to notice
 --
 -- OptionsMenu builds its row list ONCE, when it is opened, and then reads

@@ -14,17 +14,40 @@
   sea-level datum at 0, and the terrain tops out 22px up.
 
   The subtlety is that ledges do not enclose anything -- every one can be
-  walked around through a gap, so a plateau flood fill would meet itself
-  across its own ledge line and contradict. Instead a least-squares field
-  is solved over the whole connected overworld at once (lib/Elevation.lua):
-  every ledge is a hard one-tier step with the direction the game's own
-  hop table gives it, every body of water is hard-tied to one level, and
-  everywhere else adjacent cells prefer to be level -- so the missing tier
-  through a bypass gap is paid off as a gentle ramp of 2px terrace treads,
-  and far from any ledge the rounding snaps the world flat. The solve is
-  global and anchored at Pallet, so two connected maps never disagree
-  about a seam; it runs once, inside the build budget, in ~0.15s for all
-  43k cells of Kanto, with zero contradictions in the shipped ledge data.
+  walked around through a gap, so a plateau flood fill would leak through
+  it, meet itself across its own ledge line and conclude an area sits a
+  tier above itself. So lib/Elevation.lua closes the lines before it
+  fills anything. Ledge cells group into runs, and each run is extended
+  along its own axis from either end -- across the gap the player detours
+  through -- until it reaches something that closes it: unwalkable
+  ground, another ledge, or the edge of the world. A run that finds
+  nothing within reach is not a cliff anybody walks around and stays
+  open. The cells that extension crosses become STEPS, and they are the
+  one piece of sloped ground in the world: their tiles grade into 4px and
+  2px treads, so walking a sealed gap climbs three crisp 2px risers where
+  the cliff line crosses it.
+
+  With every line closed, an ordinary flood over the walkable ground cuts
+  the world into areas -- and now they really are the areas enclosed by
+  ledges. Those areas are then levelled against each other in whole
+  tiers, by least squares over the area graph rather than by propagation:
+  each lip votes "the area behind me is one tier over the area in front",
+  areas meeting across ordinary trees or water cast a small
+  same-ground vote, and a stray lip is outvoted by the run it disagrees
+  with instead of tipping half a route. Because each area is a single
+  variable the result is exactly FLAT -- these are plateaus, not a
+  smoothed field. The solve is global and anchored on Pallet's own
+  ground, so two connected maps never disagree about a seam; it runs once
+  inside the build budget, in well under a second for all 43k cells of
+  Kanto, and cuts them into 199 areas rising six tiers from Pallet at 0 to
+  the Route 22/23 highlands at 42px.
+
+  Roughly three quarters of the ledges with standable ground on both
+  sides come out as an exact one-tier drop. The rest -- and the ones
+  whose high side is impassable mountain rock, where there is no plateau
+  to stand on at all -- take the level of the ground around them, which
+  reads as terrain rather than as a mistake, but they are the cases still
+  worth an eye in-game.
 
   Everything that stands on the ground rides it: characters and NPCs
   (including ghosts on neighbour maps), grass tufts, flowers, props,
