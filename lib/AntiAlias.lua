@@ -133,7 +133,10 @@ local targets = {}
 local function targetFor(slot, w, h)
   local t = targets[slot]
   if not (t and t.w == w and t.h == h) then
-    local ok, c = pcall(love.graphics.newCanvas, w, h)
+    -- dpiscale 1: `w`/`h` are the pass's DISPLAY size in pixels, and the
+    -- highdpi default would fold the supersample down into a target that
+    -- is itself density x too big (see Voxel3D.newDepth for the trap)
+    local ok, c = pcall(love.graphics.newCanvas, w, h, { dpiscale = 1 })
     if not (ok and c) then return nil end
     -- nearest, like the canvas it stands in for: this one is composited a
     -- canvas pixel to a display pixel, and the smoothing has already happened
