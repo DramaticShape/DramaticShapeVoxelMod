@@ -41,6 +41,8 @@
 -- the mod namespace (see main.lua): V.data loads a shipped data file
 local V = ...
 
+local ModSetting = V.require("ModSetting")
+
 local TileShape = {}
 
 -- class -> height fallbacks, used when data/voxel_heights.lua is missing
@@ -698,6 +700,40 @@ function TileShape.bookcaseRelief(tilesetId)
   local s = load()
   local entry = s and s.tilesets and s.tilesets[tilesetId]
   return not (entry and entry.bookcase_relief == false)
+end
+
+--- Does this tileset's `bookcase` top wear a SOLID of the face's majority
+--- body colour?  Yes when the SHELF TOPS row is SOLID (every shelf, like
+--- an interior wall), or when the tileset opts in with
+--- `bookcase_solid_top` (Bill's transporter drums -- machines that
+--- borrow the collapse and whose lid still smears as face art).
+--- Default / TILE: real shelves wear their northmost or cap tile whole.
+TileShape.SHELF_TOP_KEY = "shelf_top"
+TileShape.shelfTopSetting = ModSetting.new(
+  TileShape.SHELF_TOP_KEY, "SHELF TOPS",
+  { "tile", "solid" }, { "TILE", "SOLID" })
+
+-- Tops are baked into the mesh at build time, so flipping the row has to
+-- drop every cached analysis / mesh or the old plateau stays on screen.
+do
+  local baseRow = TileShape.shelfTopSetting.row
+  function TileShape.shelfTopSetting:row()
+    local r = baseRow(self)
+    local step = r.step
+    r.step = function(game, dir)
+      local ok = step(game, dir)
+      V.require("ChunkMesher").invalidate()
+      return ok
+    end
+    return r
+  end
+end
+
+function TileShape.bookcaseSolidTop(tilesetId)
+  if TileShape.shelfTopSetting:get() == "solid" then return true end
+  local s = load()
+  local entry = s and s.tilesets and s.tilesets[tilesetId]
+  return entry and entry.bookcase_solid_top == true or false
 end
 
 -- Drop the cache: a mod that shadows data/voxel_heights.lua or a tileset

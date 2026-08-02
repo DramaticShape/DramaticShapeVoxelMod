@@ -89,6 +89,9 @@ local cache = {}
 -- ---------------------------------------------------------------- pixels --
 
 local atlasData = {}
+-- tile id -> { u, v } majority-body atlas UV, keyed under atlasData's
+-- path so an atlas reload drops both together
+local faceCapUV = {}
 
 local function pixels(tileset)
   local path = tileset.image
@@ -97,6 +100,60 @@ local function pixels(tileset)
     atlasData[path] = (ok and data and data.getPixel) and data or false
   end
   return atlasData[path] or nil
+end
+
+-- Atlas UV of the majority non-outline texel of an 8x8 tile.  Interior
+-- walls have no top-view art -- their plateau used to wear the face
+-- drawing laid flat -- so the mesher points every corner of the top
+-- quad at this one texel and the top reads as a flat of the face's
+-- body colour (white plaster, blue panel, yellow cabinet).
+function Structures.faceCapUV(tileset, tile, atlasW, atlasH)
+  local path = tileset.image or ""
+  local cache = faceCapUV[path]
+  if not cache then
+    cache = {}
+    faceCapUV[path] = cache
+  end
+  local hit = cache[tile]
+  if hit then return hit[1], hit[2] end
+
+  local perRow = tileset.tilesPerRow or 16
+  local ax = (tile % perRow) * 8
+  local ay = math.floor(tile / perRow) * 8
+  local aw = atlasW or tileset.imageWidth or (perRow * 8)
+  local ah = atlasH or tileset.imageHeight or 48
+  local data = pixels(tileset)
+  local bestN, bestPx, bestPy = 0, 4, 4
+  if data then
+    local counts = {}
+    for py = 0, 7 do
+      for px = 0, 7 do
+        local r, g, b, a = data:getPixel(ax + px, ay + py)
+        -- skip clear and black outline: the body fill is what a wall
+        -- top should wear, not the stroke around the panels
+        if a > 0 and Structures.shadeClass(math.min(r, g, b)) ~= "black" then
+          local key = math.floor(r * 15 + 0.5) * 256
+                     + math.floor(g * 15 + 0.5) * 16
+                     + math.floor(b * 15 + 0.5)
+          local e = counts[key]
+          if e then
+            e.n = e.n + 1
+          else
+            counts[key] = { n = 1, px = px, py = py }
+          end
+        end
+      end
+    end
+    for _, e in pairs(counts) do
+      if e.n > bestN then
+        bestN, bestPx, bestPy = e.n, e.px, e.py
+      end
+    end
+  end
+  local u = (ax + bestPx + 0.5) / aw
+  local v = (ay + bestPy + 0.5) / ah
+  cache[tile] = { u, v }
+  return u, v
 end
 
 -- tiles whose art is entirely black or transparent (interior darkness):
@@ -1843,8 +1900,19 @@ local function bookcaseRank(S, map, perRow, run, i, j, k, pane, srcU, srcV,
     end
   end
 
+  -- Cap trim when the rank adopted one, otherwise the northmost drawn
+  -- row.  Real shelves wear that tile whole on the plateau; a tileset
+  -- that borrowed the collapse for a machine (Bill's drums) opts into
+  -- a solid of the face's majority fill instead -- same rule as an
+  -- interior wall, see TileShape.bookcaseSolidTop.
   local topTile = capTile or map:tileAt(tx, northTy)
-  local u0, u1, v0, v1 = uvRect(topTile)
+  local u0, u1, v0, v1
+  if TileShape.bookcaseSolidTop(map.tileset.id) then
+    local u, v = Structures.faceCapUV(map.tileset, topTile, atlasW, atlasH)
+    u0, u1, v0, v1 = u, u, v, v
+  else
+    u0, u1, v0, v1 = uvRect(topTile)
+  end
   for seg = 0, depth / 8 - 1 do
     local sz0 = z0 + seg * 8
     quads[#quads + 1] = { { x0, h, sz0 }, { x1, h, sz0 },
@@ -3612,6 +3680,7 @@ function Structures.invalidate(mapId)
   else
     cache = {}
     atlasData = {}
+    faceCapUV = {}
     roundCache = {}
     Buildings.invalidate()
   end

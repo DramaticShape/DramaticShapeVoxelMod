@@ -140,6 +140,7 @@ T.check(not fullIds["pipeline:tiltshift"],
   "FULL takes T-SHIFT off the menu -- it owns the blur")
 T.check(not fullIds["DRAMATIC_SHAPE:grid"], "and V-GRID")
 T.check(not fullIds["DRAMATIC_SHAPE:curve"], "and V-CURVE")
+T.check(not fullIds["DRAMATIC_SHAPE:shelf_top"], "and SHELF TOPS")
 T.check(not fullIds["DRAMATIC_SHAPE:daytime"], "and DAYTIME")
 
 -- but the battle rows survive it: they are not knobs on the look, and FULL
@@ -310,6 +311,8 @@ T.eq(order["DRAMATIC_SHAPE:battles"] - order["pipeline:tiltshift"], 4,
   "and sit in one unbroken block, not scattered to the end of the list")
 T.check(order["void_fill"] > order["DRAMATIC_SHAPE:battles"],
   "with the engine's own later rows still after them")
+T.check(order["DRAMATIC_SHAPE:shelf_top"] > order["DRAMATIC_SHAPE:aa"],
+  "SHELF TOPS sits at the end of the mode's settings block")
 
 -- ------- the open menu notices when FULL is stepped onto or off
 --
@@ -387,7 +390,7 @@ end
 Pipelines.setLevel("voxel", 2)
 local hookedRows = Runtime.call("ui.options.rows", function(_, r) return r end,
                                { data = Data }, { { id = "text_speed" } })
-T.eq(#hookedRows, 9, "the options hook added a row per setting")
+T.eq(#hookedRows, 10, "the options hook added a row per setting")
 local grid, curve, water = hookedRows[2], hookedRows[3], hookedRows[4]
 local battles, backRow, daytime = hookedRows[5], hookedRows[6], hookedRows[7]
 -- the AA row is hookedRows[8]; it is read in its own block below, because
@@ -415,6 +418,10 @@ T.eq(backRow.value(), "OFF",
   .. "map, so the classic slot is opt-in")
 T.check(backRow.id ~= battles.id and backRow.id:find("battleBack", 1, true),
   "on its own key, so it persists beside 3D-BTL rather than over it")
+T.eq(hookedRows[#hookedRows].label, "SHELF TOPS",
+  "SHELF TOPS is the last of the mode's settings")
+T.eq(hookedRows[#hookedRows].value(), "TILE",
+  "and defaults to TILE -- shelves wear their drawn top or cap trim")
 
 -- stepping writes through to the one place both rows read
 local settingGame = { save = { options = {} }, mods = { modOptions = {} } }
@@ -2640,6 +2647,109 @@ T.eq(Battles.pinnedPic({ player = false, playerBackPic = false }, mine), false,
 Battles.backSetting:setIndex(1, backGame)          -- and off for the rows below
 T.eq(Battles.pinnedPic(live, mine), false,
   "with BACK SPRITES off the player's mon is out on the map with the foe")
+end
+
+-- ------- player grow-in stays on the billboard's texture centre
+--
+-- With 3D-BTL on and BACK SPRITES off the player's mon is a mirrored map
+-- billboard hung about TEX_AX.  The pics layer's grow-in does not go through
+-- backPlacement, so our TEX_AX remap never reaches those frames -- art in
+-- the classic left slot under a column-80 hang reads as a brief jump to the
+-- right before the settled pose snaps it home.  sideTexture itself has to
+-- put every grow stage on TEX_AX, the same column the settled pose uses.
+
+do
+local BattleState = require("src.battle.BattleState")
+local TEX_AX = Battles.TEX_AX
+T.check(type(TEX_AX) == "number" and TEX_AX == 80,
+  "the billboard texture centre is the column the hang reads")
+
+-- The hang math: a mirrored card's apparent content centre in canvas space
+-- is 2*ax - drawCentre.  Wrong drawCentre with ax pinned at TEX_AX is
+-- exactly the rightward flicker; matching centres cancel the flip.
+local function mirroredCentre(ax, drawCentre)
+  return 2 * ax - drawCentre
+end
+local W, padL, s = 56, 0, 1
+local classicCentre = 8 - padL * s + W * s / 2
+T.check(math.abs(mirroredCentre(TEX_AX, classicCentre) - TEX_AX) > 1,
+  "drawing grow in the classic slot under a TEX_AX hang flips it off the tile")
+T.eq(mirroredCentre(TEX_AX, TEX_AX), TEX_AX,
+  "drawing grow on TEX_AX leaves the mirrored centre on the tile")
+
+-- Live path: sideTexture must force player grow draws onto TEX_AX.
+local img = {
+  getWidth = function() return W end,
+  getHeight = function() return 56 end,
+}
+local player = { sprite = img, mon = { species = "RATTATA" } }
+local battle = setmetatable({
+  player = player,
+  data = {},
+  growIn = { battler = player, frame = 4 }, -- 3/7 stage (after the ball beat)
+  sendingOut = false,
+  showPlayerBack = false,
+  safari = false,
+  demo = false,
+  enemyHidden = true,
+}, BattleState)
+T.eq(battle:growInScale(player), 3 / 7, "the stub is mid grow-in")
+
+local draws = {}
+local realDraw = love.graphics.draw
+love.graphics.draw = function(drawable, x, y, r, sx, sy, ...)
+  if type(x) == "number" and drawable and drawable.getWidth then
+    draws[#draws + 1] = {
+      x = x, sx = sx or 1, w = drawable:getWidth(),
+    }
+  end
+  if realDraw then return realDraw(drawable, x, y, r, sx, sy, ...) end
+end
+local ok, tex = pcall(Battles.sideTexture, battle, "player")
+love.graphics.draw = realDraw
+
+T.check(ok, "sideTexture renders a growing player: " .. tostring(tex))
+T.check(tex and tex.canvas, "and returns a billboard texture")
+T.eq(tex.ax, TEX_AX, "hung from the forced texture centre")
+
+local growDraws = 0
+for _, d in ipairs(draws) do
+  if d.sx > 0 and d.sx < 1 then
+    growDraws = growDraws + 1
+    local centre = d.x + d.w * d.sx / 2
+    T.check(math.abs(centre - TEX_AX) < 0.5,
+      ("grow stage centres on TEX_AX (got %.2f at scale %.3f)")
+      :format(centre, d.sx))
+    T.check(math.abs(centre - classicCentre) > 1,
+      "and is not still in the classic left slot")
+  end
+end
+T.check(growDraws > 0, "the grow stage actually drew into the texture")
+
+-- Settled pose (grow finished) must use the same centre, or the snap at
+-- the end of grow would be a regression of its own.
+battle.growIn = nil
+draws = {}
+love.graphics.draw = function(drawable, x, y, r, sx, sy, ...)
+  if type(x) == "number" and drawable and drawable.getWidth then
+    draws[#draws + 1] = {
+      x = x, sx = sx or 1, w = drawable:getWidth(),
+    }
+  end
+  if realDraw then return realDraw(drawable, x, y, r, sx, sy, ...) end
+end
+ok, tex = pcall(Battles.sideTexture, battle, "player")
+love.graphics.draw = realDraw
+T.check(ok and tex and tex.canvas, "settled player texture still renders")
+local settled = 0
+for _, d in ipairs(draws) do
+  if d.sx == 1 then
+    settled = settled + 1
+    T.check(math.abs(d.x + d.w / 2 - TEX_AX) < 0.5,
+      "settled pose centres on the same TEX_AX column")
+  end
+end
+T.check(settled > 0, "the settled pose drew into the texture")
 end
 
 -- ------- the hour reaches the FLAT world too

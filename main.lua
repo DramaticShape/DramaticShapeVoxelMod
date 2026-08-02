@@ -93,6 +93,7 @@ local AntiAlias = V.require("AntiAlias")
 local FirstPerson = V.require("FirstPerson")
 local FreeMove = V.require("FreeMove")
 local VR = V.require("VR")
+local TileShape = V.require("TileShape")
 
 -- Forward declaration: the voxel pipeline's update hook (registered below)
 -- calls this, and it is defined further down with the settings it drives.
@@ -445,6 +446,14 @@ local SETTINGS = {
     -- says why); off Windows -- mobile above all -- there is no VR to have
     -- and the row does not exist
     when = function() return VR.supported() end, full = true },
+  -- Last among the look knobs: a preference about furniture tops, not a
+  -- mode of the diorama itself, so it sits at the end of the block.
+  { TileShape.shelfTopSetting,
+    "How shelf tops are painted. TILE wears the drawn top or cap trim "
+    .. "across the plateau -- the usual look for bookcases. SOLID paints "
+    .. "a flat of the face's majority colour, the same rule interior "
+    .. "walls use, which cleans up machines that borrow the shelf "
+    .. "collapse (and anything else whose lid still reads as face art)." },
 }
 
 local schema = {}
@@ -705,6 +714,11 @@ mod.events:on("mod.options_changed", function(payload)
   if not (payload and payload.mod == mod.id) then return end
   for _, entry in ipairs(SETTINGS) do
     if payload.key == entry[1].key then entry[1]:sync(payload.value) end
+  end
+  -- Tops are baked into the mesh: flipping SHELF TOPS from the manager
+  -- has to drop every cached analysis the same way the OPTIONS row does.
+  if payload.key == TileShape.SHELF_TOP_KEY then
+    ChunkMesher.invalidate()
   end
   -- 3D-BTL switched on from the manager's page pins BATTLE LAYOUT exactly as
   -- the OPTIONS row does. The manager persists its own value; this is the one
