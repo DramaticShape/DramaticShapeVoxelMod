@@ -2642,6 +2642,109 @@ T.eq(Battles.pinnedPic(live, mine), false,
   "with BACK SPRITES off the player's mon is out on the map with the foe")
 end
 
+-- ------- player grow-in stays on the billboard's texture centre
+--
+-- With 3D-BTL on and BACK SPRITES off the player's mon is a mirrored map
+-- billboard hung about TEX_AX.  The pics layer's grow-in does not go through
+-- backPlacement, so our TEX_AX remap never reaches those frames -- art in
+-- the classic left slot under a column-80 hang reads as a brief jump to the
+-- right before the settled pose snaps it home.  sideTexture itself has to
+-- put every grow stage on TEX_AX, the same column the settled pose uses.
+
+do
+local BattleState = require("src.battle.BattleState")
+local TEX_AX = Battles.TEX_AX
+T.check(type(TEX_AX) == "number" and TEX_AX == 80,
+  "the billboard texture centre is the column the hang reads")
+
+-- The hang math: a mirrored card's apparent content centre in canvas space
+-- is 2*ax - drawCentre.  Wrong drawCentre with ax pinned at TEX_AX is
+-- exactly the rightward flicker; matching centres cancel the flip.
+local function mirroredCentre(ax, drawCentre)
+  return 2 * ax - drawCentre
+end
+local W, padL, s = 56, 0, 1
+local classicCentre = 8 - padL * s + W * s / 2
+T.check(math.abs(mirroredCentre(TEX_AX, classicCentre) - TEX_AX) > 1,
+  "drawing grow in the classic slot under a TEX_AX hang flips it off the tile")
+T.eq(mirroredCentre(TEX_AX, TEX_AX), TEX_AX,
+  "drawing grow on TEX_AX leaves the mirrored centre on the tile")
+
+-- Live path: sideTexture must force player grow draws onto TEX_AX.
+local img = {
+  getWidth = function() return W end,
+  getHeight = function() return 56 end,
+}
+local player = { sprite = img, mon = { species = "RATTATA" } }
+local battle = setmetatable({
+  player = player,
+  data = {},
+  growIn = { battler = player, frame = 4 }, -- 3/7 stage (after the ball beat)
+  sendingOut = false,
+  showPlayerBack = false,
+  safari = false,
+  demo = false,
+  enemyHidden = true,
+}, BattleState)
+T.eq(battle:growInScale(player), 3 / 7, "the stub is mid grow-in")
+
+local draws = {}
+local realDraw = love.graphics.draw
+love.graphics.draw = function(drawable, x, y, r, sx, sy, ...)
+  if type(x) == "number" and drawable and drawable.getWidth then
+    draws[#draws + 1] = {
+      x = x, sx = sx or 1, w = drawable:getWidth(),
+    }
+  end
+  if realDraw then return realDraw(drawable, x, y, r, sx, sy, ...) end
+end
+local ok, tex = pcall(Battles.sideTexture, battle, "player")
+love.graphics.draw = realDraw
+
+T.check(ok, "sideTexture renders a growing player: " .. tostring(tex))
+T.check(tex and tex.canvas, "and returns a billboard texture")
+T.eq(tex.ax, TEX_AX, "hung from the forced texture centre")
+
+local growDraws = 0
+for _, d in ipairs(draws) do
+  if d.sx > 0 and d.sx < 1 then
+    growDraws = growDraws + 1
+    local centre = d.x + d.w * d.sx / 2
+    T.check(math.abs(centre - TEX_AX) < 0.5,
+      ("grow stage centres on TEX_AX (got %.2f at scale %.3f)")
+      :format(centre, d.sx))
+    T.check(math.abs(centre - classicCentre) > 1,
+      "and is not still in the classic left slot")
+  end
+end
+T.check(growDraws > 0, "the grow stage actually drew into the texture")
+
+-- Settled pose (grow finished) must use the same centre, or the snap at
+-- the end of grow would be a regression of its own.
+battle.growIn = nil
+draws = {}
+love.graphics.draw = function(drawable, x, y, r, sx, sy, ...)
+  if type(x) == "number" and drawable and drawable.getWidth then
+    draws[#draws + 1] = {
+      x = x, sx = sx or 1, w = drawable:getWidth(),
+    }
+  end
+  if realDraw then return realDraw(drawable, x, y, r, sx, sy, ...) end
+end
+ok, tex = pcall(Battles.sideTexture, battle, "player")
+love.graphics.draw = realDraw
+T.check(ok and tex and tex.canvas, "settled player texture still renders")
+local settled = 0
+for _, d in ipairs(draws) do
+  if d.sx == 1 then
+    settled = settled + 1
+    T.check(math.abs(d.x + d.w / 2 - TEX_AX) < 0.5,
+      "settled pose centres on the same TEX_AX column")
+  end
+end
+T.check(settled > 0, "the settled pose drew into the texture")
+end
+
 -- ------- the hour reaches the FLAT world too
 --
 -- The clock reaches the diorama through the voxel shader's tint uniform, which

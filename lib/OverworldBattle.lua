@@ -883,6 +883,26 @@ function OverworldBattle.sideTexture(battle, side)
   for k, v in pairs(OFF[side]) do saved[k] = battle[k]; battle[k] = v end
   texturing = side
 
+  -- The pics layer's player grow-in does not go through backPlacement, so the
+  -- TEX_AX remap wrapped onto that helper never reaches those frames.  The
+  -- mirrored player billboard still hangs about column 80, and art left in the
+  -- classic GB slot reads as a brief jump to the right before the settled
+  -- pose (which DOES use backPlacement) snaps it home.  While this side is
+  -- being textured, every sub-1 scale draw is forced onto TEX_AX -- the same
+  -- column the settled pose lands on.
+  local draw = g.draw
+  local grow = side == "player" and battle.player
+               and battle:growInScale(battle.player)
+  if grow and grow > 0 then
+    g.draw = function(drawable, x, y, r, sx, sy, ...)
+      if type(x) == "number" and type(sx) == "number" and sx > 0 and sx < 1
+         and drawable and drawable.getWidth then
+        x = TEX_AX - drawable:getWidth() * sx / 2
+      end
+      return draw(drawable, x, y, r, sx, sy, ...)
+    end
+  end
+
   local ok, err = pcall(function()
     g.setCanvas(canvas)
     g.clear(0, 0, 0, 0)
@@ -891,6 +911,7 @@ function OverworldBattle.sideTexture(battle, side)
     innerPics(battle, 0, 0, 0)
   end)
 
+  if grow and grow > 0 then g.draw = draw end
   texturing = nil
   for k in pairs(OFF[side]) do battle[k] = saved[k] end
   g.setScissor, g.intersectScissor, g.getScissor =
