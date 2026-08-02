@@ -26,6 +26,7 @@ local VoxelGrid = V.require("VoxelGrid")
 local DayNight = V.require("DayNight")
 local FirstPerson = V.require("FirstPerson")
 local BattleBillboard = V.require("BattleBillboard")
+local Pokedex = V.require("Pokedex")
 local PaletteFX = require("src.render.PaletteFX")
 local Map = require("src.world.Map")
 
@@ -262,21 +263,32 @@ end
 -- carries one pose into the other -- the lean eases out as the yaw eases in
 -- -- and cardBlend is zero for every camera that is not the first-person
 -- rig, the battle's placed shot included, so nothing else moves.
+-- The pitch the sprite cards lean back by -- normally the rung's own
+-- camera angle, overridable in radians. VR sets the override to the top
+-- rung's 75 degrees for every diorama and battle frame: a table watched
+-- from a freely moving head has no one camera pitch for the cards to
+-- match, and the near-upright top-rung lean is the pose that reads as
+-- "standing" from anywhere around it. nil (the default, and the flat
+-- screen always) leans with the rung as ever.
+VoxelScene.spriteLean = nil
+
+local function leanAngle()
+  return VoxelScene.spriteLean or V.require("VoxelState").angle
+end
+
 local function billboardMatrix(px, py, y, mirror)
-  local Voxel = V.require("VoxelState")
   local b = FirstPerson.cardBlend()
   local m = Mat4.translate(px + 8, y, py + 8)
   if b > 0 then
     m = Mat4.mul(m, Mat4.rotateY(FirstPerson.cardYaw(px + 8, py + 8) * b))
   end
-  m = Mat4.mul(m, Mat4.rotateX((Voxel.angle - math.pi / 2) * (1 - b)))
+  m = Mat4.mul(m, Mat4.rotateX((leanAngle() - math.pi / 2) * (1 - b)))
   if mirror then m = Mat4.mul(m, Mat4.scale(-1, 1, 1)) end
   return Mat4.mul(m, Mat4.translate(-8, 0, 0))
 end
 
 local function billboardPull()
-  local Voxel = V.require("VoxelState")
-  return VoxelScene.pull(math.max(Voxel.angle, 0.05))
+  return VoxelScene.pull(math.max(leanAngle(), 0.05))
 end
 
 -- An authored FIGURE's card -- a person the tileset draws INTO a piece of
@@ -295,7 +307,6 @@ end
 -- his edge would swing him off his seat. The width rode in on the record
 -- for exactly this (ChunkMesher.buildFigureMeshes).
 local function figureMatrix(f, offX, offZ)
-  local Voxel = V.require("VoxelState")
   local b = FirstPerson.cardBlend()
   local wx, wz = f.wx + (offX or 0), f.wz + (offZ or 0)
   local m = Mat4.translate(wx, f.y, wz)
@@ -305,7 +316,7 @@ local function figureMatrix(f, offX, offZ)
     m = Mat4.mul(m, Mat4.rotateY(FirstPerson.cardYaw(wx + half, wz) * b))
     m = Mat4.mul(m, Mat4.translate(-half, 0, 0))
   end
-  return Mat4.mul(m, Mat4.rotateX((Voxel.angle - math.pi / 2) * (1 - b)))
+  return Mat4.mul(m, Mat4.rotateX((leanAngle() - math.pi / 2) * (1 - b)))
 end
 
 -- What the sun sees: the same card UNLEANED and flattened, exactly as
@@ -1054,6 +1065,17 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
                      BattleBillboard.PULL)
       end
       if battleTex.flash then Voxel3D.flatten(nil) end
+      -- and the MOVE ANIMATIONS, standing on the same arena: the
+      -- engine's own effects layer on the plane through both cells
+      -- (BattleScene.fxCard), pulled a little harder than the mons so
+      -- a burst plays over the card it is bursting on
+      local okA, fxTex, fxModel = pcall(function()
+        return V.require("OverworldBattle").worldAnim()
+      end)
+      if okA and fxTex and fxModel then
+        Voxel3D.draw(BattleBillboard.mesh(), fxTex, fxModel,
+                     BattleBillboard.PULL + 6)
+      end
       Voxel3D.seams(true)
       Voxel3D.glass(true)
     end
@@ -1064,8 +1086,10 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
   -- is preserved, so the row still overdraws feet -- the 3D version of
   -- the GB's grass-over-feet trick -- while grass keeps losing to the
   -- buildings it genuinely stands behind (far deeper than the pull).
-  local Voxel = V.require("VoxelState")
-  local pull = VoxelScene.pull(math.max(Voxel.angle, 0.05))
+  -- the same angle the cards leaned by (leanAngle honours VR's override),
+  -- so the tuft rows keep exactly the characters' own depth handicap
+  local lean = math.max(leanAngle(), 0.05)
+  local pull = VoxelScene.pull(lean)
   Voxel3D.draw(ChunkMesher.grass(state.map), atlasFor(state.map), nil, pull)
   for _, nb in ipairs(state.neighbors or {}) do
     Voxel3D.draw(ChunkMesher.grass(nb.map), atlasFor(nb.map),
@@ -1081,7 +1105,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
   -- lands behind the card and the player obscures the patch they stand
   -- ON, while the nearest flower of the cell south (+20) stays in front
   -- and keeps overdrawing their feet.
-  local fpull = math.max(0, pull - 8 * math.sin(math.max(Voxel.angle, 0.05)))
+  local fpull = math.max(0, pull - 8 * math.sin(lean))
   -- flowers are snugged casters too, so they read their own shadowing
   -- through the same snugged transform the sun stored them with
   Voxel3D.draw(ChunkMesher.flowers(state.map), atlasFor(state.map), nil,
@@ -1090,6 +1114,20 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
     Voxel3D.draw(ChunkMesher.flowers(nb.map), atlasFor(nb.map),
                  Mat4.translate(nb.ox, 0, nb.oy), fpull,
                  ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
+  end
+
+  -- The VR pokedex in the player's left hand, last of all: a prop over
+  -- the world drawn with real depth, so leaning it into a wall still
+  -- occludes honestly. Its frame only exists while a session is live and
+  -- the left hand is tracked (VR.lua sets it), so every flat frame skips
+  -- this in one field read. No wireframe and no glass, like the cast:
+  -- the device is a drawing riding the scene, not part of the terrain.
+  if Pokedex.frame then
+    Voxel3D.glass(false)
+    Voxel3D.seams(false)
+    Pokedex.draw()
+    Voxel3D.seams(true)
+    Voxel3D.glass(true)
   end
 
   end   -- drawScene

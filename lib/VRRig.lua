@@ -85,6 +85,38 @@ end
 -- an angle nobody supplied
 VRRig.TABLE = { 0, -0.45, -0.75 }
 
+-- ------- the battle mount
+--
+-- A staged fight snaps the headset to an OVER-THE-SHOULDER seat: the same
+-- line the flat battle camera stands on (eye through focus, so the player's
+-- mon is near-left and the foe far-right exactly as the flat shot frames
+-- them), but pulled in to BATTLE_DIST -- the flat rig is a long lens from
+-- fifteen metres back, and a headset's lens is its own eyes, so keeping the
+-- distance would shrink the fight to a stage seen from the back row. 66 px
+-- is the wide rig's own standing distance: six and a half metres at life
+-- scale, close enough to fill the view, far enough to hold both mons in it
+-- -- and short enough to stay inside the small rooms the wide rig exists
+-- for.
+VRRig.BATTLE_DIST = 66
+
+-- Where the head sits for a staged fight, and which way the mapping must
+-- turn so that seat FACES it. Returns the pivot (world px -- pin the XR
+-- origin here at FP_SCALE) and the yaw for eyeCamera: the flat camera
+-- looks along focus - eye, the resting headset looks along XR -Z (world
+-- north), and the yaw is what closes that gap.
+function VRRig.battleMount(eye, focus)
+  local dx = eye[1] - focus[1]
+  local dy = eye[2] - focus[2]
+  local dz = eye[3] - focus[3]
+  local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+  if len < 1e-6 then return { eye[1], eye[2], eye[3] }, 0 end
+  local k = VRRig.BATTLE_DIST / len
+  -- Ry(yaw) sends XR forward (0,0,-1) to (-sin yaw, 0, -cos yaw); aiming
+  -- that along the horizontal of focus - eye solves to atan2 of eye - focus
+  return { focus[1] + dx * k, focus[2] + dy * k, focus[3] + dz * k },
+         math.atan2(dx, dz)
+end
+
 -- eye-space clip planes, in metres (see the unit note above)
 VRRig.NEAR = 0.05
 VRRig.FAR = 400
@@ -98,19 +130,25 @@ VRRig.FAR = 400
 --   pivot   {x,y,z} world px pinned to `anchor`
 --   anchor  {x,y,z} LOCAL metres (VRRig.TABLE, or 0,0,0 for first person)
 --   scale   world px per metre
+--   yaw     optional turn of the whole mapping about +Y, radians: the
+--           battle mount faces the resting head at the arena with it.
+--           worldFromXr(p) becomes pivot + s * Ry(yaw) * (p - anchor).
 --
 -- Returns a table shaped for Voxel3D.camera: raw view + proj, the world
 -- eye and focus (for setLook, the water's lean, the sky), fov as a
 -- vertical span, and the curve declined -- a bent tabletop reads as a
 -- broken model, and first person already declines it on the flat screen.
-function VRRig.eyeCamera(pose, fov, pivot, anchor, scale)
+function VRRig.eyeCamera(pose, fov, pivot, anchor, scale, yaw)
   local px, py, pz = pose.pos[1], pose.pos[2], pose.pos[3]
   local q = pose.quat
   local R = Mat4.fromQuat(q[1], q[2], q[3], q[4])
 
-  -- view = R^T * T(-pos) * T(anchor) * S(1/s) * T(-pivot)
+  -- view = R^T * T(-pos) * T(anchor) * Ry(-yaw) * S(1/s) * T(-pivot)
   local view = Mat4.mul(Mat4.transpose(R), Mat4.translate(-px, -py, -pz))
   view = Mat4.mul(view, Mat4.translate(anchor[1], anchor[2], anchor[3]))
+  if yaw and yaw ~= 0 then
+    view = Mat4.mul(view, Mat4.rotateY(-yaw))
+  end
   view = Mat4.mul(view, Mat4.scale(1 / scale, 1 / scale, 1 / scale))
   view = Mat4.mul(view, Mat4.translate(-pivot[1], -pivot[2], -pivot[3]))
 
@@ -120,11 +158,17 @@ function VRRig.eyeCamera(pose, fov, pivot, anchor, scale)
 
   -- the eye and its forward, in world pixels: worldFromEye applied to the
   -- origin and to -Z
-  local ex = pivot[1] + scale * (px - anchor[1])
-  local ey = pivot[2] + scale * (py - anchor[2])
-  local ez = pivot[3] + scale * (pz - anchor[3])
+  local ax, ay, az = px - anchor[1], py - anchor[2], pz - anchor[3]
   -- R's third column is the eye's +Z axis; forward is its negation
   local fx, fy, fz = -R[3], -R[7], -R[11]
+  if yaw and yaw ~= 0 then
+    local c, s = math.cos(yaw), math.sin(yaw)
+    ax, az = c * ax + s * az, -s * ax + c * az
+    fx, fz = c * fx + s * fz, -s * fx + c * fz
+  end
+  local ex = pivot[1] + scale * ax
+  local ey = pivot[2] + scale * ay
+  local ez = pivot[3] + scale * az
 
   return {
     view = view,
@@ -134,6 +178,24 @@ function VRRig.eyeCamera(pose, fov, pivot, anchor, scale)
     fov = fov.angleUp - fov.angleDown,
     curve = 0,
   }
+end
+
+-- The WORLD model matrix a hand-held prop stands on: worldFromXr (the
+-- same mapping the eyes use -- so the prop is exactly where the hand is,
+-- whatever mode the mapping is in) composed with the hand's own tracked
+-- pose. A mesh authored in METRES rides it straight: the mapping's scale
+-- is what turns metres into world pixels, so the prop keeps its real
+-- size in the hand at the diorama's scale and at life scale alike.
+--
+--   model = T(pivot) * S(s) * Ry(yaw) * T(-anchor) * T(hand.pos) * R(hand.quat)
+function VRRig.propMatrix(pose, pivot, anchor, scale, yaw)
+  local m = Mat4.translate(pivot[1], pivot[2], pivot[3])
+  m = Mat4.mul(m, Mat4.scale(scale, scale, scale))
+  if yaw and yaw ~= 0 then m = Mat4.mul(m, Mat4.rotateY(yaw)) end
+  m = Mat4.mul(m, Mat4.translate(-anchor[1], -anchor[2], -anchor[3]))
+  m = Mat4.mul(m, Mat4.translate(pose.pos[1], pose.pos[2], pose.pos[3]))
+  local q = pose.quat
+  return Mat4.mul(m, Mat4.fromQuat(q[1], q[2], q[3], q[4]))
 end
 
 -- The flat compass numbers a head orientation implies, for driving

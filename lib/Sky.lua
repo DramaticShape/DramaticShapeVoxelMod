@@ -78,6 +78,19 @@ Sky.DITHER_START = 0.6
 -- ladder instead of changing character rung by rung.
 Sky.SPAN = 0.23
 
+-- How much ELEVATION the gradient spans above the horizon, in radians, for
+-- a caller that anchors the sky IN SPACE rather than to the frame (the VR
+-- eyes -- see Voxel3D.beginScene). On the flat screen the bands run from
+-- the top edge of the frame down to the horizon, which is right for a
+-- camera whose pitch is the rung's: the frame IS the window on the sky.
+-- A headset's frame is wherever the head points, so glueing the zenith
+-- band to its top edge drags the whole gradient around with the head. An
+-- anchored caller instead hangs the gradient over a fixed slice of sky --
+-- horizon to ELEV_SPAN up -- and hands paint() the canvas row that span's
+-- top lands on this frame (the `top` argument), so tilting the head slides
+-- the frame across a sky that stays put.
+Sky.ELEV_SPAN = math.rad(55)
+
 -- ------- the bands
 --
 -- Top first, each a { r, g, b } in 0..1, as the display mode has them.
@@ -168,8 +181,15 @@ local SHADER_SRC = [[
 uniform Image ramp;     // the bands, one texel each, top of the sky first
 uniform float count;    // how many texels wide that ramp is
 uniform float edge;     // the sky's bottom, in canvas pixels
+uniform float top;      // where the deepest band begins, in canvas pixels --
+                        // 0 glues the gradient to the frame (the flat
+                        // screen); an anchored caller passes the row its
+                        // fixed elevation span starts on, often negative
 uniform float cell;     // the diorama's pixel size, in canvas pixels
 uniform float start;    // where the checker begins inside a band
+uniform float axisX;    // the "toward the ground" direction on the canvas:
+uniform float axisY;    // (0,1) for a level camera; a rolled VR eye tips
+                        // it, and edge/top are distances along it
 uniform float alpha;
 uniform float glowAmt;  // twilight warmth around the low sun; 0 = none
 uniform vec2 glowPos;   // the sun disc, in canvas pixels
@@ -186,8 +206,10 @@ vec3 bandAt(float i) {
 }
 
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
-  float row = floor(sc.y / cell) * cell;              // top of this cell row
-  float pos = min(row / max(edge, 1.0), 1.0) * count;
+  vec2 cc0 = floor(sc / cell) * cell;                 // top of this cell
+  float row = cc0.x * axisX + cc0.y * axisY;          // along the axis
+  if (row > edge) { discard; }                        // below the horizon
+  float pos = clamp((row - top) / max(edge - top, 1.0), 0.0, 1.0) * count;
   float base = min(floor(pos), count - 1.0);
   vec3 c = bandAt(base);
   float parity = mod(floor(sc.x / cell) + floor(sc.y / cell), 2.0);
@@ -310,13 +332,14 @@ Sky._getShader = getShader        -- named for the suite
 -- The flat fallback: the same bands as solid rectangles, no checker, on the same
 -- quantised edges. For a driver that could not compile the shader -- which is
 -- also every headless run.
-local function paintFlat(w, h, bands, edge, alpha, cell)
+local function paintFlat(w, h, bands, edge, alpha, cell, top)
   local g = love.graphics
   local n = #bands
+  local span = edge - (top or 0)
   local prev = 0
   for i = 1, n do
     local cut = (i == n) and math.min(h, math.ceil(edge))
-                         or math.floor(i / n * edge / cell + 0.5) * cell
+                or math.floor(((top or 0) + i / n * span) / cell + 0.5) * cell
     cut = math.max(prev, math.min(cut, math.min(h, math.ceil(edge))))
     if cut > prev then
       local c = bands[i]
@@ -383,7 +406,7 @@ function Sky.discRadius(h, cell, body)
   return r * cell, r
 end
 
-local function paintDisc(body, edge, cell, w, h)
+local function paintDisc(body, edge, cell, w, h, axis)
   local g = love.graphics
   if not (body and body.y and g.setScissor) then return end
   local shades = Sky.discShades(body.moon)
@@ -392,12 +415,31 @@ local function paintDisc(body, edge, cell, w, h)
   -- snap the centre to the cell grid, like everything else in this sky
   local bx = math.floor(body.x / cell) * cell + cell / 2
   local by = math.floor(body.y / cell) * cell + cell / 2
-  if by - r * cell > edge then return end     -- wholly below the horizon point
+  -- wholly below the horizon point -- measured along the tilt axis when
+  -- the caller has one (a rolled VR eye)
+  local bt = axis and (bx * axis[1] + by * axis[2]) or by
+  if bt - r * cell > edge then return end
   local core = shades[1]
   local main = shades[twilight and 3 or 2]
   local sx, sy, sw, sh = g.getScissor()
-  g.setScissor(0, 0, math.ceil(w), math.floor(edge))
+  -- the scissor is axis-aligned and cannot follow a tilted horizon; under
+  -- an axis the world drawn after this covers the ground side anyway, so
+  -- the region opens to the frame and only the cull above clips the disc
+  if axis then
+    g.setScissor(0, 0, math.ceil(w), math.ceil(h))
+  else
+    g.setScissor(0, 0, math.ceil(w), math.floor(edge))
+  end
   local craterR = math.max(1, math.floor(r / 5))
+  -- The disc's cells are drawn in the HORIZON'S frame, not the canvas's:
+  -- under an axis (a VR eye that can roll) the whole pattern -- craters,
+  -- rim dither, the cell grid itself -- is rotated to stay upright over
+  -- the world, or a tipped head watches the moon's face spin in place.
+  -- Level cameras rotate by zero and draw exactly what they always drew.
+  local rot = axis and math.atan2(-axis[1], axis[2]) or 0
+  g.push()
+  g.translate(bx, by)
+  if rot ~= 0 then g.rotate(rot) end
   for dy = -r, r do
     for dx = -r, r do
       local d = math.sqrt(dx * dx + dy * dy)
@@ -416,12 +458,13 @@ local function paintDisc(body, edge, cell, w, h)
         end
         if keep then
           g.setColor(c[1] / 255, c[2] / 255, c[3] / 255, 1)
-          g.rectangle("fill", bx + dx * cell - cell / 2,
-                      by + dy * cell - cell / 2, cell, cell)
+          g.rectangle("fill", dx * cell - cell / 2,
+                      dy * cell - cell / 2, cell, cell)
         end
       end
     end
   end
+  g.pop()
   if sx then g.setScissor(sx, sy, sw, sh) else g.setScissor() end
   g.setColor(1, 1, 1, 1)
 end
@@ -436,16 +479,29 @@ end
 -- the caller's own camera (Voxel3D.skyBody), with the twilight glow riding
 -- along; nil hangs nothing and warms nothing.
 --
+-- `top` anchors the gradient in space rather than to the frame: the canvas
+-- row band 1 starts on (often negative -- above the frame), from a caller
+-- that mapped a fixed elevation span to its own camera (see ELEV_SPAN).
+-- nil or 0 is the flat screen's behaviour: zenith band at the top edge.
+--
+-- `axis` tips the whole painting to a rolled camera's true horizon: a unit
+-- {ax, ay} pointing "toward the ground" on the canvas (Voxel3D.horizonLine),
+-- with `horizonY` and `top` then read as distances ALONG it rather than as
+-- rows. nil is the level default. Only the shader path can tilt; the flat
+-- fallback paints level, which only a headless run ever sees.
+--
 -- Returns false when there is nothing to paint, in which case the caller's flat
 -- fill is the whole sky. That fill is the palest band, so a frame that declines
 -- this looks like a hazy day rather than like a bug.
-function Sky.paint(w, h, sky, horizonY, cell, body)
+function Sky.paint(w, h, sky, horizonY, cell, body, top, axis)
   local bands = sky and sky.bands
   if not (bands and bands[1]) then return false end
   if not (w and h and w > 0 and h > 0) then return false end
   local g = love.graphics
   if not (g and g.rectangle) then return false end
-  local edge = Sky.region(h, horizonY)
+  -- along an axis the caller's edge is already the signed distance and
+  -- has no row to be clamped to; level callers keep the SPAN fallback
+  local edge = axis and horizonY or Sky.region(h, horizonY)
   if not edge then return false end
   local alpha = sky[4] or 1
   cell = math.max(1, math.floor((cell or 1) + 0.5))
@@ -474,6 +530,9 @@ function Sky.paint(w, h, sky, horizonY, cell, body)
       sh:send("ramp", ramp)
       sh:send("count", #bands)
       sh:send("edge", edge)
+      sh:send("top", math.min(top or 0, edge - 1))
+      sh:send("axisX", axis and axis[1] or 0)
+      sh:send("axisY", axis and axis[2] or 1)
       sh:send("cell", cell)
       sh:send("start", Sky.DITHER and Sky.DITHER_START or 2)
       sh:send("alpha", alpha)
@@ -488,16 +547,22 @@ function Sky.paint(w, h, sky, horizonY, cell, body)
     if sent then
       g.setShader(sh)
       g.setColor(1, 1, 1, 1)
-      g.rectangle("fill", 0, 0, w, math.min(h, math.ceil(edge)))
+      -- tilted, the sky's reach is not a row: the full frame goes through
+      -- the shader and the discard is the boundary
+      local rectH = axis and h or math.min(h, math.ceil(edge))
+      g.rectangle("fill", 0, 0, w, rectH)
       g.setShader()
     else
       sh = nil
     end
   end
-  if not sh then paintFlat(w, h, bands, edge, alpha, cell) end
+  if not sh then
+    paintFlat(w, h, bands, axis and math.min(h, edge) or edge, alpha, cell,
+              math.min(top or 0, edge - 1))
+  end
   -- the disc goes over the glow, under nothing: plain rectangles, so it is
   -- there whether or not the shader built
-  paintDisc(body, math.min(h, edge), cell, w, h)
+  paintDisc(body, axis and edge or math.min(h, edge), cell, w, h, axis)
   g.setColor(1, 1, 1, 1)
 
   if g.setBlendMode and blend then g.setBlendMode(blend, blendAlpha) end

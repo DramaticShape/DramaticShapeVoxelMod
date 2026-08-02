@@ -585,6 +585,56 @@ function Voxel3D.horizonY(h)
   return (y / w * 0.5 + 0.5) * h
 end
 
+-- The horizon as a LINE rather than a row, for a camera that can ROLL --
+-- a VR eye. A head tipped sideways tips the true horizon across the
+-- canvas, and a sky painted in flat rows then visibly hinges with the
+-- head. So: project the flat forward direction (a point ON the vanishing
+-- line) and the same direction nudged a hair of world-up (a point just
+-- above it); the difference is the canvas direction "down toward the
+-- ground", perpendicular to the horizon however the head is tipped.
+--
+-- Returns (ax, ay, edge, top): a unit axis in canvas pixels pointing from
+-- sky toward ground, the horizon's signed distance along it -- a pixel at
+-- canvas (x, y) is above the horizon while x*ax + y*ay < edge -- and,
+-- when `elev` (radians) is given, the distance the direction that far
+-- ABOVE the horizon projects to. `top` is what pins the gradient's far
+-- end to a real direction in the sky: extrapolating it linearly from a
+-- pixels-per-radian estimate left the bands sliding as a pitch moved the
+-- horizon through the frame, because a perspective's rows are tan-spaced,
+-- not angle-spaced. nil `top` (the elevated direction is outside this
+-- frustum's forward hemisphere) leaves the caller its estimate. nil
+-- everything with no horizon in front of this camera.
+function Voxel3D.horizonLine(w, h, elev)
+  local m, eye, focus = Voxel3D.vp, Voxel3D.eye, Voxel3D.focus
+  if not (m and eye and focus and w and h and h > 0) then return nil end
+  local dx = focus[1] - eye[1]
+  local dz = focus[3] - eye[3]
+  local len = math.sqrt(dx * dx + dz * dz)
+  if len < 1e-6 then return nil end
+  dx, dz = dx / len, dz / len
+  local function proj(vx, vy, vz)
+    local x = m[1] * vx + m[2] * vy + m[3] * vz
+    local y = m[5] * vx + m[6] * vy + m[7] * vz
+    local ww = m[13] * vx + m[14] * vy + m[15] * vz
+    if ww <= 1e-6 then return nil end
+    return (x / ww * 0.5 + 0.5) * w, (y / ww * 0.5 + 0.5) * h
+  end
+  local qx, qy = proj(dx, 0, dz)
+  if not qx then return nil end
+  local rx, ry = proj(dx, 0.02, dz)
+  if not rx then return nil end
+  local ax, ay = qx - rx, qy - ry
+  local al = math.sqrt(ax * ax + ay * ay)
+  if al < 1e-6 then ax, ay = 0, 1 else ax, ay = ax / al, ay / al end
+  local top = nil
+  if elev then
+    local ce, se = math.cos(elev), math.sin(elev)
+    local tx, ty = proj(dx * ce, se, dz * ce)
+    if tx then top = tx * ax + ty * ay end
+  end
+  return ax, ay, qx * ax + qy * ay, top
+end
+
 -- ------- the hour's light
 --
 -- What the scene shader multiplies every surface by (see dayTint in the
@@ -689,10 +739,38 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
   -- screen. The sky's dither grid is cut to it, and so is the water's --
   -- one number, so the two break up on the same checkerboard.
   Voxel3D.cell = w / math.max(1, vw or w)
+  -- A VR eye's sky is ANCHORED IN SPACE, where the flat screen's is glued
+  -- to the frame. The differences all key off the raw-matrix camera only
+  -- the VR eyes bring: the horizon must really be in frame for any band
+  -- to paint (no Sky.SPAN fallback -- that slice pinned to the top of the
+  -- view is exactly "the sky moves with the headset"); the gradient hangs
+  -- over a fixed ELEVATION span above the horizon rather than filling up
+  -- to the frame's edge; the whole painting runs along the horizon's OWN
+  -- AXIS (horizonLine), so a rolled head sees the horizon hold level in
+  -- the world instead of hinging with the ears; and the sun or moon was
+  -- already honest -- skyBody projects the hour's direction through this
+  -- very eye.
+  local vrEye = Voxel3D.camera and Voxel3D.camera.view and Voxel3D.camera.proj
+                and true or false
+  local hy = Voxel3D.horizonY(h)
+  local ax, ay, edgeT, topT
+  if vrEye then
+    ax, ay, edgeT, topT = Voxel3D.horizonLine(w, h, Sky.ELEV_SPAN)
+  end
+  -- any sky in frame at all? the corner most toward the sky must sit
+  -- above the horizon's line
+  local skyUp = false
+  if sky and sky.bands then
+    if not vrEye then
+      skyUp = true
+    elseif edgeT then
+      local minT = math.min(0, w * ax, h * ay, w * ax + h * ay)
+      skyUp = edgeT > minT + 1
+    end
+  end
   -- and where the sky's bottom edge lands, which is what the reflection
   -- reads its bands against (see Water). nil when nothing painted bands.
-  Voxel3D.skyEdge = (sky and sky.bands)
-                    and Sky.region(h, Voxel3D.horizonY(h)) or nil
+  Voxel3D.skyEdge = skyUp and Sky.region(h, hy) or nil
   if sky then
     love.graphics.clear(sky[1], sky[2], sky[3], sky[4] or 1, true, true)
     -- The sky goes down here, in the one window in this function where a
@@ -705,8 +783,24 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
     -- are the same size as the world's own and follow every resize and zoom.
     -- The banded sky also hangs the hour's sun or moon (skyBody projects it
     -- through this very camera); a flat sky has no bands and hangs nothing.
-    Sky.paint(w, h, sky, Voxel3D.horizonY(h), Voxel3D.cell,
-              sky.bands and Voxel3D.skyBody(w, h) or nil)
+    if not vrEye then
+      Sky.paint(w, h, sky, hy, Voxel3D.cell,
+                sky.bands and Voxel3D.skyBody(w, h) or nil)
+    elseif skyUp then
+      -- the gradient's far end: the ELEV_SPAN direction's own projection
+      -- when the frustum holds it (horizonLine's `top` -- exact, so a
+      -- pitch slides the frame over bands that stay put), and the
+      -- pixels-per-radian estimate when it does not
+      local top = topT
+      if not (top and top < edgeT - 1) then
+        local radPerPx = math.max(1e-6, (Voxel3D.fovY or 1) / h)
+        top = edgeT - Sky.ELEV_SPAN / radPerPx
+      end
+      Sky.paint(w, h, sky, edgeT, Voxel3D.cell,
+                Voxel3D.skyBody(w, h), top, { ax, ay })
+    end
+    -- a VR eye with no horizon in frame paints nothing: everything in view
+    -- is below the horizon, and the haze clear above already filled it
   else
     love.graphics.clear(0, 0, 0, 0, true, true)
   end

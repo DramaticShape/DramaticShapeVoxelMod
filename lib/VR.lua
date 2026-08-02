@@ -24,10 +24,16 @@
 -- rungs the world is a TABLETOP DIORAMA pinned below and ahead of where
 -- your head started -- lean in, walk around it; on 1ST you stand inside
 -- at life scale, the HMD steers FirstPerson's yaw and pitch, and FreeMove
--- walks where you look exactly as it does on the flat screen. The flat
--- window keeps running as the mirror (left eye when the world is up), so
--- menus stay usable at the desk and every existing input keeps working --
--- v1 has no XR controller bindings on purpose.
+-- walks where you look exactly as it does on the flat screen. A STAGED
+-- FIGHT takes the camera from both: the headset snaps -- through a fade
+-- to black and back -- to the flat battle's own over-the-shoulder seat
+-- (VRRig.battleMount), and returns the same way when the fight ends;
+-- the 2D battle screen lights up on the POKEDEX in the tracked left
+-- hand (lib/Pokedex.lua) and NO floating panel is submitted at all --
+-- the fight itself owns the view. The flat window keeps
+-- running as the mirror (left eye when the world is up), so menus stay
+-- usable at the desk and every existing input keeps working alongside
+-- the XR controllers.
 --
 -- Failure is a status, never a crash: no runtime, no headset, no GL
 -- interop, or a mid-session loss all land back on the flat screen with
@@ -45,6 +51,7 @@ local BattleCam = V.require("BattleCam")
 local VRRig = V.require("VRRig")
 local VRXR = V.require("VRXR")
 local VRGL = V.require("VRGL")
+local Pokedex = V.require("Pokedex")
 
 local VR = {}
 
@@ -52,7 +59,11 @@ local VR = {}
 -- spoken for, and a headset is not something to toggle by accident.
 VR.setting = ModSetting.new("vr", "VR", { false, true }, { "OFF", "ON" })
 
--- where the diorama's UI panel floats vs first person's
+-- Where the diorama's UI panel floats vs first person's. These are the
+-- FALLBACK screens: wherever the pokedex is up and lit -- first
+-- person's menus, a battle's 2D scene -- no quad is submitted at all
+-- (see updateQuad), and these serve only the diorama and the no-tracked-
+-- controller case.
 local QUAD_DIORAMA = { pos = { 0, 0.1, -1.0 }, width = 0.8 }
 local QUAD_FP = { pos = { 0, 0, -1.4 }, width = 1.1 }
 
@@ -74,12 +85,58 @@ local lastOrbit = 4             -- the 50-degree rung, a sane middle
 local held = {}                 -- GB buttons this module is holding down
 local lastHandY = nil           -- the gripping hand's height, last frame
 
+-- First person's SNAP TURN: the right stick flicked left or right steps
+-- the whole XR-to-world mapping 45 degrees at a time (a smooth software
+-- turn is the classic comfort mistake -- vection with no vestibular
+-- signal; a snap is instant and the head does the rest). The offset
+-- turns the mapping itself, so the eyes, the walk direction and the
+-- pokedex all agree about which way the world now faces.
+local SNAP_TURN = math.rad(45)
+local fpYawOff = 0              -- accumulated snaps, radians
+local snapArmed = true          -- re-arms when the stick returns to centre
+
+local function wrapPi(a)
+  return (a + math.pi) % (2 * math.pi) - math.pi
+end
+
+-- The battle snap, made a FADE rather than a cut: when a fight is staged
+-- on the world (or stops being), black rises over both eyes, the camera
+-- swaps mounts behind it, and black lifts. A teleport inside VR is the
+-- one camera move that should never be SEEN happening -- the world
+-- sliding to a new seat reads as the room moving.
+local FADE_TIME = 0.35          -- seconds each way: out, then back in
+local camMode = "explore"       -- "explore" (diorama / 1ST) or "battle"
+local fadeAlpha = 0             -- the black over the eyes right now
+
+-- The staged fight to look at, if there is one: arena, floor height.
+local function battleStage()
+  local ok, arena, groundY = pcall(function()
+    return V.require("OverworldBattle").stage()
+  end)
+  if not ok then return nil end
+  return arena, groundY
+end
+
 -- the palette closure the engine hands drawWorld; stashed there (see
 -- main.lua) because the VR frame renders from update, where no ctx exists
 VR.paletteFor = nil
 
+-- Whether this platform can do VR AT ALL: the shipped loader and the GL
+-- interop are Win32 (openxr_loader.dll, wgl), so only Windows qualifies.
+-- Everywhere else -- Android above all -- the row is not offered on any
+-- menu, and a stored vr=true is ignored rather than read: a save that
+-- migrated over from the desktop must not leave a phone trying to start
+-- an OpenXR session (or silently forcing the battle rows). Headless runs
+-- have no love.system and answer true, which costs nothing: enabling VR
+-- there stops at VRXR.start like it always did.
+function VR.supported()
+  local ok, os = pcall(function() return love.system.getOS() end)
+  if not ok or not os then return true end
+  return os == "Windows"
+end
+
 function VR.enabled()
-  return VR.setting:get() == true
+  return VR.supported() and VR.setting:get() == true
 end
 
 function VR.active()
@@ -124,15 +181,68 @@ local function shutdown(reason)
   mirrorSrc = nil
   releaseInputs()
   BattleCam.still = false
+  VoxelScene.spriteLean = nil
+  Pokedex.clear()
   zoom, heightOff = 1, 0
+  fpYawOff, snapArmed = 0, true
+  camMode, fadeAlpha = "explore", 0
   status = reason or "off"
 end
 
 VR.shutdown = shutdown          -- named for the probe driver
 
+-- Whether the flat screen is showing something the world pass cannot: a
+-- menu, a dialog, a battle, a transition wipe. The quad and the pokedex's
+-- screen both key on it.
+local function uiShowing()
+  local ok, showing = pcall(function()
+    local Game = require("src.core.Game")
+    local top = Game.stack and Game.stack:top()
+    return top ~= Game.overworld
+           or (Game.overworld and Game.overworld.transitioning) or false
+  end)
+  return ok and showing or false
+end
+
+-- ------- the pokedex's screen
+--
+-- What the device in the hand shows during a battle: the flat window --
+-- which IS the 2D battle screen for as long as the battle state draws --
+-- copied into a canvas the scene pass can texture with, cropped by UV to
+-- the battle's own letterbox so the screen wears the GB frame edge to
+-- edge. Menus over the battle (the party, the bag) ride along for free:
+-- they are the flat screen too, and reading them on the device in your
+-- hand is exactly the point.
+local dexCanvas = nil
+
+local function dexScreen()
+  local ok, out = pcall(function()
+    local ww, wh = love.graphics.getPixelDimensions()
+    if not (ww and ww > 0 and wh and wh > 0) then return nil end
+    if not (dexCanvas and dexCanvas:getWidth() == ww
+            and dexCanvas:getHeight() == wh) then
+      dexCanvas = love.graphics.newCanvas(ww, wh)
+      pcall(dexCanvas.setFilter, dexCanvas, "nearest", "nearest")
+    end
+    local fbo = fboCache[dexCanvas]
+    if not fbo then
+      fbo = VRGL.canvasFBO(dexCanvas)
+      fboCache[dexCanvas] = fbo
+    end
+    if not (fbo and VRGL.copyFrontToCanvas(fbo, ww, wh)) then return nil end
+    local BattleScene = V.require("BattleScene")
+    local lx, ly, s = BattleScene.letterbox()
+    return { dexCanvas,
+             lx / ww, ly / wh,
+             (lx + BattleScene.GB_W * s) / ww,
+             (ly + BattleScene.GB_H * s) / wh }
+  end)
+  return ok and out or nil
+end
+
 -- ------- the world, once per eye
 
-local function renderWorld(views)
+local function renderWorld(views, ctl)
   local ok, Game = pcall(require, "src.core.Game")
   local ow = ok and Game.overworld or nil
   if not (ow and ow.map and ow.camera and Voxel.active()
@@ -142,19 +252,39 @@ local function renderWorld(views)
   local vw, vh = 320, 288
   pcall(function() vw, vh = Game.renderer:worldViewSize() end)
 
-  local pivot, anchor, scale
+  -- Whatever the camera does, the CARDS hold the top rung's near-upright
+  -- lean: a head that roams has no one pitch for them to match, and 75
+  -- degrees is the pose that reads as "standing" from anywhere. Cleared
+  -- on shutdown, so the flat screen leans with the rung as ever.
+  VoxelScene.spriteLean = math.rad(75)
+
+  local pivot, anchor, scale, mountYaw
   local fp = FirstPerson.engaged()
-  if fp then
+  local battle, battleFloor
+  if camMode == "battle" then battle, battleFloor = battleStage() end
+  if battle then
+    -- the over-the-shoulder seat the flat battle shot stands in, pulled
+    -- close enough for a headset's own lens (see VRRig.battleMount), at
+    -- life scale, turned to face the arena
+    local rec = BattleCam.rig(battle, battleFloor)
+    pivot, mountYaw = VRRig.battleMount(rec.eye, rec.focus)
+    anchor = { 0, 0, 0 }
+    scale = VRRig.FP_SCALE
+  elseif fp then
     local p = ow.player
     local gh = 0
     pcall(function() gh = VoxelScene.groundAt(ow.map, p.cellX, p.cellY) end)
     pivot = VRRig.fpPivot(p.px, p.py, gh, FirstPerson.EYE_HEIGHT)
     anchor = { 0, 0, 0 }
     scale = VRRig.FP_SCALE
-    -- the HMD is the head: its yaw and pitch become FirstPerson's, so
-    -- FreeMove walks where you look and A talks to what you face
+    -- the snap turn is a yaw on the MAPPING, same seam the battle mount
+    -- turns through
+    if fpYawOff ~= 0 then mountYaw = fpYawOff end
+    -- the HMD is the head: its yaw and pitch (plus the snaps) become
+    -- FirstPerson's, so FreeMove walks where you look and A talks to
+    -- what you face
     local yaw, pitch = VRRig.headYawPitch(views[1].pose.quat)
-    FirstPerson.yaw = yaw
+    FirstPerson.yaw = wrapPi(yaw + fpYawOff)
     FirstPerson.pitch = math.max(FirstPerson.PITCH_UP,
                           math.min(FirstPerson.PITCH_DOWN, pitch))
   else
@@ -168,14 +298,37 @@ local function renderWorld(views)
     scale = VRRig.dioramaScale(vh, Voxel.FOCAL) / zoom
   end
 
+  -- The pokedex, on the tracked left hand, under this very mapping --
+  -- but only where it earns its keep: FIRST PERSON, where its screen is
+  -- every menu, dialog and wipe the flat screen shows (and the floating
+  -- billboard is retired outright -- see updateQuad), and the BATTLE
+  -- seat, where its screen is the fight's own 2D scene. The diorama
+  -- does without: a hand-sized device hovering over a tabletop town is
+  -- clutter, and the panel serves there. No hand tracked, no device.
+  local hand = ctl and ctl.handl or nil
+  if hand and (battle or fp) then
+    Pokedex.place(hand, pivot, anchor, scale, mountYaw)
+    if uiShowing() then
+      local scr = dexScreen()
+      if scr then
+        Pokedex.screen(scr[1], scr[2], scr[3], scr[4], scr[5])
+      end
+    end
+  else
+    Pokedex.clear()
+  end
+
   local eyes = {}
   for i = 1, 2 do
     local v = views[i]
     eyes[i] = {
-      camera = VRRig.eyeCamera(v.pose, v.fov, pivot, anchor, scale),
+      camera = VRRig.eyeCamera(v.pose, v.fov, pivot, anchor, scale, mountYaw),
       w = v.w, h = v.h,
       slot = i == 1 and "vrL" or "vrR",
-      adopt = true,
+      -- the battle seat is a placed shot, not the first-person rig: the
+      -- cards keep their stage lean rather than yawing at this eye, and
+      -- the player's own card stays visible in it
+      adopt = not battle,
     }
   end
   eyes.cx, eyes.cy = pivot[1], pivot[3]
@@ -185,6 +338,21 @@ local function renderWorld(views)
   if not (okR and type(canvases) == "table" and canvases[1] and canvases[2])
   then
     return false
+  end
+
+  -- the snap's fade, over the finished eyes: plain black at this moment's
+  -- strength, drawn before the blit so the headset never sees the swap
+  if fadeAlpha > 0 then
+    pcall(function()
+      for i = 1, 2 do
+        local c = canvases[i]
+        love.graphics.setCanvas(c)
+        love.graphics.setColor(0, 0, 0, math.min(1, fadeAlpha))
+        love.graphics.rectangle("fill", 0, 0, c:getWidth(), c:getHeight())
+      end
+      love.graphics.setCanvas()
+      love.graphics.setColor(1, 1, 1, 1)
+    end)
   end
 
   for i = 1, 2 do
@@ -214,24 +382,44 @@ end
 -- world pass is off entirely.
 local function wantQuad(worldUp)
   if not worldUp then return true end
-  local ok, showing = pcall(function()
-    local Game = require("src.core.Game")
-    local top = Game.stack and Game.stack:top()
-    return top ~= Game.overworld
-           or (Game.overworld and Game.overworld.transitioning) or false
-  end)
-  return ok and showing or false
+  return uiShowing()
 end
 
 local function updateQuad(worldUp, fp)
   if not wantQuad(worldUp) then return nil end
+  -- Wherever the pokedex is up and lit -- first person's menus, the
+  -- battle seat's 2D fight -- it IS the screen, and no floating
+  -- billboard is submitted at all. (No tracked left hand still gets
+  -- the panel: the UI must be readable somewhere.)
+  if Pokedex.frame and Pokedex.frame.tex then return nil end
   local tex, qw, qh = VRXR.acquireQuad()
   if not tex then return nil end
   local ww, wh = qw, qh
   pcall(function() ww, wh = love.graphics.getPixelDimensions() end)
   VRGL.copyFrontBuffer(tex, math.min(qw, ww), math.min(qh, wh))
   VRXR.releaseQuad()
-  return fp and QUAD_FP or QUAD_DIORAMA
+  -- The panel wears the GB FRAME, not the window: everything the flat
+  -- screen has to say lives in the 160x144 letterbox (the world around
+  -- it is just the mirror's picture), so the quad's sub-rect crops to
+  -- it and the panel presents near-square instead of monitor-wide.
+  -- Image space is GL's, origin bottom-left -- exactly how
+  -- copyFrontBuffer landed the window in the texture.
+  local crop = nil
+  pcall(function()
+    local BattleScene = V.require("BattleScene")
+    local lx, ly, s = BattleScene.letterbox()
+    local wpx = BattleScene.GB_W * s
+    local hpx = BattleScene.GB_H * s
+    local x = math.max(0, math.floor(lx))
+    local y = math.max(0, math.floor(wh - ly - hpx))
+    crop = { x, y,
+             math.min(qw - x, math.ceil(wpx)),
+             math.min(qh - y, math.ceil(hpx)) }
+    if crop[3] < 1 or crop[4] < 1 then crop = nil end
+  end)
+  local base = fp and QUAD_FP or QUAD_DIORAMA
+  if not crop then return base end
+  return { pos = base.pos, width = base.width, crop = crop }
 end
 
 -- ------- the controllers
@@ -242,10 +430,13 @@ end
 --                 so it grid-walks the diorama and free-walks 1ST);
 --                 A/B are A/B; either trigger is START; clicking the
 --                 LEFT stick toggles first/third person.
---   diorama only  right stick up/down zooms the model; clicking the
---                 RIGHT stick cycles the viewing angle through the orbit
---                 rungs; squeezing a grip and moving that hand up or
---                 down drags the whole table with it.
+--   1ST only      right stick left/right SNAP-TURNS 45 degrees a flick.
+--   diorama only  right stick up/down zooms the model; squeezing a grip
+--                 and moving that hand up or down drags the whole table
+--                 with it.
+--
+-- Leaving VR is the VR row's job alone (OPTIONS menu or the manager) --
+-- no controller button does it. VR.leave below stays as the API for it.
 
 -- Flip between the 1ST rung and the last orbit rung, through the same
 -- gate and plumbing the keyboard hotkey uses.
@@ -269,33 +460,15 @@ function VR.toggleView()
   end)
 end
 
--- Step the diorama's presentation angle through the orbit rungs (the
--- anchor re-derives from the rung's angle, so the table re-tilts on the
--- rung's own tween). FULL counts as its 35-degree twin, like the hotkey.
-function VR.cycleAngle()
+-- Leave VR: the VR row toggled back off and persisted, exactly as if
+-- stepped on the OPTIONS menu, so the next update tears the session down
+-- and the flat screen takes the picture back. Deliberately bound to NO
+-- controller button (a click that ejects you from the headset is a trap
+-- mid-fight); kept as the one programmatic door out.
+function VR.leave()
   pcall(function()
     local Game = require("src.core.Game")
-    local Pipelines = require("src.render.Pipelines")
-    local top = Game.stack and Game.stack:top()
-    if not Pipelines.canToggle("voxel", top, Game.overworld) then return end
-    local level = Pipelines.level("voxel")
-    if Voxel.isFirstPerson(level) then return end
-    local order = { 2, 3, 4, 5 }
-    local at = nil
-    for i, rung in ipairs(order) do
-      if rung == level then at = i break end
-    end
-    if not at then
-      local deg = Voxel.ANGLES_DEG[level + 1]
-      for i, rung in ipairs(order) do
-        if Voxel.ANGLES_DEG[rung + 1] == deg then at = i break end
-      end
-    end
-    Pipelines.setLevel("voxel", order[at and (at % #order + 1) or 1])
-    if Game.save and Game.save.options then
-      Pipelines.syncOptions(Game.save.options)
-      pcall(Game.writeOptions, Game)
-    end
+    VR.setting:setIndex(VR.setting:read() + 1, Game)
   end)
 end
 
@@ -331,12 +504,28 @@ local function driveControls(ctl, dt, fp)
 
   if ctl.toggleChanged and ctl.toggle then VR.toggleView() end
 
-  if not fp then
+  -- first person's snap turn: a flick of the right stick steps the view
+  -- 45 degrees, once per flick -- it re-arms only when the stick comes
+  -- back toward centre, so holding it turns exactly once
+  if fp and camMode ~= "battle" then
+    local sx = ctl.lookX or 0
+    if math.abs(sx) > 0.65 then
+      if snapArmed then
+        snapArmed = false
+        -- increasing yaw turns LEFT in this mod's compass, so a stick
+        -- pushed right subtracts
+        fpYawOff = wrapPi(fpYawOff + (sx > 0 and -SNAP_TURN or SNAP_TURN))
+      end
+    elseif math.abs(sx) < 0.35 then
+      snapArmed = true
+    end
+  end
+
+  if not fp and camMode ~= "battle" then
     local zy = ctl.lookY or 0
     if math.abs(zy) > 0.15 then
       zoom = math.max(0.35, math.min(4, zoom * math.exp(zy * (dt or 0) * 1.6)))
     end
-    if ctl.angleChanged and ctl.angle then VR.cycleAngle() end
     -- the grab-drag: while a grip is squeezed, the table follows that
     -- hand's height, metre for metre
     local gl, gr = ctl.gripL or 0, ctl.gripR or 0
@@ -406,18 +595,33 @@ function VR.update(dt)
   -- VR reads as the world lurching
   BattleCam.still = true
 
+  -- The battle snap's fade: while the camera the frame WANTS is not the
+  -- one it is showing, black rises; at full black the mount swaps; then
+  -- black lifts. Driven here, on game time, so a fight that ends during
+  -- the fade just turns it around.
+  local want = battleStage() and "battle" or "explore"
+  if want ~= camMode then
+    fadeAlpha = math.min(1, fadeAlpha + (dt or 0) / FADE_TIME)
+    if fadeAlpha >= 1 then camMode = want end
+  else
+    fadeAlpha = math.max(0, fadeAlpha - (dt or 0) / FADE_TIME)
+  end
+
   local time, should = VRXR.waitFrame()
   if not time then return end
 
   -- the controllers, before the world renders: the frame the toggle
-  -- flips rungs on should be the frame that renders the new rig
-  driveControls(VRXR.input(time), dt, FirstPerson.engaged())
+  -- flips rungs on should be the frame that renders the new rig. The
+  -- state is kept in hand for renderWorld too -- the pokedex stands on
+  -- the same frame's left-hand pose.
+  local ctl = VRXR.input(time)
+  driveControls(ctl, dt, FirstPerson.engaged())
 
   local worldUp = false
   if should then
     local views = VRXR.locateViews(time)
     if views then
-      worldUp = renderWorld(views)
+      worldUp = renderWorld(views, ctl)
     end
   end
   local quadPose = updateQuad(worldUp, FirstPerson.engaged())
@@ -458,6 +662,9 @@ function VR.invalidate()
     pcall(mirrorCanvas.release, mirrorCanvas)
   end
   mirrorCanvas, mirrorSrc = nil, nil
+  if dexCanvas and dexCanvas.release then pcall(dexCanvas.release, dexCanvas) end
+  dexCanvas = nil
+  Pokedex.invalidate()
   for k in pairs(fboCache) do fboCache[k] = nil end
 end
 

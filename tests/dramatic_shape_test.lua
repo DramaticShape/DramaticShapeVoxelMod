@@ -3777,12 +3777,151 @@ local rx, ry, rz = apply(R, 1, 0, 0)
 T.check(near(rx, 0) and near(ry, 0) and near(rz, -1),
   "fromQuat: a quarter turn about +Y carries east into north")
 
+-- ------- the battle mount: the over-the-shoulder seat, faced right
+--
+-- The seat sits BATTLE_DIST along the flat battle camera's own line from
+-- its aim point, and the yaw is whatever turns XR forward (north) onto
+-- that line's look direction.
+local seat, byaw = VRRig.battleMount({ 100, 35, 332 }, { 100, 2, 200 })
+local sdx = seat[1] - 100
+local sdy = seat[2] - 2
+local sdz = seat[3] - 200
+T.check(near(math.sqrt(sdx * sdx + sdy * sdy + sdz * sdz),
+             VRRig.BATTLE_DIST, 1e-3),
+  "the battle seat sits BATTLE_DIST from the aim point")
+T.check(near(byaw, 0),
+  "a camera due south of its focus looks north -- XR forward, yaw 0")
+local eyaw = select(2, VRRig.battleMount({ 150, 10, 200 }, { 100, 10, 200 }))
+T.check(near(eyaw, math.pi / 2),
+  "a camera east of its focus turns the mapping a quarter toward west")
+
+-- an eye seated with that yaw really faces the arena: an identity head at
+-- the seat comes out looking WEST, and the view agrees to the metre
+local seated = VRRig.eyeCamera(pose, fov, { 150, 10, 200 }, { 0, 0, 0 },
+                               VRRig.FP_SCALE, math.pi / 2)
+T.check(near(seated.eye[1], 150) and near(seated.eye[3], 200),
+  "the yawed mapping still pins the resting head to the pivot")
+T.check(seated.focus[1] < seated.eye[1] - 1,
+  "and turns its gaze west, toward the focus it was seated against")
+local wx2, wy2, wz2 = apply(seated.view, 150 - VRRig.FP_SCALE, 10, 200)
+T.check(near(wx2, 0) and near(wy2, 0) and near(wz2, -1),
+  "the yawed view carries one metre west of the pivot to one metre ahead")
+
+-- ------- the hand prop: the pokedex rides the same mapping as the eyes
+--
+-- propMatrix carries a hand pose through worldFromXr: an identity hand at
+-- the LOCAL origin lands ON the pivot, offsets scale by px-per-metre, and
+-- the battle mount's yaw turns the prop with the whole mapping.
+local handPose = { pos = { 0, 0, 0 }, quat = { 0, 0, 0, 1 } }
+local pm = VRRig.propMatrix(handPose, { 500, 20, 700 }, { 0, 0, 0 }, 10)
+local hx, hy, hz = apply(pm, 0, 0, 0)
+T.check(near(hx, 500) and near(hy, 20) and near(hz, 700),
+  "an identity hand at the origin puts the prop on the pivot")
+local hx2, hy2, hz2 = apply(pm, 0.1, 0.2, 0)
+T.check(near(hx2, 501) and near(hy2, 22) and near(hz2, 700),
+  "prop-local metres scale to world pixels through the mapping")
+local pmYaw = VRRig.propMatrix(handPose, { 500, 20, 700 }, { 0, 0, 0 },
+                               10, math.pi / 2)
+local yx, yy, yz = apply(pmYaw, 0, 0, -1)
+T.check(near(yx, 490) and near(yy, 20) and near(yz, 700),
+  "the battle mount's yaw turns the prop with the mapping: local "
+  .. "forward comes out west")
+
+-- and the pokedex module holds its shape headless: no frame until VR
+-- places one, placement builds a model matrix, clear() takes it away
+local Dex = run.loader.exports.DRAMATIC_SHAPE.lib.require("Pokedex")
+T.eq(Dex.frame, nil, "no session, no pokedex frame")
+Dex.place(handPose, { 500, 20, 700 }, { 0, 0, 0 }, 10)
+T.check(Dex.frame ~= nil and type(Dex.frame.model) == "table"
+        and #Dex.frame.model == 16,
+  "placing the pokedex on a hand pose builds its world model matrix")
+T.check(Dex.frame.tex == nil,
+  "and the screen stays dark until something is put on it")
+T.check(pcall(Dex.draw),
+  "drawing headless is a clean no-op -- no meshes, no crash")
+Dex.clear()
+T.eq(Dex.frame, nil, "clear() takes the device away")
+T.check(type(Dex.VOX) == "number" and Dex.VOX > 0,
+  "the voxel size is a named, tunable number")
+T.check(near(Dex.TILT, -math.pi / 2),
+  "the device lies a full quarter turn forward, flush with the controller")
+
+-- the sprite lean override and the anchored sky's knobs exist, unset and
+-- set respectively, and an unstaged world offers no battle mount
+local VS_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("VoxelScene")
+T.eq(VS_.spriteLean, nil,
+  "the sprite lean override ships unset -- the flat screen leans with the rung")
+local Sky_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("Sky")
+T.check(type(Sky_.ELEV_SPAN) == "number" and Sky_.ELEV_SPAN > 0,
+  "the anchored sky hangs its gradient over a fixed elevation span")
+local OB_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("OverworldBattle")
+T.eq(OB_.stage(), nil, "no staged fight, no battle mount")
+T.eq(OB_.battle(), nil, "and no battle state for the UI panel to cut up")
+
+-- ------- the effects plane: solved like the camera was, anchors on cells
+--
+-- fxCard's whole contract is that the classic layout's two slot marks land
+-- on the two arena cells, so an effect authored at a slot bursts on the
+-- mon standing in for it.
+local BS_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("BattleScene")
+local fxArena = { player = { 96, 240 }, enemy = { 96, 192 } }
+-- eyeless first (fxCard reads Voxel3D.eye at call time, and earlier
+-- sections leave one behind): straight down the arena's axis the frame
+-- is the fixed plane through both cells, marks exactly on them
+local V3D_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("Voxel3D")
+local hadEye = V3D_.eye
+V3D_.eye = nil
+local fxm = BS_.fxCard(fxArena, 10, OB_.ANCHOR)
+T.check(type(fxm) == "table" and #fxm == 16, "the effects plane has a model")
+local pa, ea = OB_.ANCHOR.player, OB_.ANCHOR.enemy
+local fpx, fpy, fpz = apply(fxm, pa[1] / 160 - 0.5, 1 - pa[2] / 144, 0)
+T.check(near(fpx, 96, 1e-3) and near(fpy, 10, 1e-3) and near(fpz, 240, 1e-3),
+  "the player slot's mark lands on the player's cell, at the floor")
+local fex, fey, fez = apply(fxm, ea[1] / 160 - 0.5, 1 - ea[2] / 144, 0)
+T.check(near(fex, 96, 1e-3) and near(fey, 10, 1e-3) and near(fez, 192, 1e-3),
+  "and the enemy slot's mark on the enemy's cell")
+
+-- and BILLBOARDED at an eye: seated east of the arena the frame turns
+-- square to it, and the marks still land on the cells -- this eye's own
+-- rays are what pinned them
+V3D_.eye = { 200, 20, 216 }
+local fxb = BS_.fxCard(fxArena, 10, OB_.ANCHOR)
+T.check(near(fxb[3], 1, 1e-3) and near(fxb[11], 0, 1e-3),
+  "the effects frame faces the eye in the east")
+local bpx, bpy, bpz = apply(fxb, pa[1] / 160 - 0.5, 1 - pa[2] / 144, 0)
+T.check(near(bpx, 96, 1e-3) and near(bpy, 10, 1e-3) and near(bpz, 240, 1e-3),
+  "billboarded, the player mark still sits over the player's cell")
+local bex, bey, bez = apply(fxb, ea[1] / 160 - 0.5, 1 - ea[2] / 144, 0)
+T.check(near(bex, 96, 1e-3) and near(bey, 10, 1e-3) and near(bez, 192, 1e-3),
+  "and the enemy mark over the enemy's")
+V3D_.eye = hadEye
+
+-- ------- VR owns the battle rows while it is on
+local VRSet = run.loader.exports.DRAMATIC_SHAPE.lib.require("VR").setting
+VRSet:sync(true)
+OB_.setting:sync(false)
+OB_.backSetting:sync(true)
+T.eq(OB_.enabled(), true, "VR on forces staged battles whatever the row says")
+T.eq(OB_.backPinned(), false, "and holds back sprites off")
+VRSet:sync(false)
+T.eq(OB_.enabled(), false, "VR off hands the row back to its stored value")
+OB_.setting:sync(true)
+T.eq(OB_.backPinned(), true, "and back sprites return at theirs")
+OB_.backSetting:sync(false)
+
 -- and the VR row exists, shaped like every other mod setting
 local VRMod = run.loader.exports.DRAMATIC_SHAPE.lib.require("VR")
 T.eq(VRMod.setting.key, "vr", "the VR row persists under its own key")
 T.eq(VRMod.setting:get(), false, "and ships OFF")
 T.eq(VRMod.status(), "off", "with the status agreeing")
 T.check(not VRMod.active(), "no session without a runtime, and no crash")
+T.eq(type(VRMod.supported), "function",
+  "the platform gate exists -- off Windows the row is not offered at all")
+T.eq(VRMod.supported(), true,
+  "and a headless run (no love.system) counts as supported, harmlessly")
+T.eq(type(VRMod.leave), "function",
+  "VR.leave stays as the programmatic door out -- no controller button "
+  .. "is wired to it")
 end
 vrRigSection()
 

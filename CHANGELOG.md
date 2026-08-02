@@ -31,25 +31,111 @@
     1ST), **A/B** are A/B, **either trigger** is START, and **clicking
     the left stick** toggles first/third person (returning to the orbit
     rung you left). In the diorama: **right stick up/down** zooms the
-    model, **clicking the right stick** cycles the viewing angle through
-    the orbit rungs (the table re-tilts on the rung's own tween), and
-    **squeezing a grip** while moving that hand up or down drags the
-    whole table with it.
+    model, and **squeezing a grip** while moving that hand up or down
+    drags the whole table with it. No controller button leaves VR --
+    both directions belong to the VR row alone, so no mid-fight click
+    can eject you from the headset.
 
-  - **Battles happen ON the world.** While a staged fight runs, the
-    headset keeps looking at the map -- both mons stand on their arena
-    cells in the VR eyes' own view, yawed per eye, casting real shadows,
-    wearing the hit flash -- while the battle UI reads from the floating
-    panel. (The flat screen keeps its composed battle shot, untouched.)
-    And the battle camera's parallax drift holds still while a headset
-    is watching: the sway is a flat screen's depth cue, and inside VR it
-    read as the world lurching -- most of all on the floating panel.
+  - **Battles happen ON the world -- from the flat game's own seat.**
+    When a staged fight starts, the headset fades to black and comes
+    back seated in the flat battle's over-the-shoulder shot: on the same
+    camera line (your mon near-left, the foe far-right), pulled in to
+    the wide rig's standing distance at life scale, turned to face the
+    arena -- and fades back to wherever you were when the fight ends.
+    Both mons stand on their arena cells in the VR eyes' own view, yawed
+    per eye, casting real shadows, wearing the hit flash -- and the MOVE
+    ANIMATIONS play out there with them: the engine's own effects layer,
+    caught on a canvas and stood on a billboard that faces the eye the
+    way the mon cards do (effects are 2D drawings, and a drawing must
+    face the eye that is looking), with the classic layout's two slot
+    marks pinned where each arena cell lands on that plane along the
+    eye's own ray -- so a burst authored at a slot sits exactly over the
+    mon standing in for it, per eye, and a projectile crossing the frame
+    crosses the arena. (The flat screen keeps its
+    composed battle shot, untouched.) And the battle camera's parallax
+    drift holds still while a headset is watching: the sway is a flat
+    screen's depth cue, and inside VR it read as the world lurching.
+
+  - **A voxel POKEDEX along your left controller.** A hand-authored
+    voxel model of the series' own field guide -- red slab, lens, LEDs,
+    hinge, d-pad, dark screen bezel -- laid flush along the left
+    controller's grip pose (a full quarter turn forward, so holding the
+    controller is holding the device) through the same XR-to-world
+    mapping as the eyes, at its real hand size wherever the camera is.
+    It rides in FIRST PERSON and in the BATTLE seat; the diorama does
+    without it -- a hand-sized device hovering over a tabletop town is
+    clutter, and the floating panel serves there. In first person its
+    screen carries EVERYTHING the flat screen shows -- menus, dialogs,
+    shops, wipes -- and the floating billboard is retired outright:
+    raise your hand to read, lower it to play. In a staged fight the
+    screen is the 2D battle -- text, menus, HP bars, and any party or
+    bag screen opened over it -- and there too the floating billboard is
+    gone entirely: the fight owns the view, the reading is in the hand.
+    (No tracked left controller still gets the floating panel -- the UI
+    must be readable somewhere.) Drawn by the scene's own pass with real
+    depth, per eye; dark when nothing is showing.
+
+  - **The floating panel wears the GB frame.** The quad used to show
+    the whole window -- monitor-wide, mostly mirror -- and now crops to
+    the 160x144 letterbox where everything the flat screen has to say
+    actually lives, so the panel presents near-square (10:9) at 1:1
+    pixel aspect. To keep a battle's HUDs inside that frame, the HUD
+    blocks stay in their classic GB slots for as long as a headset is
+    live instead of snapping out to the window's edges.
+
+  - **The sky is anchored in space.** On the flat screen the band
+    gradient hangs off the frame; inside a headset that meant the sky
+    (and the sun and moon with it) rode the player's head. The VR eyes
+    now hang the gradient over a fixed slice of elevation above the
+    world's real horizon and drop the fixed-slice fallback entirely, so
+    tilting your head slides the frame across a sky that stays put --
+    and the discs, already projected through each eye's true camera,
+    stand still over their own azimuth. The horizon holds LEVEL under a
+    rolled head too: the whole painting runs along the horizon's own
+    projected axis rather than the canvas's rows, so tipping your head
+    tips the frame across the horizon instead of hinging the horizon
+    with your ears -- and the discs' cell art is drawn in that same
+    frame, so a tipped head no longer spins the moon's face in place.
+    Under PITCH the gradient stays put as well: the band span's far end
+    is the 55-degree direction's own projection through the eye's
+    frustum rather than a pixels-per-radian estimate -- a perspective's
+    rows are tan-spaced, not angle-spaced, and the linear guess let the
+    bands slide as the horizon crossed the frame.
+
+  - **The VR row exists only where VR can.** Off Windows -- the Android
+    build above all -- the row is absent from the OPTIONS menu and the
+    mod manager's page both (the loader and the GL interop are Win32),
+    and a stored vr=true that migrated over in a save is ignored instead
+    of read, so a phone never tries to start a session or force the
+    battle rows.
+
+  - **VR owns the battle rows.** While the VR row is ON, staged battles
+    are REQUIRED (3D-BTL answers ON whatever it was set to) and BACK
+    SPRITES is held OFF -- the battle seat, the pokedex screen and the
+    effects plane all assume both mons standing on the world -- and both
+    rows leave the OPTIONS menu for the duration, because a switch that
+    decides nothing reads as broken. Both come back, at their stored
+    values, the moment VR goes off.
+
+  - **First person snap-turns.** Flicking the right stick left or right
+    steps the view 45 degrees, once per flick (it re-arms at centre) --
+    a snap rather than a smooth spin, because smooth software yaw is
+    the classic VR comfort mistake. The turn steps the XR-to-world
+    mapping itself, so the eyes, the walk direction and the pokedex in
+    your hand all agree about which way the world now faces.
+
+  - **The cast holds one pose for the headset.** Sprite cards lean back
+    by the camera pitch on the flat screen; a head that roams the table
+    has no one pitch to match, so every VR frame leans the cards at the
+    top rung's near-upright 75 degrees instead -- whatever orbit rung
+    the ladder is on -- and the flat screen keeps leaning with the rung.
 
   - **Menus, dialogs, battles and wipes float on a panel** (an OpenXR
     quad layer fed from the window), so everything the flat screen can
     show, the headset can read. The window itself becomes the VR mirror
-    -- the left eye, fitted to the window -- and every existing input
-    keeps working; v1 deliberately has no XR controller bindings.
+    -- the left eye, fitted to the window -- and every existing
+    keyboard, mouse and pad input keeps working alongside the XR
+    controllers.
 
   - The two eyes share one shadow map, one pose capture and one glint
     step per frame (VoxelScene.render's `eyes` path), so they can never

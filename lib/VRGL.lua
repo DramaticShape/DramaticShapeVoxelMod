@@ -166,6 +166,32 @@ function VRGL.copyFrontBuffer(tex, w, h)
   return ok
 end
 
+-- Copy the window's front buffer into a LOVE CANVAS (by its FBO id, from
+-- canvasFBO), flipped so the canvas reads top-down exactly like the
+-- window: what LOVE then draws from that canvas at (0,0) is the screen,
+-- row for row. The battle's VR quad is the caller: it needs the screen as
+-- something LOVE can CUT UP (scissored cutouts of the UI), not just as a
+-- finished texture -- copyFrontBuffer above is for the finished case.
+function VRGL.copyFrontToCanvas(dstFBO, w, h)
+  if not ready then return false end
+  local ok = pcall(function()
+    ext.glBindFramebuffer(GL.READ_FRAMEBUFFER, 0)
+    gl.glReadBuffer(GL.FRONT)
+    ext.glBindFramebuffer(GL.DRAW_FRAMEBUFFER, dstFBO)
+    ext.glBlitFramebuffer(0, 0, w, h, 0, h, w, 0,
+                          GL.COLOR_BUFFER_BIT, GL.NEAREST)
+    ext.glBindFramebuffer(GL.FRAMEBUFFER, 0)
+    gl.glReadBuffer(GL.BACK)
+  end)
+  if not ok then
+    pcall(function()
+      ext.glBindFramebuffer(GL.FRAMEBUFFER, 0)
+      gl.glReadBuffer(GL.BACK)
+    end)
+  end
+  return ok
+end
+
 function VRGL.status()
   if ready then return "ok" end
   return reason or "not loaded"

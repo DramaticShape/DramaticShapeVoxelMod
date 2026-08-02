@@ -477,8 +477,6 @@ local function setupInput()
     start = makeAction(set, "btn_start", XR.ACTION_TYPE_BOOLEAN, "Start"),
     toggle = makeAction(set, "viewtoggle", XR.ACTION_TYPE_BOOLEAN,
                         "First / Third Person"),
-    angle = makeAction(set, "angle", XR.ACTION_TYPE_BOOLEAN,
-                       "Diorama Angle"),
     gripl = makeAction(set, "grip_l", XR.ACTION_TYPE_FLOAT, "Left Grip"),
     gripr = makeAction(set, "grip_r", XR.ACTION_TYPE_FLOAT, "Right Grip"),
     handl = makeAction(set, "hand_l", XR.ACTION_TYPE_POSE, "Left Hand"),
@@ -511,7 +509,6 @@ local function setupInput()
     { A.start, "/user/hand/left/input/trigger/value" },
     { A.start, "/user/hand/right/input/trigger/value" },
     { A.toggle, "/user/hand/left/input/thumbstick/click" },
-    { A.angle, "/user/hand/right/input/thumbstick/click" },
     { A.gripl, "/user/hand/left/input/squeeze/value" },
     { A.gripr, "/user/hand/right/input/squeeze/value" },
     { A.handl, "/user/hand/left/input/grip/pose" },
@@ -534,7 +531,6 @@ local function setupInput()
     { A.start, "/user/hand/left/input/trigger/value" },
     { A.start, "/user/hand/right/input/trigger/value" },
     { A.toggle, "/user/hand/left/input/thumbstick/click" },
-    { A.angle, "/user/hand/right/input/thumbstick/click" },
     { A.gripl, "/user/hand/left/input/squeeze/click" },
     { A.gripr, "/user/hand/right/input/squeeze/click" },
     { A.handl, "/user/hand/left/input/grip/pose" },
@@ -617,7 +613,6 @@ function VRXR.input(time)
     o.b, o.bChanged = readBool(A.b)
     o.start, o.startChanged = readBool(A.start)
     o.toggle, o.toggleChanged = readBool(A.toggle)
-    o.angle, o.angleChanged = readBool(A.angle)
     o.gripL = readFloat(A.gripl)
     o.gripR = readFloat(A.gripr)
 
@@ -632,6 +627,13 @@ function VRXR.input(time)
         local fl = tonumber(loc.locationFlags) or 0
         if fl % 4 >= XR.SPACE_LOCATION_POSITION_VALID_BIT then
           o[name .. "Y"] = loc.pose.position.y
+          -- and the whole pose when the orientation is valid too
+          -- (bit 0x1): the hand-held pokedex stands on it
+          if fl % 2 >= 1 then
+            local p, q = loc.pose.position, loc.pose.orientation
+            o[name] = { pos = { p.x, p.y, p.z },
+                        quat = { q.x, q.y, q.z, q.w } }
+          end
         end
       end
     end
@@ -912,7 +914,12 @@ end
 
 -- Close the frame. `world` submits the projection layer from the LAST
 -- locateViews (both eyes assumed blitted); `quadOpts` floats the UI panel:
--- { pos = {x,y,z}, quat = {x,y,z,w}, width = metres }. Either may be nil.
+-- { pos = {x,y,z}, quat = {x,y,z,w}, width = metres,
+--   crop = {x, y, w, h} or nil }. Either may be nil. `crop` shows only
+-- that sub-rect of the quad's texture -- GL image coordinates, origin
+-- bottom-left, exactly as the front-buffer copy landed the window -- and
+-- the panel's aspect follows the rect (the GB letterbox's near-square
+-- frame) instead of the whole texture's.
 function VRXR.endFrame(time, world, quadOpts)
   if not running then return end
   pcall(function()
@@ -946,8 +953,16 @@ function VRXR.endFrame(time, world, quadOpts)
       quadLayer[0].space = space
       quadLayer[0].eyeVisibility = XR.EYE_VISIBILITY_BOTH
       quadLayer[0].subImage.swapchain = quad.swapchain
-      quadLayer[0].subImage.imageRect.extent.width = quad.w
-      quadLayer[0].subImage.imageRect.extent.height = quad.h
+      local cr = quadOpts.crop
+      if cr then
+        quadLayer[0].subImage.imageRect.offset.x = cr[1]
+        quadLayer[0].subImage.imageRect.offset.y = cr[2]
+        quadLayer[0].subImage.imageRect.extent.width = cr[3]
+        quadLayer[0].subImage.imageRect.extent.height = cr[4]
+      else
+        quadLayer[0].subImage.imageRect.extent.width = quad.w
+        quadLayer[0].subImage.imageRect.extent.height = quad.h
+      end
       local p, q = quadOpts.pos or { 0, 0, -1 }, quadOpts.quat or { 0, 0, 0, 1 }
       quadLayer[0].pose.position.x = p[1]
       quadLayer[0].pose.position.y = p[2]
@@ -958,7 +973,11 @@ function VRXR.endFrame(time, world, quadOpts)
       quadLayer[0].pose.orientation.w = q[4]
       local w = quadOpts.width or 1.0
       quadLayer[0].size.width = w
-      quadLayer[0].size.height = w * (quad.h / quad.w)
+      if cr then
+        quadLayer[0].size.height = w * (cr[4] / math.max(1, cr[3]))
+      else
+        quadLayer[0].size.height = w * (quad.h / quad.w)
+      end
       layers[#layers + 1] = quadLayer
     end
 

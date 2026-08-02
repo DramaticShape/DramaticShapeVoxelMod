@@ -395,10 +395,14 @@ local SETTINGS = {
     .. "fraction of the cost." },
   -- `full` marks a row FULL does not take away. FULL owns the diorama's own
   -- knobs; what a battle is drawn over, and how it is framed, are not that.
+  -- Off the OPTIONS menu while VR is on: the headset REQUIRES staged
+  -- battles (OverworldBattle.enabled answers true regardless of this row)
+  -- and forbids back sprites (backPinned answers false), so both rows
+  -- decide nothing there and a dead switch on the menu reads as broken.
   { OverworldBattle.setting,
     "Fight on the map: the battle draws over the nearest clear ground, "
     .. "shot over the shoulder with a slow parallax drift.",
-    full = true },
+    when = function() return not VR.enabled() end, full = true },
   -- Only offered while a fight can actually be staged on the map: with 3D-BTL
   -- off the engine draws the classic screen, which is this row's ON already,
   -- and a row that no longer decides anything is worse than no row.
@@ -406,7 +410,8 @@ local SETTINGS = {
     "Keep your own Pokemon on the battle menu, seen from behind in its "
     .. "original slot, instead of standing it on the map facing the foe. "
     .. "The foe is still out there on its own tile.",
-    when = function() return stagedBattles() end, full = true },
+    when = function() return stagedBattles() and not VR.enabled() end,
+    full = true },
   { DayNight.setting,
     "What time it is outdoors: pin the sky to DAY, NIGHT, DUSK or DAWN, "
     .. "let CYCLE run it -- ten minutes of sun, ten of moon, with the "
@@ -436,12 +441,20 @@ local SETTINGS = {
     .. "Menus and dialogs float on a panel. Needs a Windows OpenXR runtime "
     .. "and the mod running from a real folder; without them the row stays "
     .. "and the game stays flat, with the reason on the console.",
-    full = true },
+    -- on Windows the row stays even when a runtime is missing (the console
+    -- says why); off Windows -- mobile above all -- there is no VR to have
+    -- and the row does not exist
+    when = function() return VR.supported() end, full = true },
 }
 
 local schema = {}
-for i, entry in ipairs(SETTINGS) do
-  schema[i] = entry[1]:schema(entry[2])
+for _, entry in ipairs(SETTINGS) do
+  -- the VR row is absent from the mod manager's page too where the
+  -- platform cannot do VR at all -- the OPTIONS menu's `when` gates are
+  -- situational (a row hidden for now), this one is existential
+  if entry[1] ~= VR.setting or VR.supported() then
+    schema[#schema + 1] = entry[1]:schema(entry[2])
+  end
 end
 mod.options:define(schema)
 
@@ -804,12 +817,16 @@ do
     function OptionsMenu:update(dt)
       local before = Pipelines.level("voxel")
       local hadBattles = OverworldBattle.enabled()
+      -- the VR row hides the two battle rows while it is on, so stepping
+      -- it changes the LIST exactly the way 3D-BTL does
+      local hadVR = VR.enabled()
       local wasOn = idAt(self, self.index)
       inner(self, dt)
       local after = Pipelines.level("voxel")
       local crossedFull = after ~= before
                           and (Voxel.isFull(before) or Voxel.isFull(after))
-      if crossedFull or OverworldBattle.enabled() ~= hadBattles then
+      if crossedFull or OverworldBattle.enabled() ~= hadBattles
+         or VR.enabled() ~= hadVR then
         local rebuilt = OptionsMenu.new(self.game)
         self.rows = rebuilt.rows
         -- Follow the row the cursor was ON rather than the slot it was in:
