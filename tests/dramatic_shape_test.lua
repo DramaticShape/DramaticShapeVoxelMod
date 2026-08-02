@@ -3998,6 +3998,17 @@ T.eq(type(VRMod.supported), "function",
   "the platform gate exists -- off Windows the row is not offered at all")
 T.eq(VRMod.supported(), true,
   "and a headless run (no love.system) counts as supported, harmlessly")
+
+-- the loader search covers every install shape: the mod-relative path
+-- first, the system name last, and (with a filesystem to ask) the real
+-- mount and the save directory in between
+local VRXR_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("VRXR")
+local cands = VRXR_._loaderCandidates()
+T.check(#cands >= 2, "the loader has candidates to try")
+T.check(cands[1]:find("assets/vr/openxr_loader%.dll") ~= nil,
+  "the first is the mod's own path")
+T.eq(cands[#cands], "openxr_loader",
+  "and the system search path is the last resort")
 T.eq(type(VRMod.leave), "function",
   "VR.leave stays as the programmatic door out -- no controller button "
   .. "is wired to it")

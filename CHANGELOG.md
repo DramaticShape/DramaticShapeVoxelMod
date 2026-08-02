@@ -4,6 +4,16 @@
 
 ### Added
 
+- **VR works from an installed release.** The OpenXR loader used to be
+  looked for only against the working directory and the game's source --
+  right for the dev tree, wrong for a release install, where importing
+  the mod lands it in the game's SAVE DIRECTORY (or keeps it zipped) and
+  the VR row silently failed to start. The search now also asks the
+  mount that actually holds the mod and the save directory itself; and
+  if nothing on disk answers -- the mod imported as an archive -- the
+  DLL is copied once out of the mod into the save directory and loaded
+  from there, so every install shape reaches the headset.
+
 - **SELECT walks the VOXEL ladder.** In free roam, the pad's SELECT
   button makes exactly the step hotkey 3 makes -- OFF through the angle
   rungs to 1ST and round, stepping over FULL, clearing TILT and GBC FX

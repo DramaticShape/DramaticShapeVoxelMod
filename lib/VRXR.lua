@@ -361,16 +361,56 @@ local function check(r, what)
 end
 
 -- Where the loader DLL might really be on disk. mod.path is
--- PHYSFS-relative; ffi.load needs an OS path, so try it against the
--- process's working directory and against the game's source directory.
+-- PHYSFS-relative; ffi.load needs an OS path. The dev tree answers to
+-- the working directory or the source directory -- but an INSTALLED
+-- release is neither: importing a mod there lands it in the game's SAVE
+-- DIRECTORY, so the mount that actually holds the mod
+-- (getRealDirectory) and the save directory itself are both tried too.
+local DLL_REL = "assets/vr/openxr_loader.dll"
+
 local function loaderCandidates()
-  local rel = (V.path or "mods/DramaticShapeVoxelMod")
-              .. "/assets/vr/openxr_loader.dll"
+  local rel = (V.path or "mods/DramaticShapeVoxelMod") .. "/" .. DLL_REL
   local list = { rel }
+  local okR, real = pcall(function()
+    return love.filesystem.getRealDirectory(rel)
+  end)
+  if okR and type(real) == "string" then
+    list[#list + 1] = real .. "/" .. rel
+  end
   local ok, src = pcall(function() return love.filesystem.getSource() end)
   if ok and type(src) == "string" then list[#list + 1] = src .. "/" .. rel end
+  local okS, save = pcall(function()
+    return love.filesystem.getSaveDirectory()
+  end)
+  if okS and type(save) == "string" then list[#list + 1] = save .. "/" .. rel end
   list[#list + 1] = "openxr_loader"   -- last resort: the system search path
   return list
+end
+
+VRXR._loaderCandidates = loaderCandidates   -- named for the suite
+
+-- The escape hatch for a mod imported as an ARCHIVE (or mounted anywhere
+-- else ffi.load cannot see): copy the DLL out of the mount into the save
+-- directory -- a real folder on every platform -- and load it from
+-- there. Written once and reused; rewritten only if the size changed (a
+-- mod update shipping a new loader).
+local EXTRACTED = "dramatic_shape_openxr_loader.dll"
+
+local function extractLoader()
+  local okB, bytes = pcall(function()
+    return V.mod and V.mod.read and V.mod:read(DLL_REL)
+  end)
+  if not (okB and type(bytes) == "string" and #bytes > 0) then return nil end
+  local ok, path = pcall(function()
+    local have = love.filesystem.getInfo and love.filesystem.getInfo(EXTRACTED)
+    if not (have and have.size == #bytes) then
+      if not love.filesystem.write(EXTRACTED, bytes) then return nil end
+    end
+    local save = love.filesystem.getSaveDirectory()
+    if type(save) ~= "string" then return nil end
+    return save .. "/" .. EXTRACTED
+  end)
+  return ok and path or nil
 end
 
 local function loadLoader()
@@ -383,8 +423,15 @@ local function loadLoader()
     if ok then return lib end
     errs[#errs + 1] = tostring(lib)
   end
-  error("openxr_loader.dll not loadable (is the mod running from a real "
-        .. "folder, not an archive?): " .. table.concat(errs, " | "), 0)
+  -- nothing loadable in place: extract a copy to the save directory
+  local extracted = extractLoader()
+  if extracted then
+    local ok, lib = pcall(ffi.load, extracted)
+    if ok then return lib end
+    errs[#errs + 1] = tostring(lib)
+  end
+  error("openxr_loader.dll not loadable from the mod, the save directory "
+        .. "or the system: " .. table.concat(errs, " | "), 0)
 end
 
 local function makeSwapchain(w, h, format)

@@ -45,3 +45,23 @@ alongside.
 | grip squeeze + raise / lower that hand | *diorama only* — drag the table's height |
 | head | *1ST and battles* — look; FreeMove walks where you look |
 | left hand | *1ST and battles* — the Pokédex: menus, dialogs and the 2D battle screen on its screen |
+
+## Licenses
+
+This mod redistributes one third-party binary:
+
+- **`assets/vr/openxr_loader.dll`** — the Khronos OpenXR loader
+  (version 1.0.10.2, x64, unmodified), © The Khronos Group Inc.,
+  licensed under the **Apache License 2.0**. The full license text ships
+  alongside the DLL at
+  [`assets/vr/LICENSE-openxr_loader.txt`](assets/vr/LICENSE-openxr_loader.txt),
+  as the license requires; keep the two files together if you
+  redistribute this mod. Source:
+  [KhronosGroup/OpenXR-SDK](https://github.com/KhronosGroup/OpenXR-SDK).
+
+Everything else in this mod is original to it, except that the voxel
+geometry and shape profiles are derived from the tile and sprite data of
+the original game, as documented by the
+[pret/pokered](https://github.com/pret/pokered) disassembly. No ROM
+data, artwork or audio is included; the mod reads the assets the host
+game already has.
