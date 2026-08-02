@@ -37,9 +37,10 @@ local VRRig = V.require("VRRig")
 local Pokedex = {}
 
 -- one voxel, in metres: a centimetre-ish grid gives the classic chunky
--- read at a believable device size (the body below comes out about
--- 10 x 15 x 2.5 cm)
-Pokedex.VOX = 0.011
+-- read at a device you can read a battle off (the body below comes out
+-- about 12 x 19 x 3 cm -- a quarter up from the first, believable size,
+-- because the screen carries every menu and was squint-small in hand)
+Pokedex.VOX = 0.011 * 1.25
 
 -- Where the device sits relative to the GRIP pose, in metres, and how it
 -- is tipped. A full quarter turn forward lays the slab exactly along the

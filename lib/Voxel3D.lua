@@ -721,6 +721,11 @@ function Voxel3D.skyBody(w, h)
   return {
     x = (x / ww * 0.5 + 0.5) * w,
     y = (y / ww * 0.5 + 0.5) * h,
+    -- the body's WORLD direction, for the skybox path: a ray-fan caller
+    -- measures the twilight glow by the angle between a pixel's ray and
+    -- this, so the glow is pinned to the sky like the bands are (see
+    -- Sky.paint's glowDir)
+    dx = b.dx, dy = b.dy, dz = b.dz,
     moon = b.moon,
     glowAmt = amt,
     glowColor = color,

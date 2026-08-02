@@ -166,6 +166,43 @@ function VRGL.copyFrontBuffer(tex, w, h)
   return ok
 end
 
+-- Blit a REGION of the window's front buffer into a GL texture (an XR
+-- swapchain image), SCALED to (dw, dh) at the texture's origin. This is
+-- the panel's route: the whole-window copy above is pixel-for-pixel, so
+-- a window larger than the swapchain image simply ran off its edges --
+-- fullscreen cut the GB frame's own menu off the panel. A scaled blit
+-- has no such cliff: the letterbox region lands whole at the texture's
+-- own resolution whatever size the window is. Source coordinates are GL
+-- window space, origin bottom-left; LINEAR, because the region rarely
+-- matches the target size exactly and dropped rows read worse than a
+-- soft one. Restores the read buffer and framebuffer LOVE believes in.
+function VRGL.copyFrontRegionToTexture(tex, sx, sy, sw, sh, dw, dh)
+  if not ready then return false end
+  local ok = pcall(function()
+    if not fbo then
+      local out = ffi.new("unsigned int[1]")
+      ext.glGenFramebuffers(1, out)
+      fbo = out[0]
+    end
+    ext.glBindFramebuffer(GL.READ_FRAMEBUFFER, 0)
+    gl.glReadBuffer(GL.FRONT)
+    ext.glBindFramebuffer(GL.DRAW_FRAMEBUFFER, fbo)
+    ext.glFramebufferTexture2D(GL.DRAW_FRAMEBUFFER, GL.COLOR_ATTACHMENT0,
+                               GL.TEXTURE_2D, tex, 0)
+    ext.glBlitFramebuffer(sx, sy, sx + sw, sy + sh, 0, 0, dw, dh,
+                          GL.COLOR_BUFFER_BIT, GL.LINEAR)
+    ext.glBindFramebuffer(GL.FRAMEBUFFER, 0)
+    gl.glReadBuffer(GL.BACK)
+  end)
+  if not ok then
+    pcall(function()
+      ext.glBindFramebuffer(GL.FRAMEBUFFER, 0)
+      gl.glReadBuffer(GL.BACK)
+    end)
+  end
+  return ok
+end
+
 -- Copy the window's front buffer into a LOVE CANVAS (by its FBO id, from
 -- canvasFBO), flipped so the canvas reads top-down exactly like the
 -- window: what LOVE then draws from that canvas at (0,0) is the screen,

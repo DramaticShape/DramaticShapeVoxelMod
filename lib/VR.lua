@@ -77,11 +77,9 @@ local mirrorCanvas = nil
 local status = "off"
 
 -- the diorama's live adjustments: the right stick's zoom (a multiplier on
--- the model's size), the grab-drag's height (metres of world travel), and
--- the orbit rung the view toggle returns to from first person
+-- the model's size) and the grab-drag's height (metres of world travel)
 local zoom = 1
 local heightOff = 0
-local lastOrbit = 4             -- the 50-degree rung, a sane middle
 local held = {}                 -- GB buttons this module is holding down
 local lastHandY = nil           -- the gripping hand's height, last frame
 
@@ -396,27 +394,44 @@ local function updateQuad(worldUp, fp)
   if not tex then return nil end
   local ww, wh = qw, qh
   pcall(function() ww, wh = love.graphics.getPixelDimensions() end)
-  VRGL.copyFrontBuffer(tex, math.min(qw, ww), math.min(qh, wh))
-  VRXR.releaseQuad()
   -- The panel wears the GB FRAME, not the window: everything the flat
   -- screen has to say lives in the 160x144 letterbox (the world around
-  -- it is just the mirror's picture), so the quad's sub-rect crops to
-  -- it and the panel presents near-square instead of monitor-wide.
-  -- Image space is GL's, origin bottom-left -- exactly how
-  -- copyFrontBuffer landed the window in the texture.
+  -- it is just the mirror's picture). The frame region is blitted OUT
+  -- of the window and SCALED into the swapchain image -- never copied
+  -- pixel-for-pixel, because the swapchain's size is fixed at session
+  -- start and a fullscreened window outgrows it, running the frame (and
+  -- the START menu flush with its right edge) off the copy. Scaled, the
+  -- panel shows the identical picture at the identical ratio whatever
+  -- size the window is. Source coordinates are GL's, origin bottom-left.
   local crop = nil
+  local copied = false
   pcall(function()
     local BattleScene = V.require("BattleScene")
     local lx, ly, s = BattleScene.letterbox()
-    local wpx = BattleScene.GB_W * s
-    local hpx = BattleScene.GB_H * s
-    local x = math.max(0, math.floor(lx))
-    local y = math.max(0, math.floor(wh - ly - hpx))
-    crop = { x, y,
-             math.min(qw - x, math.ceil(wpx)),
-             math.min(qh - y, math.ceil(hpx)) }
-    if crop[3] < 1 or crop[4] < 1 then crop = nil end
+    local wpx = math.ceil(BattleScene.GB_W * s)
+    local hpx = math.ceil(BattleScene.GB_H * s)
+    local sx = math.max(0, math.floor(lx))
+    local sy = math.max(0, math.floor(wh - ly - hpx))
+    wpx = math.min(wpx, ww - sx)
+    hpx = math.min(hpx, wh - sy)
+    if wpx < 1 or hpx < 1 then return end
+    -- fitted to the swapchain image at the REGION's own aspect: the
+    -- crop then presents exactly that rect, so the panel's shape is the
+    -- GB frame's at any window and any swapchain size
+    local fit = math.min(qw / wpx, qh / hpx)
+    local dw = math.max(1, math.floor(wpx * fit))
+    local dh = math.max(1, math.floor(hpx * fit))
+    if VRGL.copyFrontRegionToTexture(tex, sx, sy, wpx, hpx, dw, dh) then
+      copied = true
+      crop = { 0, 0, dw, dh }
+    end
   end)
+  if not copied then
+    -- no letterbox to cut (or the blit refused): the old whole-window
+    -- copy, clamped, is still a readable panel
+    VRGL.copyFrontBuffer(tex, math.min(qw, ww), math.min(qh, wh))
+  end
+  VRXR.releaseQuad()
   local base = fp and QUAD_FP or QUAD_DIORAMA
   if not crop then return base end
   return { pos = base.pos, width = base.width, crop = crop }
@@ -429,7 +444,8 @@ end
 --   both modes    left stick moves (through the engine's own stick path,
 --                 so it grid-walks the diorama and free-walks 1ST);
 --                 A/B are A/B; either trigger is START; clicking the
---                 LEFT stick toggles first/third person.
+--                 LEFT stick steps the VOXEL angle ladder exactly as
+--                 the "3" key (and the pad's SELECT) does.
 --   1ST only      right stick left/right SNAP-TURNS 45 degrees a flick.
 --   diorama only  right stick up/down zooms the model; squeezing a grip
 --                 and moving that hand up or down drags the whole table
@@ -438,25 +454,19 @@ end
 -- Leaving VR is the VR row's job alone (OPTIONS menu or the manager) --
 -- no controller button does it. VR.leave below stays as the API for it.
 
--- Flip between the 1ST rung and the last orbit rung, through the same
--- gate and plumbing the keyboard hotkey uses.
-function VR.toggleView()
+-- The left stick click makes EXACTLY the step the "3" key makes: one
+-- rung up the VOXEL angle ladder, wrapping, stepping over FULL, clearing
+-- TILT and GBC FX in the save -- by calling the very function the key
+-- and the pad's SELECT button already share. main.lua installs it below
+-- (cycleVoxel is a local of that file); the free-roam gate is the
+-- registry's own, inside it, so a click over a menu or mid-warp is a
+-- no-op exactly like the key.
+VR.cycleVoxel = nil             -- cycleVoxel(game), set by main.lua
+
+function VR.stepView()
   pcall(function()
-    local Game = require("src.core.Game")
-    local Pipelines = require("src.render.Pipelines")
-    local top = Game.stack and Game.stack:top()
-    if not Pipelines.canToggle("voxel", top, Game.overworld) then return end
-    local level = Pipelines.level("voxel")
-    if Voxel.isFirstPerson(level) then
-      Pipelines.setLevel("voxel", lastOrbit)
-    else
-      if level > 0 and not Voxel.isFull(level) then lastOrbit = level end
-      Pipelines.setLevel("voxel", Voxel.FP_LEVEL)
-    end
-    if Game.save and Game.save.options then
-      Pipelines.syncOptions(Game.save.options)
-      pcall(Game.writeOptions, Game)
-    end
+    if not VR.cycleVoxel then return end
+    VR.cycleVoxel(require("src.core.Game"))
   end)
 end
 
@@ -502,7 +512,7 @@ local function driveControls(ctl, dt, fp)
   inp:gamepadaxis(nil, "leftx", ctl.moveX or 0)
   inp:gamepadaxis(nil, "lefty", -(ctl.moveY or 0))
 
-  if ctl.toggleChanged and ctl.toggle then VR.toggleView() end
+  if ctl.toggleChanged and ctl.toggle then VR.stepView() end
 
   -- first person's snap turn: a flick of the right stick steps the view
   -- 45 degrees, once per flick -- it re-arms only when the stick comes

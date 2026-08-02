@@ -4015,6 +4015,142 @@ T.eq(type(VRMod.leave), "function",
 end
 vrRigSection()
 
+-- ------- the skybox's checker and glow are the sky's own, not the screen's
+--
+-- The bands were already read by angle, but the DITHER between them kept
+-- screen-cell parity: a world-fixed band edge sliding over a screen-fixed
+-- checkerboard recomputes the pattern with every head motion -- the
+-- shimmer. Now the ray path lays the checker (and the twilight glow's
+-- rings) on azimuth/elevation cells, and these pin what it sends.
+;(function()
+  local Sky = run.loader.exports.DRAMATIC_SHAPE.lib.require("Sky")
+  local realGraphics, realImage = love.graphics, love.image
+  local sent = {}
+  local fakeShader = {
+    send = function(_, name, a, b, c, d) sent[name] = { a, b, c, d } end,
+  }
+  local function fakeImage(w, h)
+    return {
+      getWidth = function() return w end,
+      getHeight = function() return h end,
+      getDimensions = function() return w, h end,
+      setPixel = function() end,
+      setFilter = function() end,
+      setWrap = function() end,
+    }
+  end
+  love.image = { newImageData = function(w, h) return fakeImage(w, h) end }
+  love.graphics = {
+    getShader = function() return nil end,
+    setShader = function() end,
+    getDepthMode = function() return "lequal", true end,
+    setDepthMode = function() end,
+    setColor = function() end,
+    newShader = function() return fakeShader end,
+    newImage = function(data) return data end,
+    rectangle = function() end,
+  }
+  Sky.invalidate()   -- rebuild the shader and ramp through the fakes
+
+  local grad = { bands = { { 8, 8, 16 }, { 48, 64, 96 }, { 96, 128, 160 } } }
+  -- a level fan looking north: base + u*du + v*dv, spanning 2*atan(0.5)
+  -- both ways at depth 1 -- easy angles to pin the sends against
+  local fan = { base = { -0.5, 0.5, -1 }, du = { 1, 0, 0 },
+                dv = { 0, -1, 0 } }
+  local span = 2 * math.atan(0.5)
+  local body = { x = 160, y = 40, dx = 0, dy = 0.5, dz = -1,
+                 glowAmt = 0.5, glowColor = { 248, 224, 168 } }
+  T.eq(Sky.paint(320, 288, grad, nil, 7, body, nil, nil, fan), true,
+    "the skybox paints with a ray fan and a bodied glow")
+  T.check(sent.cellAng and sent.cellAng[1] > 0,
+    "the checker gets an ANGULAR cell: the dither grid is laid on "
+    .. "azimuth and elevation, so no head motion reslides it")
+  T.check(math.abs(sent.cellAng[1] - span * 7 / 288) < 1e-6,
+    "sized so the sky's grid matches the diorama's pixel grid on screen")
+  T.check(sent.glowDir ~= nil, "the glow gets the sun's world direction")
+  local gd = sent.glowDir[1]
+  local gl = math.sqrt(gd[1] ^ 2 + gd[2] ^ 2 + gd[3] ^ 2)
+  T.check(math.abs(gl - 1) < 1e-6 and math.abs(gd[2] - 0.4472) < 1e-3,
+    "normalised, the hour's own")
+  T.check(math.abs(sent.glowInvA[1] - 1 / (span * Sky.GLOW_REACH)) < 1e-6,
+    "and an angular reach cut from the view the way the pixel reach was")
+  T.eq(sent.glowPos, nil,
+    "the screen-space glow stays the flat frame's path alone")
+
+  sent = {}
+  fakeShader.send = function(_, name, a, b, c, d) sent[name] = { a, b, c, d } end
+  local bare = { x = 160, y = 40, glowAmt = 0.5,
+                 glowColor = { 248, 224, 168 } }
+  T.eq(Sky.paint(320, 288, grad, nil, 7, bare, nil, nil, fan), true,
+    "a body with no world direction still paints")
+  T.eq(sent.glowAmt[1], 0,
+    "but offers no glow -- there is no direction to measure angles against")
+  T.eq(sent.glowDir, nil, "and no direction is sent")
+
+  love.graphics, love.image = realGraphics, realImage
+  Sky.invalidate()
+
+  -- ------- a live headset holds every menu inside the GB frame
+  --
+  -- The engine's zoom-aware anchoring docks the START menu to the WINDOW's
+  -- edge; both VR screens crop the window to the GB frame, so a docked
+  -- menu is cropped away with the border it hugged. The wrap answers the
+  -- engine's own uiAnchorsHeldInStack predicate with yes while a headset
+  -- is live, which blits every menu where it was drawn -- the START
+  -- menu's slot is already flush with the frame's right edge.
+  local Game = require("src.core.Game")
+  local VRMod = run.loader.exports.DRAMATIC_SHAPE.lib.require("VR")
+  T.eq(Game.dramaticShapeAnchorHold, true,
+    "the anchor-hold wrap installed at load, once")
+  T.eq(Game.uiAnchorsHeldInStack({ states = {} }), false,
+    "with no headset the engine's own answer stands: an empty stack docks")
+  local innerActive = VRMod.active
+  VRMod.active = function() return true end
+  T.eq(Game.uiAnchorsHeldInStack({ states = {} }), true,
+    "a live headset holds anchors -- menus stay inside the GB frame, "
+    .. "which is all either VR screen shows")
+  VRMod.active = innerActive
+  T.eq(Game.uiAnchorsHeldInStack({ states = {} }), false,
+    "and hands the predicate back when the headset is gone")
+  T.eq(Game.uiAnchorsHeldInStack({ states = { { holdsUIAnchors = true } } }),
+    true, "a self-composing state still holds them on its own")
+
+  -- and the panel's route to the headset is the SCALED region blit: the
+  -- pixel-for-pixel copy ran the GB frame off a swapchain image smaller
+  -- than the window (fullscreen cut the menu), so the scaled seam must
+  -- exist for updateQuad to reach for first
+  local VRGL_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("VRGL")
+  T.eq(type(VRGL_.copyFrontRegionToTexture), "function",
+    "the letterbox reaches the panel scaled, not pixel-for-pixel")
+
+  -- ------- the stick click IS the "3" key
+  --
+  -- Left stick click makes exactly the step the key (and SELECT) makes:
+  -- the very same function, handed across from main.lua, so the ladder
+  -- walk, the FULL step-over and the TILT/GBC FX clearing can never
+  -- drift. Through the same fixture the key tests lend.
+  T.eq(VRMod.cycleVoxel ~= nil, true,
+    "main.lua hands its cycleVoxel to the stick click")
+  local hadStack2, hadOw2 = Game.stack, Game.overworld
+  local hadSave2, hadWrite2 = Game.save, Game.writeOptions
+  Game.stack, Game.overworld = keyGame.stack, keyGame.overworld
+  Game.save, Game.writeOptions = keyGame.save, keyGame.writeOptions
+  Pipelines.setLevel("voxel", 0)
+  VRMod.stepView()
+  T.eq(Pipelines.levelLabel("voxel"), "15",
+    "the stick click steps the VOXEL ladder exactly as 3 does")
+  VRMod.stepView()
+  T.eq(Pipelines.levelLabel("voxel"), "35", "and keeps walking it")
+  keyGame.save.options.tilt = 2
+  require("src.render.Tilt").setLevel(2)
+  VRMod.stepView()
+  T.eq(keyGame.save.options.tilt, 0,
+    "each click clears TILT in the save, exactly as each keypress does")
+  Game.stack, Game.overworld = hadStack2, hadOw2
+  Game.save, Game.writeOptions = hadSave2, hadWrite2
+  Pipelines.setLevel("voxel", 0)
+end)()
+
 Pipelines.reset()
 run.release()
 

@@ -4,6 +4,52 @@
 
 ### Added
 
+- **The Pokédex in hand is a quarter larger.** Its voxel pitch went from
+  1.1 cm to 1.375 cm (the body from about 10x15 cm to about 12x19 cm),
+  because the screen carries every menu in first person and was
+  squint-small at the old size. The attachment -- flush along the left
+  controller -- is unchanged.
+
+- **Left stick click steps the VOXEL ladder.** In VR the click now makes
+  exactly the step the "3" key (and the pad's SELECT) makes -- the same
+  function, handed across, so the ladder walk, the FULL step-over and
+  the TILT/GBC FX clearing can never drift from the key's. It used to
+  toggle first/third person against a remembered return rung.
+
+- **The floating panel shows the same picture at every window size.**
+  The GB-frame region used to be copied into the headset's panel
+  pixel-for-pixel, and the panel's swapchain image has a fixed size --
+  so a window scaled past it (fullscreen above all) ran the frame off
+  the copy's edge and cut the START menu out of the panel. The region
+  is now blitted OUT of the window and SCALED into the swapchain image
+  at the frame's own aspect: identical picture, identical near-square
+  ratio, whatever size or shape the window takes.
+
+- **Menus stay inside the GB frame while a headset is live.** The
+  engine's new zoom-aware anchoring docks the START menu to the
+  WINDOW's edge -- and both VR screens (the floating panel and the
+  Pokédex) crop the window to the near-square GB frame, so a docked
+  menu was cropped away with the border it hugged. While a headset is
+  live the mod answers the engine's own "hold the anchors" predicate
+  with yes, and every menu blits where it was drawn: the START menu's
+  classic slot, flush with the frame's right edge, which is the right
+  edge of everything the headset shows.
+
+- **The sky's dither is glued to the sky.** The gradient's bands were
+  already read by true elevation, but the GBC checker between them kept
+  SCREEN-cell parity -- so a head's pitch or roll slid the world-fixed
+  band edges over a screen-fixed checkerboard and the whole gradient
+  shimmered as the pattern recomputed. The ray path is now a computed
+  SKYBOX: each pixel's ray lands in a cell of the sky's own angular
+  grid (azimuth columns, elevation rows, sized to match the diorama's
+  pixel grid on screen), and the band, the checker's parity and the
+  twilight glow -- now measured by the angle to the sun's own direction
+  -- are all answered from that cell's centre. The screen grid
+  quantises nothing, so the picture behaves exactly like a
+  nearest-filtered texture on a dome: its cells slide smoothly with the
+  world, no motion of the head recomputes the pattern, and only the
+  clock moves the sky.
+
 - **VR works from an installed release.** The OpenXR loader used to be
   looked for only against the working directory and the game's source --
   right for the dev tree, wrong for a release install, where importing
@@ -46,8 +92,8 @@
     runtime's own UI. In both modes: **left stick** moves (through the
     engine's own stick path, so it grid-walks the diorama and free-walks
     1ST), **A/B** are A/B, **either trigger** is START, and **clicking
-    the left stick** toggles first/third person (returning to the orbit
-    rung you left). In the diorama: **right stick up/down** zooms the
+    the left stick** steps the VOXEL angle ladder exactly as the "3"
+    key does. In the diorama: **right stick up/down** zooms the
     model, and **squeezing a grip** while moving that hand up or down
     drags the whole table with it. No controller button leaves VR --
     both directions belong to the VR row alone, so no mid-fight click

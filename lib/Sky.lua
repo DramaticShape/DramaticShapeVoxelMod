@@ -198,10 +198,17 @@ uniform vec3 rayDv;     // base + u*du + v*dv, world axes -- so each pixel
 uniform float raySpan;  // radians of elevation the gradient covers
 uniform vec2 invSize;   // 1/w, 1/h: canvas pixels to fractions
 uniform float useRay;   // 0 = the flat screen's frame-linear gradient
+uniform float cellAng;  // one checker cell in RADIANS (ray path): the
+                        // dither's own grid, laid on azimuth/elevation so
+                        // the pattern is glued to the SKY -- a screen-cell
+                        // parity flips under every head motion and the
+                        // whole gradient shimmers
 uniform float alpha;
 uniform float glowAmt;  // twilight warmth around the low sun; 0 = none
-uniform vec2 glowPos;   // the sun disc, in canvas pixels
-uniform float glowInvR; // 1 / the glow's reach
+uniform vec2 glowPos;   // the sun disc, in canvas pixels (flat path)
+uniform float glowInvR; // 1 / the glow's reach in pixels (flat path)
+uniform vec3 glowDir;   // the sun's world direction (ray path)
+uniform float glowInvA; // 1 / the glow's reach in radians (ray path)
 uniform vec3 glowColor;
 
 // Band `i`, read from its own texel centre. The index is clamped rather than
@@ -214,37 +221,62 @@ vec3 bandAt(float i) {
 }
 
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
-  vec2 cc0 = floor(sc / cell) * cell;                 // top of this cell
   float tn;
+  float parity;
+  float glowD = 2.0;                                  // past the reach
   if (useRay > 0.5) {
-    // the cell's own ray, and its true elevation: the sky by ANGLE, so
-    // no motion of the head -- pitch, yaw or roll -- moves a band
-    vec2 cc1 = (floor(sc / cell) + 0.5) * cell;
-    vec3 dir = rayBase + rayDu * (cc1.x * invSize.x)
-                       + rayDv * (cc1.y * invSize.y);
+    // A SKYBOX, computed instead of stored: the pixel's own ray lands in
+    // a cell of the sky's angular grid (azimuth columns and elevation
+    // rows, cellAng square), and EVERYTHING -- the band, the checker's
+    // parity, the glow -- is answered from that cell's centre. The
+    // screen grid quantises nothing here; that is the point. A screen
+    // quantisation of similar pitch laid under the sky grid beats
+    // against it (moire), and every subpixel head motion re-snaps the
+    // beat -- the fizz. Sampled per pixel, the picture is exactly a
+    // nearest-filtered texture on a dome: its cells slide smoothly with
+    // the world and no motion of the head recomputes the pattern. The
+    // one seam, where azimuth wraps behind the camera, is a single cell
+    // column of a dither pattern.
+    vec3 dir = rayBase + rayDu * (sc.x * invSize.x)
+                       + rayDv * (sc.y * invSize.y);
     float elev = atan(dir.y, length(dir.xz));
-    if (elev < 0.0) { discard; }                      // below the horizon
-    tn = 1.0 - clamp(elev / max(raySpan, 0.001), 0.0, 1.0);
+    float ei = floor(elev / cellAng);                 // elevation row
+    if (ei < 0.0) { discard; }                        // below the horizon
+    float ai = floor(atan(dir.x, dir.z) / cellAng);   // azimuth column
+    float elc = (ei + 0.5) * cellAng;                 // the row's centre
+    tn = 1.0 - clamp(elc / max(raySpan, 0.001), 0.0, 1.0);
+    parity = mod(ai + ei, 2.0);
+    if (glowAmt > 0.0) {
+      // the glow by the angle between the CELL's centre direction and
+      // the sun's own, so its rings are pinned to the same sky grid
+      float azc = (ai + 0.5) * cellAng;
+      vec3 cd = vec3(cos(elc) * sin(azc), sin(elc), cos(elc) * cos(azc));
+      glowD = acos(clamp(dot(cd, glowDir), -1.0, 1.0)) * glowInvA;
+    }
   } else {
+    vec2 cc0 = floor(sc / cell) * cell;               // top of this cell
     float row = cc0.x * axisX + cc0.y * axisY;        // along the axis
     if (row > edge) { discard; }                      // below the horizon
     tn = clamp((row - top) / max(edge - top, 1.0), 0.0, 1.0);
+    parity = mod(floor(sc.x / cell) + floor(sc.y / cell), 2.0);
+    if (glowAmt > 0.0) {
+      vec2 cc = (floor(sc / cell) + 0.5) * cell;
+      glowD = length(cc - glowPos) * glowInvR;
+    }
   }
   float pos = tn * count;
   float base = min(floor(pos), count - 1.0);
   vec3 c = bandAt(base);
-  float parity = mod(floor(sc.x / cell) + floor(sc.y / cell), 2.0);
   if (base < count - 1.0 && (pos - base) > start) {
     if (parity < 0.5) { c = bandAt(base + 1.0); }
   }
   // The sunset's warmth, radiating from the disc: posterised to a few rungs
   // and checker-dithered between them -- the same 8-bit move as the bands,
   // so the glow reads as painted light rather than as a smooth airbrush --
-  // and measured cell-to-cell, so its rings ride the diorama's own grid.
+  // measured cell-to-cell on the flat frame and angle-to-angle on the
+  // skybox, so its rings ride whichever grid the checker itself is on.
   if (glowAmt > 0.0) {
-    vec2 cc = (floor(sc / cell) + 0.5) * cell;
-    float d = length(cc - glowPos) * glowInvR;
-    float g = glowAmt * pow(clamp(1.0 - d, 0.0, 1.0), 2.0);
+    float g = glowAmt * pow(clamp(1.0 - glowD, 0.0, 1.0), 2.0);
     float lvl = floor(g * 4.0);
     if (g * 4.0 - lvl > 0.5 && parity < 0.5) { lvl += 1.0; }
     c = mix(c, glowColor, min(lvl / 3.0, 1.0) * 0.65);
@@ -600,6 +632,26 @@ function Sky.paint(w, h, sky, horizonY, cell, body, top, axis, ray)
   if g.setBlendMode then g.setBlendMode("alpha") end
 
   local glowAmt = body and not body.moon and (body.glowAmt or 0) or 0
+  -- the skybox glow needs the sun's world DIRECTION (skyBody carries it);
+  -- a body without one has nothing to measure angles against, so no glow
+  if ray and glowAmt > 0 and not (body and body.dx) then glowAmt = 0 end
+  -- the world direction a canvas fraction (u, v) looks along, normalised
+  -- -- for sizing the angular checker and the glow's angular reach below
+  local function rayDirAt(u, v)
+    local b, du, dv = ray.base, ray.du, ray.dv
+    local x = b[1] + du[1] * u + dv[1] * v
+    local y = b[2] + du[2] * u + dv[2] * v
+    local z = b[3] + du[3] * u + dv[3] * v
+    local l = math.sqrt(x * x + y * y + z * z)
+    if l < 1e-9 then return 0, 0, -1 end
+    return x / l, y / l, z / l
+  end
+  local function rayAngle(u0, v0, u1, v1)
+    local ax, ay, az = rayDirAt(u0, v0)
+    local bx, by, bz = rayDirAt(u1, v1)
+    local d = ax * bx + ay * by + az * bz
+    return math.acos(math.max(-1, math.min(1, d)))
+  end
   local sh = getShader()
   local ramp = sh and rampFor(bands)
   if not ramp then sh = nil end       -- no ramp, no gradient: paint it flat
@@ -620,6 +672,11 @@ function Sky.paint(w, h, sky, horizonY, cell, body, top, axis, ray)
         sh:send("rayDv", ray.dv)
         sh:send("raySpan", Sky.ELEV_SPAN)
         sh:send("invSize", { 1 / w, 1 / h })
+        -- the angular checker's cell: the angle one dither cell spans at
+        -- the frame's centre, so the sky-glued grid comes out the same
+        -- size on screen as the diorama's own pixel grid
+        sh:send("cellAng",
+                math.max(1e-4, rayAngle(0.5, 0, 0.5, 1) * cell / h))
       end
       sh:send("cell", cell)
       sh:send("start", Sky.DITHER and Sky.DITHER_START or 2)
@@ -627,8 +684,19 @@ function Sky.paint(w, h, sky, horizonY, cell, body, top, axis, ray)
       sh:send("glowAmt", glowAmt)
       if glowAmt > 0 then
         local gc = body.glowColor or { 248, 224, 168 }
-        sh:send("glowPos", { body.x, body.y })
-        sh:send("glowInvR", 1 / math.max(1, w * Sky.GLOW_REACH))
+        if ray then
+          -- the glow in ANGLES: its direction is the sun's own, and its
+          -- reach is the same fraction of the view the pixel reach was
+          -- of the frame, so the two paths agree on how wide it looks
+          local dx, dy, dz = body.dx, body.dy, body.dz
+          local l = math.sqrt(dx * dx + dy * dy + dz * dz)
+          sh:send("glowDir", { dx / l, dy / l, dz / l })
+          sh:send("glowInvA", 1 / math.max(
+            1e-3, rayAngle(0, 0.5, 1, 0.5) * Sky.GLOW_REACH))
+        else
+          sh:send("glowPos", { body.x, body.y })
+          sh:send("glowInvR", 1 / math.max(1, w * Sky.GLOW_REACH))
+        end
         sh:send("glowColor", { gc[1] / 255, gc[2] / 255, gc[3] / 255 })
       end
     end)

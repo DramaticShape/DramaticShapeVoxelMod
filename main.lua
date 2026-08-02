@@ -524,6 +524,11 @@ local function cycleVoxel(game)
   return true
 end
 
+-- The VR stick click makes this same step (VR.stepView): the function is
+-- a local of this file, so the handoff is explicit rather than a
+-- reimplementation drifting out of date in lib/VR.lua.
+VR.cycleVoxel = cycleVoxel
+
 do
   local Game = require("src.core.Game")
   local Pipelines = require("src.render.Pipelines")
@@ -910,6 +915,31 @@ do
       return inner(self, ...)
     end
     OverworldState.dramaticShapeSelectHook = true
+  end
+end
+
+-- ------- edge-anchored menus stay in the GB frame while a headset is live
+--
+-- The engine's zoom-aware anchoring (Renderer:setUIAnchor) docks the START
+-- menu to the WINDOW's top-right edge. Both VR screens -- the floating
+-- panel and the Pokedex -- crop the window to the GB frame, so a menu at
+-- the window's edge is cropped away with the border it docked to. The
+-- engine's own answer to "a state composes its screen, keep every element
+-- inside it" is uiAnchorHold, computed per frame from this predicate; a
+-- live headset is exactly that situation for the WHOLE window, so the
+-- predicate answers yes for as long as one is. Held menus blit where they
+-- were drawn in the 160x144 canvas -- the START menu's 9,0 x 11 slot is
+-- already flush with the frame's right edge, which is the right edge of
+-- what the headset sees. Off-headset frames fall through untouched.
+do
+  local Game = require("src.core.Game")
+  if not Game.dramaticShapeAnchorHold then
+    local inner = Game.uiAnchorsHeldInStack
+    function Game.uiAnchorsHeldInStack(stack)
+      if VR.active() then return true end
+      return inner(stack)
+    end
+    Game.dramaticShapeAnchorHold = true
   end
 end
 

@@ -39,7 +39,7 @@ alongside.
 | left stick | move — grid-walks the diorama, free-walks 1ST |
 | A / B (X / Y on the left hand) | A / B |
 | either trigger | START |
-| left stick click | toggle first / third person |
+| left stick click | step the VOXEL angle ladder (same as the "3" key) |
 | right stick up / down | *diorama only* — zoom the model |
 | right stick left / right | *1ST only* — snap-turn 45° |
 | grip squeeze + raise / lower that hand | *diorama only* — drag the table's height |
