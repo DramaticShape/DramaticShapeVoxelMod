@@ -210,6 +210,91 @@ end
 
 BattleScene.monCards = monCards
 
+-- The MOVE-ANIMATION layer's place in the world: a BILLBOARD facing the
+-- eye, for the GB-frame effects texture OverworldBattle.animTexture
+-- renders (the engine's own drawAnimLayer, caught on a canvas).
+--
+-- Effects are 2D drawings like the pics, and the pics' answer holds for
+-- them too: a drawing must FACE the eye that is looking (the mon cards
+-- yaw toward it per eye -- see monMatrix). So the frame stands on the
+-- arena's midpoint, yawed at the eye like the cards are, and the classic
+-- layout's two slot marks are pinned where each CELL lands on that plane
+-- along this very eye's own ray -- so from the eye that is looking, a
+-- burst authored at a slot sits exactly over the mon standing in for it,
+-- and a projectile crossing the frame crosses the arena. The vertical
+-- scale is the mon cards' own (FULL_W / FULL_PIC), so an effect is sized
+-- like the pics it plays over.
+--
+-- An eye standing (nearly) ON the arena's axis sees the two cells in
+-- line and the pinning degenerates; the frame then falls back to the
+-- fixed plane through both cells, which that eye views edge-on anyway.
+--
+-- Reads Voxel3D.eye at CALL time, like the cards -- call it per eye.
+-- Returns the model matrix for BattleBillboard's unit card (x -0.5..0.5,
+-- y 0..1 up, v flipped), or nil where the anchors are degenerate.
+function BattleScene.fxCard(arena, groundY, anchors)
+  local p, e = anchors.player, anchors.enemy
+  local dgb = e[1] - p[1]
+  if math.abs(dgb) < 1 then return nil end
+  local GW, GH = BattleScene.GB_W, BattleScene.GB_H
+  local Px, Py, Pz = arena.player[1], groundY, arena.player[2]
+  local Ex, Ey, Ez = arena.enemy[1], groundY, arena.enemy[2]
+  local s = BattleBillboard.FULL_W / BattleBillboard.FULL_PIC
+  local Mx, My, Mz = (Px + Ex) / 2, groundY, (Pz + Ez) / 2
+
+  local eye = Voxel3D.eye
+  local yaw = BattleBillboard.yawToward(Mx, Mz, eye)
+  local nx, nz = math.sin(yaw), math.cos(yaw)     -- out of the frame, at the eye
+  local rx, rz = math.cos(yaw), -math.sin(yaw)    -- the frame's own right
+
+  -- where a world point sits ON the billboard, as (right, up) coordinates
+  -- about the midpoint: slid along the eye's ray onto the plane, so the
+  -- mark and the mon line up from exactly the seat that is looking
+  local function inPlane(qx_, qy_, qz_)
+    if eye then
+      local dqx, dqy, dqz = qx_ - eye[1], qy_ - eye[2], qz_ - eye[3]
+      local denom = dqx * nx + dqz * nz
+      if math.abs(denom) > 1e-6 then
+        local t = ((Mx - eye[1]) * nx + (Mz - eye[3]) * nz) / denom
+        qx_ = eye[1] + dqx * t
+        qy_ = eye[2] + dqy * t
+        qz_ = eye[3] + dqz * t
+      end
+    end
+    return (qx_ - Mx) * rx + (qz_ - Mz) * rz, qy_ - My
+  end
+  local pax, pay = inPlane(Px, Py, Pz)
+  local eax, eay = inPlane(Ex, Ey, Ez)
+
+  if math.abs(eax - pax) < 4 then
+    -- edge-on: the fixed plane through both cells, world-axis mapping
+    local ux = (Ex - Px) / dgb
+    local uy = (Ey - Py - s * (p[2] - e[2])) / dgb
+    local uz = (Ez - Pz) / dgb
+    local cx = Px + ux * (0.5 * GW - p[1])
+    local cy = Py + uy * (0.5 * GW - p[1]) + s * (p[2] - GH)
+    local cz = Pz + uz * (0.5 * GW - p[1])
+    local nl = math.sqrt(ux * ux + uz * uz)
+    local fx, fz = 0, 1
+    if nl > 1e-9 then fx, fz = uz / nl, -ux / nl end
+    return { ux * GW, 0, fx, cx,
+             uy * GW, s * GH, 0, cy,
+             uz * GW, 0, fz, cz,
+             0, 0, 0, 1 }
+  end
+
+  -- in-plane travel per GB pixel of frame x, solved so both marks land:
+  -- inPlane(gb) = (pax, pay) + U * (gbx - p.x) + (0, s) * (p.y - gby)
+  local ux = (eax - pax) / dgb
+  local uy = (eay - pay - s * (p[2] - e[2])) / dgb
+  local cxp = pax + ux * (0.5 * GW - p[1])
+  local cyp = pay + uy * (0.5 * GW - p[1]) + s * (p[2] - GH)
+  return { rx * ux * GW, 0, nx, Mx + rx * cxp,
+           uy * GW, s * GH, 0, My + cyp,
+           rz * ux * GW, 0, nz, Mz + rz * cxp,
+           0, 0, 0, 1 }
+end
+
 -- The sun has to see the mons too, or they stand on the ground without
 -- putting anything on it. They are the one thing in this scene that MOVES,
 -- so `token` -- a counter the caller bumps whenever a pic could have changed

@@ -124,6 +124,14 @@ BattleCam.PAN_PERIOD = 26         -- seconds for one there-and-back
 BattleCam.PAN_DOLLY = 0.02        -- how far the eye breathes, as a fraction
 BattleCam.DOLLY_PERIOD = 37
 
+-- Hold the rig perfectly still (VR sets this while a session runs). The
+-- drift exists to give a FLAT screen the depth cue the picture cannot
+-- have; a headset gets real parallax from the player's own head, and a
+-- picture that sways on its own inside VR reads as the world lurching --
+-- on the floating panel especially, where the battle screen is watched
+-- from a fixed seat.
+BattleCam.still = false
+
 BattleCam.t = 0
 
 function BattleCam.reset()
@@ -160,12 +168,14 @@ function BattleCam.rig(arena, groundY)
   local R = BattleCam.rigFor(arena)
   local mx, mz = arena.mid[1], arena.mid[2]
 
-  local yaw = BattleCam.PAN_YAW * phase(BattleCam.t, BattleCam.PAN_PERIOD)
+  local yaw = BattleCam.still and 0
+              or BattleCam.PAN_YAW * phase(BattleCam.t, BattleCam.PAN_PERIOD)
   local c, s = math.cos(yaw), math.sin(yaw)
   -- the breath scales the whole offset, height included, so the eye moves
   -- along its own line to the arena and the pitch of the shot never changes
-  local k = 1 + BattleCam.PAN_DOLLY
-              * phase(BattleCam.t, BattleCam.DOLLY_PERIOD)
+  local k = BattleCam.still and 1
+            or 1 + BattleCam.PAN_DOLLY
+                   * phase(BattleCam.t, BattleCam.DOLLY_PERIOD)
   local dx = (R.side * c - R.back * s) * k
   local dz = (R.side * s + R.back * c) * k
 

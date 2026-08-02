@@ -150,6 +150,9 @@ T.check(fullIds["DRAMATIC_SHAPE:battleBack"], "and BACK SPRITES with it")
 -- and AA, for the opposite reason: it is not a knob on the look at all, it is
 -- what the look COSTS, and only the player knows what their machine can carry
 T.check(fullIds["DRAMATIC_SHAPE:aa"], "and AA, which FULL neither sets nor owns")
+-- VR survives FULL on AA's reasoning: whether a headset is on the desk is
+-- not the diorama's to decide
+T.check(fullIds["DRAMATIC_SHAPE:vr"], "and VR, likewise the hardware's question")
 
 -- DAYTIME is not only hidden under FULL, it is HELD at SYNC: the row cannot
 -- be reached while FULL owns it, so a value changed underneath (the mod
@@ -384,7 +387,7 @@ end
 Pipelines.setLevel("voxel", 2)
 local hookedRows = Runtime.call("ui.options.rows", function(_, r) return r end,
                                { data = Data }, { { id = "text_speed" } })
-T.eq(#hookedRows, 8, "the options hook added a row per setting")
+T.eq(#hookedRows, 9, "the options hook added a row per setting")
 local grid, curve, water = hookedRows[2], hookedRows[3], hookedRows[4]
 local battles, backRow, daytime = hookedRows[5], hookedRows[6], hookedRows[7]
 -- the AA row is hookedRows[8]; it is read in its own block below, because
@@ -1122,6 +1125,34 @@ Game.keypressed(keyGame, "8")
 T.eq(Battles.setting:get(), false, "8 toggles overworld battles off")
 Game.keypressed(keyGame, "8")
 T.eq(Battles.setting:get(), true, "and back on")
+
+-- ------- SELECT makes the same step the 3 key does
+--
+-- The pad's own button, for the machines with no number row. The wrap
+-- sits on OverworldState:handleInput -- free-roam by construction -- and
+-- reads the live Game's input, so the fake free-roam shape the key tests
+-- built is lent to the Game module for the length of the check.
+-- (An anonymous function scope: the main chunk sits AT LuaJIT's
+-- 200-active-locals ceiling, so even a named wrapper is one too many.)
+;(function()
+  local OverworldState = require("src.world.OverworldController")
+  T.eq(OverworldState.dramaticShapeSelectHook, true,
+    "the SELECT wrap is installed on the overworld input seam")
+  local hadInput, hadStack = Game.input, Game.stack
+  local hadOw, hadSave, hadWrite = Game.overworld, Game.save, Game.writeOptions
+  Game.input = { wasPressed = function(_, b) return b == "select" end }
+  Game.stack, Game.overworld = keyGame.stack, keyGame.overworld
+  Game.save, Game.writeOptions = keyGame.save, keyGame.writeOptions
+  Pipelines.setLevel("voxel", 0)
+  OverworldState.handleInput({})
+  T.eq(Pipelines.levelLabel("voxel"), "15",
+    "SELECT steps the VOXEL ladder exactly as 3 does")
+  OverworldState.handleInput({})
+  T.eq(Pipelines.levelLabel("voxel"), "35", "and keeps walking it")
+  Game.input, Game.stack = hadInput, hadStack
+  Game.overworld, Game.save, Game.writeOptions = hadOw, hadSave, hadWrite
+  Pipelines.setLevel("voxel", 0)
+end)()
 
 -- 3 also clears the two engine modes it displaced. Without this a player
 -- who left TILT or GBC FX on before enabling the mod has no key left to
@@ -3642,6 +3673,483 @@ T.eq(blocked(state, p, 6, 5), "entity",
 FirstPerson.blend = 0
 VoxelState.reset()
 end
+
+-- ------- the VR rig's arithmetic
+--
+-- VRRig is the deliberately pure half of the VR stack: headset poses in,
+-- placed cameras out, with no FFI anywhere -- so the suite can hold a
+-- synthetic head still and check the world lands where the design says.
+-- (The FFI half -- VRXR, VRGL -- is exercised by tests/vr_probe.lua
+-- against a real runtime, which a headless suite cannot be.)
+
+-- an immediately-run function rather than a bare do-block: the main chunk
+-- is brushing LuaJIT's 200-active-locals ceiling, and a function scope
+-- keeps this section's locals off the chunk's own count
+local function vrRigSection()
+local VRRig = run.loader.exports.DRAMATIC_SHAPE.lib.require("VRRig")
+local Mat4 = run.loader.exports.DRAMATIC_SHAPE.lib.require("Mat4")
+
+local function near(a, b, eps) return math.abs(a - b) < (eps or 1e-5) end
+
+-- a Mat4 applied to a point, for reading results back out
+local function apply(m, x, y, z)
+  return m[1] * x + m[2] * y + m[3] * z + m[4],
+         m[5] * x + m[6] * y + m[7] * z + m[8],
+         m[9] * x + m[10] * y + m[11] * z + m[12]
+end
+
+-- identity quaternion, head at the LOCAL origin: the eye lands ON the
+-- pivot offset by the anchor, and the view carries a world point at the
+-- pivot to `anchor` metres in eye space
+local pose = { pos = { 0, 0, 0 }, quat = { 0, 0, 0, 1 } }
+local fov = { angleLeft = -0.7, angleRight = 0.7,
+              angleUp = 0.6, angleDown = -0.6 }
+local pivot = { 1000, 0, 2000 }
+
+local S = 128    -- an arbitrary table scale; eyeCamera takes any
+local cam = VRRig.eyeCamera(pose, fov, pivot, VRRig.TABLE, S)
+T.check(near(cam.eye[1], 1000 - VRRig.TABLE[1] * S)
+        and near(cam.eye[2], -VRRig.TABLE[2] * S)
+        and near(cam.eye[3], 2000 - VRRig.TABLE[3] * S),
+  "the diorama eye stands the table's offset from the pivot, scaled")
+T.eq(cam.curve, 0, "a VR camera declines the world curve outright")
+T.check(near(cam.fov, 1.2), "fov is the vertical angular span")
+
+-- the view ends in METRES: the pivot itself lands at `anchor` in eye
+-- space, however big the scale is
+local vx, vy, vz = apply(cam.view, pivot[1], pivot[2], pivot[3])
+T.check(near(vx, VRRig.TABLE[1]) and near(vy, VRRig.TABLE[2])
+        and near(vz, VRRig.TABLE[3]),
+  "the view un-scales the world: the pivot sits at the table offset, "
+  .. "in metres")
+
+-- a point one metre of world east of the pivot lands one metre east in
+-- eye space -- the scale cancels end to end
+local ex, ey, ez = apply(cam.view, pivot[1] + S, pivot[2], pivot[3])
+T.check(near(ex - vx, 1) and near(ey, vy) and near(ez, vz),
+  "one scale's worth of world east is one metre east in eye space")
+
+-- ------- the diorama presents at the rung's own angle and framing
+--
+-- The anchor sits VIEW_DIST along the rung's viewing angle: at 35 degrees
+-- mostly below the head, at 75 mostly ahead of it -- so the resting head
+-- looks at the model along exactly the line the flat camera uses.
+local a35 = VRRig.dioramaAnchor(math.rad(35), 0)
+T.check(near(a35[2], -VRRig.VIEW_DIST * math.cos(math.rad(35)))
+        and near(a35[3], -VRRig.VIEW_DIST * math.sin(math.rad(35))),
+  "the 35-degree anchor hangs the table down-and-ahead at the rung's angle")
+local a75 = VRRig.dioramaAnchor(math.rad(75), 0)
+T.check(a75[3] < a35[3] and a75[2] > a35[2],
+  "75 degrees brings the table up toward eye level and further out")
+T.check(near(VRRig.dioramaAnchor(math.rad(35), 0.25)[2], a35[2] + 0.25),
+  "the grab-drag height rides the anchor straight up")
+
+-- and the scale reproduces the flat screen's framing: vh world pixels
+-- subtend the flat lens's field at VIEW_DIST
+local sc = VRRig.dioramaScale(432, 1.0)
+T.check(near(sc, 432 / VRRig.VIEW_DIST),
+  "the diorama scale is the flat framing carried to arm's length")
+
+-- first person: anchor at the origin pins the head to the pivot exactly
+local fpCam = VRRig.eyeCamera(pose, fov, { 108, 13, 208 }, { 0, 0, 0 },
+                              VRRig.FP_SCALE)
+T.check(near(fpCam.eye[1], 108) and near(fpCam.eye[2], 13)
+        and near(fpCam.eye[3], 208),
+  "first person pins the start-of-session head to the player's head")
+
+-- head motion moves the eye by metres-times-scale
+local moved = VRRig.eyeCamera({ pos = { 0.1, 0.2, -0.3 },
+                                quat = { 0, 0, 0, 1 } },
+                              fov, { 108, 13, 208 }, { 0, 0, 0 },
+                              VRRig.FP_SCALE)
+T.check(near(moved.eye[1], 109) and near(moved.eye[2], 15)
+        and near(moved.eye[3], 205),
+  "a headset step moves the eye by metres times the scale")
+
+-- with no rotation, the eye looks along LOCAL -Z, which is world NORTH
+T.check(fpCam.focus[3] < fpCam.eye[3] - 1,
+  "an identity orientation looks north, the LOCAL -Z convention")
+
+-- headYawPitch round-trips this mod's conventions: identity looks north
+-- (yaw pi), and a quarter turn about +Y (counterclockwise from above)
+-- swings the forward from north to WEST (yaw -pi/2)
+local yaw, pitch = VRRig.headYawPitch({ 0, 0, 0, 1 })
+T.check(near(math.abs(yaw), math.pi) and near(pitch, 0),
+  "an identity head faces north, level")
+local s = math.sin(math.pi / 4)
+yaw = VRRig.headYawPitch({ 0, s, 0, math.cos(math.pi / 4) })
+T.check(near(yaw, -math.pi / 2),
+  "a quarter turn about +Y faces west -- the compass agrees with the "
+  .. "right-hand rule")
+
+-- the asymmetric projection: a point ON the left frustum plane lands at
+-- clip x = -w, one on the up plane at clip y = +w
+local proj = Mat4.fovProjection(-0.5, 0.3, 0.4, -0.2, 0.1, 100)
+local px_, py_, pz_ = nil, nil, nil
+local function clip(m, x, y, z)
+  local cx = m[1] * x + m[2] * y + m[3] * z + m[4]
+  local cy = m[5] * x + m[6] * y + m[7] * z + m[8]
+  local cw = m[13] * x + m[14] * y + m[15] * z + m[16]
+  return cx / cw, cy / cw
+end
+local lx = math.tan(-0.5) * 2      -- on the left plane, 2 units out
+local cxL = clip(proj, lx, 0, -2)
+T.check(near(cxL, -1, 1e-4), "the left fov angle lands on clip x = -1")
+local uy = math.tan(0.4) * 2
+local _, cyU = clip(proj, 0, uy, -2)
+T.check(near(cyU, 1, 1e-4), "the up fov angle lands on clip y = +1")
+
+-- Mat4.fromQuat: a quarter turn about Y takes +X to -Z
+local R = Mat4.fromQuat(0, s, 0, math.cos(math.pi / 4))
+local rx, ry, rz = apply(R, 1, 0, 0)
+T.check(near(rx, 0) and near(ry, 0) and near(rz, -1),
+  "fromQuat: a quarter turn about +Y carries east into north")
+
+-- ------- the battle mount: the over-the-shoulder seat, faced right
+--
+-- The seat sits BATTLE_DIST along the flat battle camera's own line from
+-- its aim point, and the yaw is whatever turns XR forward (north) onto
+-- that line's look direction.
+local seat, byaw = VRRig.battleMount({ 100, 35, 332 }, { 100, 2, 200 })
+local sdx = seat[1] - 100
+local sdy = seat[2] - 2
+local sdz = seat[3] - 200
+T.check(near(math.sqrt(sdx * sdx + sdy * sdy + sdz * sdz),
+             VRRig.BATTLE_DIST, 1e-3),
+  "the battle seat sits BATTLE_DIST from the aim point")
+T.check(near(byaw, 0),
+  "a camera due south of its focus looks north -- XR forward, yaw 0")
+local eyaw = select(2, VRRig.battleMount({ 150, 10, 200 }, { 100, 10, 200 }))
+T.check(near(eyaw, math.pi / 2),
+  "a camera east of its focus turns the mapping a quarter toward west")
+
+-- an eye seated with that yaw really faces the arena: an identity head at
+-- the seat comes out looking WEST, and the view agrees to the metre
+local seated = VRRig.eyeCamera(pose, fov, { 150, 10, 200 }, { 0, 0, 0 },
+                               VRRig.FP_SCALE, math.pi / 2)
+T.check(near(seated.eye[1], 150) and near(seated.eye[3], 200),
+  "the yawed mapping still pins the resting head to the pivot")
+T.check(seated.focus[1] < seated.eye[1] - 1,
+  "and turns its gaze west, toward the focus it was seated against")
+local wx2, wy2, wz2 = apply(seated.view, 150 - VRRig.FP_SCALE, 10, 200)
+T.check(near(wx2, 0) and near(wy2, 0) and near(wz2, -1),
+  "the yawed view carries one metre west of the pivot to one metre ahead")
+
+-- the sky's RAY FAN round-trips the eye's own projection: the direction
+-- the fan hands a canvas point looks along projects back to that very
+-- point, through a rotated head AND a yawed mapping -- one sign wrong
+-- anywhere here and the skybox paints sideways or upside down
+local rayCam = VRRig.eyeCamera({ pos = { 0.2, 1.1, -0.4 },
+                                 quat = { 0, s, 0, math.cos(math.pi / 4) } },
+                               fov, { 50, 0, 70 }, { 0, 0, 0 }, 10,
+                               math.pi / 3)
+local rm = Mat4.mul(Mat4.mul(Mat4.scale(1, -1, 1), rayCam.proj), rayCam.view)
+local function rayFrac(u, v)
+  local sr = rayCam.skyRay
+  local d1 = sr.base[1] + u * sr.du[1] + v * sr.dv[1]
+  local d2 = sr.base[2] + u * sr.du[2] + v * sr.dv[2]
+  local d3 = sr.base[3] + u * sr.du[3] + v * sr.dv[3]
+  local x = rm[1] * d1 + rm[2] * d2 + rm[3] * d3
+  local y = rm[5] * d1 + rm[6] * d2 + rm[7] * d3
+  local ww = rm[13] * d1 + rm[14] * d2 + rm[15] * d3
+  return x / ww * 0.5 + 0.5, y / ww * 0.5 + 0.5
+end
+local fu, fv = rayFrac(0.3, 0.8)
+T.check(near(fu, 0.3, 1e-4) and near(fv, 0.8, 1e-4),
+  "the sky's ray fan round-trips the eye's own projection")
+local fu2, fv2 = rayFrac(0.9, 0.1)
+T.check(near(fu2, 0.9, 1e-4) and near(fv2, 0.1, 1e-4),
+  "at every corner of the frame alike")
+
+-- ------- the hand prop: the pokedex rides the same mapping as the eyes
+--
+-- propMatrix carries a hand pose through worldFromXr: an identity hand at
+-- the LOCAL origin lands ON the pivot, offsets scale by px-per-metre, and
+-- the battle mount's yaw turns the prop with the whole mapping.
+local handPose = { pos = { 0, 0, 0 }, quat = { 0, 0, 0, 1 } }
+local pm = VRRig.propMatrix(handPose, { 500, 20, 700 }, { 0, 0, 0 }, 10)
+local hx, hy, hz = apply(pm, 0, 0, 0)
+T.check(near(hx, 500) and near(hy, 20) and near(hz, 700),
+  "an identity hand at the origin puts the prop on the pivot")
+local hx2, hy2, hz2 = apply(pm, 0.1, 0.2, 0)
+T.check(near(hx2, 501) and near(hy2, 22) and near(hz2, 700),
+  "prop-local metres scale to world pixels through the mapping")
+local pmYaw = VRRig.propMatrix(handPose, { 500, 20, 700 }, { 0, 0, 0 },
+                               10, math.pi / 2)
+local yx, yy, yz = apply(pmYaw, 0, 0, -1)
+T.check(near(yx, 490) and near(yy, 20) and near(yz, 700),
+  "the battle mount's yaw turns the prop with the mapping: local "
+  .. "forward comes out west")
+
+-- and the pokedex module holds its shape headless: no frame until VR
+-- places one, placement builds a model matrix, clear() takes it away
+local Dex = run.loader.exports.DRAMATIC_SHAPE.lib.require("Pokedex")
+T.eq(Dex.frame, nil, "no session, no pokedex frame")
+Dex.place(handPose, { 500, 20, 700 }, { 0, 0, 0 }, 10)
+T.check(Dex.frame ~= nil and type(Dex.frame.model) == "table"
+        and #Dex.frame.model == 16,
+  "placing the pokedex on a hand pose builds its world model matrix")
+T.check(Dex.frame.tex == nil,
+  "and the screen stays dark until something is put on it")
+T.check(pcall(Dex.draw),
+  "drawing headless is a clean no-op -- no meshes, no crash")
+Dex.clear()
+T.eq(Dex.frame, nil, "clear() takes the device away")
+T.check(type(Dex.VOX) == "number" and Dex.VOX > 0,
+  "the voxel size is a named, tunable number")
+T.check(near(Dex.TILT, -math.pi / 2),
+  "the device lies a full quarter turn forward, flush with the controller")
+
+-- the sprite lean override and the anchored sky's knobs exist, unset and
+-- set respectively, and an unstaged world offers no battle mount
+local VS_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("VoxelScene")
+T.eq(VS_.spriteLean, nil,
+  "the sprite lean override ships unset -- the flat screen leans with the rung")
+local Sky_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("Sky")
+T.check(type(Sky_.ELEV_SPAN) == "number" and Sky_.ELEV_SPAN > 0,
+  "the anchored sky hangs its gradient over a fixed elevation span")
+local OB_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("OverworldBattle")
+T.eq(OB_.stage(), nil, "no staged fight, no battle mount")
+T.eq(OB_.battle(), nil, "and no battle state for the UI panel to cut up")
+
+-- ------- the effects plane: solved like the camera was, anchors on cells
+--
+-- fxCard's whole contract is that the classic layout's two slot marks land
+-- on the two arena cells, so an effect authored at a slot bursts on the
+-- mon standing in for it.
+local BS_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("BattleScene")
+local fxArena = { player = { 96, 240 }, enemy = { 96, 192 } }
+-- eyeless first (fxCard reads Voxel3D.eye at call time, and earlier
+-- sections leave one behind): straight down the arena's axis the frame
+-- is the fixed plane through both cells, marks exactly on them
+local V3D_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("Voxel3D")
+local hadEye = V3D_.eye
+V3D_.eye = nil
+local fxm = BS_.fxCard(fxArena, 10, OB_.ANCHOR)
+T.check(type(fxm) == "table" and #fxm == 16, "the effects plane has a model")
+local pa, ea = OB_.ANCHOR.player, OB_.ANCHOR.enemy
+local fpx, fpy, fpz = apply(fxm, pa[1] / 160 - 0.5, 1 - pa[2] / 144, 0)
+T.check(near(fpx, 96, 1e-3) and near(fpy, 10, 1e-3) and near(fpz, 240, 1e-3),
+  "the player slot's mark lands on the player's cell, at the floor")
+local fex, fey, fez = apply(fxm, ea[1] / 160 - 0.5, 1 - ea[2] / 144, 0)
+T.check(near(fex, 96, 1e-3) and near(fey, 10, 1e-3) and near(fez, 192, 1e-3),
+  "and the enemy slot's mark on the enemy's cell")
+
+-- and BILLBOARDED at an eye: seated east of the arena the frame turns
+-- square to it, and the marks still land on the cells -- this eye's own
+-- rays are what pinned them
+V3D_.eye = { 200, 20, 216 }
+local fxb = BS_.fxCard(fxArena, 10, OB_.ANCHOR)
+T.check(near(fxb[3], 1, 1e-3) and near(fxb[11], 0, 1e-3),
+  "the effects frame faces the eye in the east")
+local bpx, bpy, bpz = apply(fxb, pa[1] / 160 - 0.5, 1 - pa[2] / 144, 0)
+T.check(near(bpx, 96, 1e-3) and near(bpy, 10, 1e-3) and near(bpz, 240, 1e-3),
+  "billboarded, the player mark still sits over the player's cell")
+local bex, bey, bez = apply(fxb, ea[1] / 160 - 0.5, 1 - ea[2] / 144, 0)
+T.check(near(bex, 96, 1e-3) and near(bey, 10, 1e-3) and near(bez, 192, 1e-3),
+  "and the enemy mark over the enemy's")
+V3D_.eye = hadEye
+
+-- the FLAT first-person rig's sky fan: a placed eye/focus camera through
+-- viewProjection carries a ray fan of its own, and it round-trips that
+-- projection exactly like the VR eyes' does -- the flat 1ST sky is a
+-- skybox by the same math
+local hadCam = V3D_.camera
+V3D_.camera = { eye = { 100, 13, 200 }, focus = { 130, 18, 160 },
+                fov = 1.1, up = { 0, 1, 0 } }
+local pvp = V3D_.viewProjection(0, 0, 320, 288)
+local psr = V3D_.skyRayLive
+T.check(psr ~= nil, "a placed free-pitch camera carries a ray fan")
+local function pFrac(u, v)
+  local d1 = psr.base[1] + u * psr.du[1] + v * psr.dv[1]
+  local d2 = psr.base[2] + u * psr.du[2] + v * psr.dv[2]
+  local d3 = psr.base[3] + u * psr.du[3] + v * psr.dv[3]
+  local x = pvp[1] * d1 + pvp[2] * d2 + pvp[3] * d3
+  local y = pvp[5] * d1 + pvp[6] * d2 + pvp[7] * d3
+  local ww = pvp[13] * d1 + pvp[14] * d2 + pvp[15] * d3
+  return x / ww * 0.5 + 0.5, y / ww * 0.5 + 0.5
+end
+local pu, pv = pFrac(0.25, 0.6)
+T.check(near(pu, 0.25, 1e-4) and near(pv, 0.6, 1e-4),
+  "and it round-trips the placed camera's own projection")
+V3D_.camera = hadCam
+V3D_.skyRayLive = nil
+
+-- ------- VR owns the battle rows while it is on
+local VRSet = run.loader.exports.DRAMATIC_SHAPE.lib.require("VR").setting
+VRSet:sync(true)
+OB_.setting:sync(false)
+OB_.backSetting:sync(true)
+T.eq(OB_.enabled(), true, "VR on forces staged battles whatever the row says")
+T.eq(OB_.backPinned(), false, "and holds back sprites off")
+VRSet:sync(false)
+T.eq(OB_.enabled(), false, "VR off hands the row back to its stored value")
+OB_.setting:sync(true)
+T.eq(OB_.backPinned(), true, "and back sprites return at theirs")
+OB_.backSetting:sync(false)
+
+-- and the VR row exists, shaped like every other mod setting
+local VRMod = run.loader.exports.DRAMATIC_SHAPE.lib.require("VR")
+T.eq(VRMod.setting.key, "vr", "the VR row persists under its own key")
+T.eq(VRMod.setting:get(), false, "and ships OFF")
+T.eq(VRMod.status(), "off", "with the status agreeing")
+T.check(not VRMod.active(), "no session without a runtime, and no crash")
+T.eq(type(VRMod.supported), "function",
+  "the platform gate exists -- off Windows the row is not offered at all")
+T.eq(VRMod.supported(), true,
+  "and a headless run (no love.system) counts as supported, harmlessly")
+
+-- the loader search covers every install shape: the mod-relative path
+-- first, the system name last, and (with a filesystem to ask) the real
+-- mount and the save directory in between
+local VRXR_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("VRXR")
+local cands = VRXR_._loaderCandidates()
+T.check(#cands >= 2, "the loader has candidates to try")
+T.check(cands[1]:find("assets/vr/openxr_loader%.dll") ~= nil,
+  "the first is the mod's own path")
+T.eq(cands[#cands], "openxr_loader",
+  "and the system search path is the last resort")
+T.eq(type(VRMod.leave), "function",
+  "VR.leave stays as the programmatic door out -- no controller button "
+  .. "is wired to it")
+end
+vrRigSection()
+
+-- ------- the skybox's checker and glow are the sky's own, not the screen's
+--
+-- The bands were already read by angle, but the DITHER between them kept
+-- screen-cell parity: a world-fixed band edge sliding over a screen-fixed
+-- checkerboard recomputes the pattern with every head motion -- the
+-- shimmer. Now the ray path lays the checker (and the twilight glow's
+-- rings) on azimuth/elevation cells, and these pin what it sends.
+;(function()
+  local Sky = run.loader.exports.DRAMATIC_SHAPE.lib.require("Sky")
+  local realGraphics, realImage = love.graphics, love.image
+  local sent = {}
+  local fakeShader = {
+    send = function(_, name, a, b, c, d) sent[name] = { a, b, c, d } end,
+  }
+  local function fakeImage(w, h)
+    return {
+      getWidth = function() return w end,
+      getHeight = function() return h end,
+      getDimensions = function() return w, h end,
+      setPixel = function() end,
+      setFilter = function() end,
+      setWrap = function() end,
+    }
+  end
+  love.image = { newImageData = function(w, h) return fakeImage(w, h) end }
+  love.graphics = {
+    getShader = function() return nil end,
+    setShader = function() end,
+    getDepthMode = function() return "lequal", true end,
+    setDepthMode = function() end,
+    setColor = function() end,
+    newShader = function() return fakeShader end,
+    newImage = function(data) return data end,
+    rectangle = function() end,
+  }
+  Sky.invalidate()   -- rebuild the shader and ramp through the fakes
+
+  local grad = { bands = { { 8, 8, 16 }, { 48, 64, 96 }, { 96, 128, 160 } } }
+  -- a level fan looking north: base + u*du + v*dv, spanning 2*atan(0.5)
+  -- both ways at depth 1 -- easy angles to pin the sends against
+  local fan = { base = { -0.5, 0.5, -1 }, du = { 1, 0, 0 },
+                dv = { 0, -1, 0 } }
+  local span = 2 * math.atan(0.5)
+  local body = { x = 160, y = 40, dx = 0, dy = 0.5, dz = -1,
+                 glowAmt = 0.5, glowColor = { 248, 224, 168 } }
+  T.eq(Sky.paint(320, 288, grad, nil, 7, body, nil, nil, fan), true,
+    "the skybox paints with a ray fan and a bodied glow")
+  T.check(sent.cellAng and sent.cellAng[1] > 0,
+    "the checker gets an ANGULAR cell: the dither grid is laid on "
+    .. "azimuth and elevation, so no head motion reslides it")
+  T.check(math.abs(sent.cellAng[1] - span * 7 / 288) < 1e-6,
+    "sized so the sky's grid matches the diorama's pixel grid on screen")
+  T.check(sent.glowDir ~= nil, "the glow gets the sun's world direction")
+  local gd = sent.glowDir[1]
+  local gl = math.sqrt(gd[1] ^ 2 + gd[2] ^ 2 + gd[3] ^ 2)
+  T.check(math.abs(gl - 1) < 1e-6 and math.abs(gd[2] - 0.4472) < 1e-3,
+    "normalised, the hour's own")
+  T.check(math.abs(sent.glowInvA[1] - 1 / (span * Sky.GLOW_REACH)) < 1e-6,
+    "and an angular reach cut from the view the way the pixel reach was")
+  T.eq(sent.glowPos, nil,
+    "the screen-space glow stays the flat frame's path alone")
+
+  sent = {}
+  fakeShader.send = function(_, name, a, b, c, d) sent[name] = { a, b, c, d } end
+  local bare = { x = 160, y = 40, glowAmt = 0.5,
+                 glowColor = { 248, 224, 168 } }
+  T.eq(Sky.paint(320, 288, grad, nil, 7, bare, nil, nil, fan), true,
+    "a body with no world direction still paints")
+  T.eq(sent.glowAmt[1], 0,
+    "but offers no glow -- there is no direction to measure angles against")
+  T.eq(sent.glowDir, nil, "and no direction is sent")
+
+  love.graphics, love.image = realGraphics, realImage
+  Sky.invalidate()
+
+  -- ------- a live headset holds every menu inside the GB frame
+  --
+  -- The engine's zoom-aware anchoring docks the START menu to the WINDOW's
+  -- edge; both VR screens crop the window to the GB frame, so a docked
+  -- menu is cropped away with the border it hugged. The wrap answers the
+  -- engine's own uiAnchorsHeldInStack predicate with yes while a headset
+  -- is live, which blits every menu where it was drawn -- the START
+  -- menu's slot is already flush with the frame's right edge.
+  local Game = require("src.core.Game")
+  local VRMod = run.loader.exports.DRAMATIC_SHAPE.lib.require("VR")
+  T.eq(Game.dramaticShapeAnchorHold, true,
+    "the anchor-hold wrap installed at load, once")
+  T.eq(Game.uiAnchorsHeldInStack({ states = {} }), false,
+    "with no headset the engine's own answer stands: an empty stack docks")
+  local innerActive = VRMod.active
+  VRMod.active = function() return true end
+  T.eq(Game.uiAnchorsHeldInStack({ states = {} }), true,
+    "a live headset holds anchors -- menus stay inside the GB frame, "
+    .. "which is all either VR screen shows")
+  VRMod.active = innerActive
+  T.eq(Game.uiAnchorsHeldInStack({ states = {} }), false,
+    "and hands the predicate back when the headset is gone")
+  T.eq(Game.uiAnchorsHeldInStack({ states = { { holdsUIAnchors = true } } }),
+    true, "a self-composing state still holds them on its own")
+
+  -- and the panel's route to the headset is the SCALED region blit: the
+  -- pixel-for-pixel copy ran the GB frame off a swapchain image smaller
+  -- than the window (fullscreen cut the menu), so the scaled seam must
+  -- exist for updateQuad to reach for first
+  local VRGL_ = run.loader.exports.DRAMATIC_SHAPE.lib.require("VRGL")
+  T.eq(type(VRGL_.copyFrontRegionToTexture), "function",
+    "the letterbox reaches the panel scaled, not pixel-for-pixel")
+
+  -- ------- the stick click IS the "3" key
+  --
+  -- Left stick click makes exactly the step the key (and SELECT) makes:
+  -- the very same function, handed across from main.lua, so the ladder
+  -- walk, the FULL step-over and the TILT/GBC FX clearing can never
+  -- drift. Through the same fixture the key tests lend.
+  T.eq(VRMod.cycleVoxel ~= nil, true,
+    "main.lua hands its cycleVoxel to the stick click")
+  local hadStack2, hadOw2 = Game.stack, Game.overworld
+  local hadSave2, hadWrite2 = Game.save, Game.writeOptions
+  Game.stack, Game.overworld = keyGame.stack, keyGame.overworld
+  Game.save, Game.writeOptions = keyGame.save, keyGame.writeOptions
+  Pipelines.setLevel("voxel", 0)
+  VRMod.stepView()
+  T.eq(Pipelines.levelLabel("voxel"), "15",
+    "the stick click steps the VOXEL ladder exactly as 3 does")
+  VRMod.stepView()
+  T.eq(Pipelines.levelLabel("voxel"), "35", "and keeps walking it")
+  keyGame.save.options.tilt = 2
+  require("src.render.Tilt").setLevel(2)
+  VRMod.stepView()
+  T.eq(keyGame.save.options.tilt, 0,
+    "each click clears TILT in the save, exactly as each keypress does")
+  Game.stack, Game.overworld = hadStack2, hadOw2
+  Game.save, Game.writeOptions = hadSave2, hadWrite2
+  Pipelines.setLevel("voxel", 0)
+end)()
 
 Pipelines.reset()
 run.release()

@@ -6,9 +6,11 @@
 -- here -- translation in the fourth column, m[4]/m[8]/m[12].
 --
 -- Only what the renderer actually needs: a perspective projection (the
--- camera), an orthographic one (the sun's shadow pass), a look-based view,
--- and the translate/rotateY/scale a model matrix is built from. No general
--- inverse, no quaternions.
+-- camera), an orthographic one (the sun's shadow pass), an asymmetric one
+-- (a headset's per-eye frustum), a look-based view, a quaternion rotation
+-- (a headset's pose), and the translate/rotateY/scale a model matrix is
+-- built from. No general inverse -- the VR view inverts its rigid pieces
+-- one at a time.
 
 local Mat4 = {}
 
@@ -60,6 +62,45 @@ function Mat4.rotateX(a)
            0, c, -s, 0,
            0, s, c, 0,
            0, 0, 0, 1 }
+end
+
+-- The rotation a unit quaternion describes, row-major. The VR rig is what
+-- needs it: an OpenXR eye pose arrives as position + orientation
+-- quaternion, and both the eye's transform and its inverse (the view) are
+-- built from this.
+function Mat4.fromQuat(x, y, z, w)
+  local xx, yy, zz = x * x, y * y, z * z
+  local xy, xz, yz = x * y, x * z, y * z
+  local wx, wy, wz = w * x, w * y, w * z
+  return { 1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy), 0,
+           2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx), 0,
+           2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy), 0,
+           0, 0, 0, 1 }
+end
+
+-- Transpose. For a pure rotation this IS the inverse, which is how the VR
+-- view matrix is assembled without a general 4x4 inverse.
+function Mat4.transpose(m)
+  return { m[1], m[5], m[9], m[13],
+           m[2], m[6], m[10], m[14],
+           m[3], m[7], m[11], m[15],
+           m[4], m[8], m[12], m[16] }
+end
+
+-- Right-handed perspective from an OpenXR-style asymmetric field of view:
+-- four signed HALF-ANGLES off the view axis (left and down negative), onto
+-- GL clip space (z in [-1, 1]). A headset's per-eye frustum is off-centre
+-- -- the nose side is narrower than the temple side -- so the symmetric
+-- perspective() above cannot express it.
+function Mat4.fovProjection(angleLeft, angleRight, angleUp, angleDown,
+                            near, far)
+  local l, r = math.tan(angleLeft), math.tan(angleRight)
+  local u, d = math.tan(angleUp), math.tan(angleDown)
+  local w, h, dz = r - l, u - d, near - far
+  return { 2 / w, 0, (r + l) / w, 0,
+           0, 2 / h, (u + d) / h, 0,
+           0, 0, (far + near) / dz, (2 * far * near) / dz,
+           0, 0, -1, 0 }
 end
 
 -- Right-handed perspective onto GL clip space (z in [-1, 1]).

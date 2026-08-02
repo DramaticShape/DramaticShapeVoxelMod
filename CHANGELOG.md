@@ -1,5 +1,223 @@
 # Changelog
 
+## 1.5.2
+
+### Added
+
+- **The Pokédex in hand is a quarter larger.** Its voxel pitch went from
+  1.1 cm to 1.375 cm (the body from about 10x15 cm to about 12x19 cm),
+  because the screen carries every menu in first person and was
+  squint-small at the old size. The attachment -- flush along the left
+  controller -- is unchanged.
+
+- **Left stick click steps the VOXEL ladder.** In VR the click now makes
+  exactly the step the "3" key (and the pad's SELECT) makes -- the same
+  function, handed across, so the ladder walk, the FULL step-over and
+  the TILT/GBC FX clearing can never drift from the key's. It used to
+  toggle first/third person against a remembered return rung.
+
+- **The floating panel shows the same picture at every window size.**
+  The GB-frame region used to be copied into the headset's panel
+  pixel-for-pixel, and the panel's swapchain image has a fixed size --
+  so a window scaled past it (fullscreen above all) ran the frame off
+  the copy's edge and cut the START menu out of the panel. The region
+  is now blitted OUT of the window and SCALED into the swapchain image
+  at the frame's own aspect: identical picture, identical near-square
+  ratio, whatever size or shape the window takes.
+
+- **Menus stay inside the GB frame while a headset is live.** The
+  engine's new zoom-aware anchoring docks the START menu to the
+  WINDOW's edge -- and both VR screens (the floating panel and the
+  Pokédex) crop the window to the near-square GB frame, so a docked
+  menu was cropped away with the border it hugged. While a headset is
+  live the mod answers the engine's own "hold the anchors" predicate
+  with yes, and every menu blits where it was drawn: the START menu's
+  classic slot, flush with the frame's right edge, which is the right
+  edge of everything the headset shows.
+
+- **The sky's dither is glued to the sky.** The gradient's bands were
+  already read by true elevation, but the GBC checker between them kept
+  SCREEN-cell parity -- so a head's pitch or roll slid the world-fixed
+  band edges over a screen-fixed checkerboard and the whole gradient
+  shimmered as the pattern recomputed. The ray path is now a computed
+  SKYBOX: each pixel's ray lands in a cell of the sky's own angular
+  grid (azimuth columns, elevation rows, sized to match the diorama's
+  pixel grid on screen), and the band, the checker's parity and the
+  twilight glow -- now measured by the angle to the sun's own direction
+  -- are all answered from that cell's centre. The screen grid
+  quantises nothing, so the picture behaves exactly like a
+  nearest-filtered texture on a dome: its cells slide smoothly with the
+  world, no motion of the head recomputes the pattern, and only the
+  clock moves the sky.
+
+- **VR works from an installed release.** The OpenXR loader used to be
+  looked for only against the working directory and the game's source --
+  right for the dev tree, wrong for a release install, where importing
+  the mod lands it in the game's SAVE DIRECTORY (or keeps it zipped) and
+  the VR row silently failed to start. The search now also asks the
+  mount that actually holds the mod and the save directory itself; and
+  if nothing on disk answers -- the mod imported as an archive -- the
+  DLL is copied once out of the mod into the save directory and loaded
+  from there, so every install shape reaches the headset.
+
+- **SELECT walks the VOXEL ladder.** In free roam, the pad's SELECT
+  button makes exactly the step hotkey 3 makes -- OFF through the angle
+  rungs to 1ST and round, stepping over FULL, clearing TILT and GBC FX
+  on every press like the key does. For the machines with no number row:
+  the phone's touch pad and a controller. SELECT has no overworld job in
+  Gen 1 -- its work is all in-menu, and menus keep it untouched.
+
+- **PCVR, in-process, through OpenXR -- with no change to the parent
+  app.** A new **VR** row (OFF / ON, off by default; on the OPTIONS menu
+  and the mod manager's page). The whole stack rides LuaJIT's FFI from
+  inside the mod: the Khronos OpenXR loader ships in `assets/vr/` (with
+  its Apache-2.0 license alongside), the session binds to LOVE's own
+  OpenGL context, each eye is rendered by the mod's existing scene pass
+  under a placed camera built from the tracked pose, and the finished
+  canvases are blitted straight into the runtime's swapchain images.
+  Works with any Windows OpenXR runtime (SteamVR, Oculus, WMR).
+
+  - **What you see mirrors the VOXEL ladder.** On the orbit rungs the
+    world is a TABLETOP DIORAMA hung at the RUNG'S own viewing angle and
+    at the scale that reproduces the flat screen's framing -- step onto
+    35 and the model presents at 35 degrees, onto 75 and it rises toward
+    eye level, easing between rungs; lean in and the town grows, walk
+    around the table and honest occlusion shows you the far side of the
+    buildings. On **1ST** you stand inside the world at life size (a
+    tile is a stride), the headset steers the same yaw and pitch the
+    flat screen's mouse does, and FreeMove walks where you look.
+
+  - **VR controllers.** One OpenXR action set, suggested onto Touch,
+    Index and WMR (plus the khr/simple fallback), rebindable in the
+    runtime's own UI. In both modes: **left stick** moves (through the
+    engine's own stick path, so it grid-walks the diorama and free-walks
+    1ST), **A/B** are A/B, **either trigger** is START, and **clicking
+    the left stick** steps the VOXEL angle ladder exactly as the "3"
+    key does. In the diorama: **right stick up/down** zooms the
+    model, and **squeezing a grip** while moving that hand up or down
+    drags the whole table with it. No controller button leaves VR --
+    both directions belong to the VR row alone, so no mid-fight click
+    can eject you from the headset.
+
+  - **Battles happen ON the world -- from the flat game's own seat.**
+    When a staged fight starts, the headset fades to black and comes
+    back seated in the flat battle's over-the-shoulder shot: on the same
+    camera line (your mon near-left, the foe far-right), pulled in to
+    the wide rig's standing distance at life scale, turned to face the
+    arena -- and fades back to wherever you were when the fight ends.
+    Both mons stand on their arena cells in the VR eyes' own view, yawed
+    per eye, casting real shadows, wearing the hit flash -- and the MOVE
+    ANIMATIONS play out there with them: the engine's own effects layer,
+    caught on a canvas and stood on a billboard that faces the eye the
+    way the mon cards do (effects are 2D drawings, and a drawing must
+    face the eye that is looking), with the classic layout's two slot
+    marks pinned where each arena cell lands on that plane along the
+    eye's own ray -- so a burst authored at a slot sits exactly over the
+    mon standing in for it, per eye, and a projectile crossing the frame
+    crosses the arena. (The flat screen keeps its
+    composed battle shot, untouched.) And the battle camera's parallax
+    drift holds still while a headset is watching: the sway is a flat
+    screen's depth cue, and inside VR it read as the world lurching.
+
+  - **A voxel POKEDEX along your left controller.** A hand-authored
+    voxel model of the series' own field guide -- red slab, lens, LEDs,
+    hinge, d-pad, dark screen bezel -- laid flush along the left
+    controller's grip pose (a full quarter turn forward, so holding the
+    controller is holding the device) through the same XR-to-world
+    mapping as the eyes, at its real hand size wherever the camera is.
+    It rides in FIRST PERSON and in the BATTLE seat; the diorama does
+    without it -- a hand-sized device hovering over a tabletop town is
+    clutter, and the floating panel serves there. In first person its
+    screen carries EVERYTHING the flat screen shows -- menus, dialogs,
+    shops, wipes -- and the floating billboard is retired outright:
+    raise your hand to read, lower it to play. In a staged fight the
+    screen is the 2D battle -- text, menus, HP bars, and any party or
+    bag screen opened over it -- and there too the floating billboard is
+    gone entirely: the fight owns the view, the reading is in the hand.
+    (No tracked left controller still gets the floating panel -- the UI
+    must be readable somewhere.) Drawn by the scene's own pass with real
+    depth, per eye; dark when nothing is showing.
+
+  - **The floating panel wears the GB frame.** The quad used to show
+    the whole window -- monitor-wide, mostly mirror -- and now crops to
+    the 160x144 letterbox where everything the flat screen has to say
+    actually lives, so the panel presents near-square (10:9) at 1:1
+    pixel aspect. To keep a battle's HUDs inside that frame, the HUD
+    blocks stay in their classic GB slots for as long as a headset is
+    live instead of snapping out to the window's edges.
+
+  - **The sky is anchored in space.** On the flat screen the band
+    gradient hangs off the frame; inside a headset that meant the sky
+    (and the sun and moon with it) rode the player's head. The VR eyes
+    now hang the gradient over a fixed slice of elevation above the
+    world's real horizon and drop the fixed-slice fallback entirely, so
+    tilting your head slides the frame across a sky that stays put --
+    and the discs, already projected through each eye's true camera,
+    stand still over their own azimuth. The gradient is a true SKYBOX:
+    each eye hands the sky shader its own ray fan (head rotation plus
+    frustum tangents), and every pixel takes its band -- and its GBC
+    checker dither -- from the TRUE elevation of its own view ray, so
+    no motion of the head, pitch, yaw or roll, in the diorama or in
+    first person, moves a band by a pixel; only the clock recolours
+    them. The FLAT screen's first person gets the very same treatment:
+    the placed rig builds its own ray fan from the basis its view is
+    made of, so mouse-look pitch slides the frame over a sky that
+    stays put there too, dither and all -- while the orbit rungs keep
+    their classic frame-hung painting. And the SUN AND MOON are no
+    longer painted on the frame at all (in first person on the flat
+    screen included): the cell art is baked to a texture once per
+    palette and hung on a quad IN THE WORLD, projected through the
+    camera like any geometry -- no per-frame cell snapping (the
+    jitter), no pattern squared to the canvas (the face that turned
+    with the head).
+
+  - **The VR row exists only where VR can.** Off Windows -- the Android
+    build above all -- the row is absent from the OPTIONS menu and the
+    mod manager's page both (the loader and the GL interop are Win32),
+    and a stored vr=true that migrated over in a save is ignored instead
+    of read, so a phone never tries to start a session or force the
+    battle rows.
+
+  - **VR owns the battle rows.** While the VR row is ON, staged battles
+    are REQUIRED (3D-BTL answers ON whatever it was set to) and BACK
+    SPRITES is held OFF -- the battle seat, the pokedex screen and the
+    effects plane all assume both mons standing on the world -- and both
+    rows leave the OPTIONS menu for the duration, because a switch that
+    decides nothing reads as broken. Both come back, at their stored
+    values, the moment VR goes off.
+
+  - **First person snap-turns.** Flicking the right stick left or right
+    steps the view 45 degrees, once per flick (it re-arms at centre) --
+    a snap rather than a smooth spin, because smooth software yaw is
+    the classic VR comfort mistake. The turn steps the XR-to-world
+    mapping itself, so the eyes, the walk direction and the pokedex in
+    your hand all agree about which way the world now faces.
+
+  - **The cast holds one pose for the headset.** Sprite cards lean back
+    by the camera pitch on the flat screen; a head that roams the table
+    has no one pitch to match, so every VR frame leans the cards at the
+    top rung's near-upright 75 degrees instead -- whatever orbit rung
+    the ladder is on -- and the flat screen keeps leaning with the rung.
+
+  - **Menus, dialogs, battles and wipes float on a panel** (an OpenXR
+    quad layer fed from the window), so everything the flat screen can
+    show, the headset can read. The window itself becomes the VR mirror
+    -- the left eye, fitted to the window -- and every existing
+    keyboard, mouse and pad input keeps working alongside the XR
+    controllers.
+
+  - The two eyes share one shadow map, one pose capture and one glint
+    step per frame (VoxelScene.render's `eyes` path), so they can never
+    disagree about anything but their viewpoint. xrWaitFrame paces the
+    app at headset rate while FixedStep keeps game logic at its own 60
+    Hz; vsync is handed off while the session runs and put back after.
+
+  - Failure is a status, never a crash: no runtime, no headset, no GL
+    interop, or a session lost mid-play all land back on the flat screen
+    with the reason printed (`XR_ERROR_FORM_FACTOR_UNAVAILABLE` means
+    "plug the headset in, then toggle the row"). Needs the mod running
+    from a real folder (the FFI cannot load a DLL out of an archive).
+
 ## 1.5.0
 
 ### Added
