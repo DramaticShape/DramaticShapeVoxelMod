@@ -1,8 +1,15 @@
 # Changelog
 
-## 1.6.0
+## 1.5.2
 
 ### Added
+
+- **SELECT walks the VOXEL ladder.** In free roam, the pad's SELECT
+  button makes exactly the step hotkey 3 makes -- OFF through the angle
+  rungs to 1ST and round, stepping over FULL, clearing TILT and GBC FX
+  on every press like the key does. For the machines with no number row:
+  the phone's touch pad and a controller. SELECT has no overworld job in
+  Gen 1 -- its work is all in-menu, and menus keep it untouched.
 
 - **PCVR, in-process, through OpenXR -- with no change to the parent
   app.** A new **VR** row (OFF / ON, off by default; on the OPTIONS menu
@@ -90,17 +97,23 @@
     world's real horizon and drop the fixed-slice fallback entirely, so
     tilting your head slides the frame across a sky that stays put --
     and the discs, already projected through each eye's true camera,
-    stand still over their own azimuth. The horizon holds LEVEL under a
-    rolled head too: the whole painting runs along the horizon's own
-    projected axis rather than the canvas's rows, so tipping your head
-    tips the frame across the horizon instead of hinging the horizon
-    with your ears -- and the discs' cell art is drawn in that same
-    frame, so a tipped head no longer spins the moon's face in place.
-    Under PITCH the gradient stays put as well: the band span's far end
-    is the 55-degree direction's own projection through the eye's
-    frustum rather than a pixels-per-radian estimate -- a perspective's
-    rows are tan-spaced, not angle-spaced, and the linear guess let the
-    bands slide as the horizon crossed the frame.
+    stand still over their own azimuth. The gradient is a true SKYBOX:
+    each eye hands the sky shader its own ray fan (head rotation plus
+    frustum tangents), and every pixel takes its band -- and its GBC
+    checker dither -- from the TRUE elevation of its own view ray, so
+    no motion of the head, pitch, yaw or roll, in the diorama or in
+    first person, moves a band by a pixel; only the clock recolours
+    them. The FLAT screen's first person gets the very same treatment:
+    the placed rig builds its own ray fan from the basis its view is
+    made of, so mouse-look pitch slides the frame over a sky that
+    stays put there too, dither and all -- while the orbit rungs keep
+    their classic frame-hung painting. And the SUN AND MOON are no
+    longer painted on the frame at all (in first person on the flat
+    screen included): the cell art is baked to a texture once per
+    palette and hung on a quad IN THE WORLD, projected through the
+    camera like any geometry -- no per-frame cell snapping (the
+    jitter), no pattern squared to the canvas (the face that turned
+    with the head).
 
   - **The VR row exists only where VR can.** Off Windows -- the Android
     build above all -- the row is absent from the OPTIONS menu and the

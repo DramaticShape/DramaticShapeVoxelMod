@@ -1126,6 +1126,34 @@ T.eq(Battles.setting:get(), false, "8 toggles overworld battles off")
 Game.keypressed(keyGame, "8")
 T.eq(Battles.setting:get(), true, "and back on")
 
+-- ------- SELECT makes the same step the 3 key does
+--
+-- The pad's own button, for the machines with no number row. The wrap
+-- sits on OverworldState:handleInput -- free-roam by construction -- and
+-- reads the live Game's input, so the fake free-roam shape the key tests
+-- built is lent to the Game module for the length of the check.
+-- (An anonymous function scope: the main chunk sits AT LuaJIT's
+-- 200-active-locals ceiling, so even a named wrapper is one too many.)
+;(function()
+  local OverworldState = require("src.world.OverworldController")
+  T.eq(OverworldState.dramaticShapeSelectHook, true,
+    "the SELECT wrap is installed on the overworld input seam")
+  local hadInput, hadStack = Game.input, Game.stack
+  local hadOw, hadSave, hadWrite = Game.overworld, Game.save, Game.writeOptions
+  Game.input = { wasPressed = function(_, b) return b == "select" end }
+  Game.stack, Game.overworld = keyGame.stack, keyGame.overworld
+  Game.save, Game.writeOptions = keyGame.save, keyGame.writeOptions
+  Pipelines.setLevel("voxel", 0)
+  OverworldState.handleInput({})
+  T.eq(Pipelines.levelLabel("voxel"), "15",
+    "SELECT steps the VOXEL ladder exactly as 3 does")
+  OverworldState.handleInput({})
+  T.eq(Pipelines.levelLabel("voxel"), "35", "and keeps walking it")
+  Game.input, Game.stack = hadInput, hadStack
+  Game.overworld, Game.save, Game.writeOptions = hadOw, hadSave, hadWrite
+  Pipelines.setLevel("voxel", 0)
+end)()
+
 -- 3 also clears the two engine modes it displaced. Without this a player
 -- who left TILT or GBC FX on before enabling the mod has no key left to
 -- turn them off with, and both fight the diorama -- TILT is the flat fake
@@ -3807,6 +3835,32 @@ local wx2, wy2, wz2 = apply(seated.view, 150 - VRRig.FP_SCALE, 10, 200)
 T.check(near(wx2, 0) and near(wy2, 0) and near(wz2, -1),
   "the yawed view carries one metre west of the pivot to one metre ahead")
 
+-- the sky's RAY FAN round-trips the eye's own projection: the direction
+-- the fan hands a canvas point looks along projects back to that very
+-- point, through a rotated head AND a yawed mapping -- one sign wrong
+-- anywhere here and the skybox paints sideways or upside down
+local rayCam = VRRig.eyeCamera({ pos = { 0.2, 1.1, -0.4 },
+                                 quat = { 0, s, 0, math.cos(math.pi / 4) } },
+                               fov, { 50, 0, 70 }, { 0, 0, 0 }, 10,
+                               math.pi / 3)
+local rm = Mat4.mul(Mat4.mul(Mat4.scale(1, -1, 1), rayCam.proj), rayCam.view)
+local function rayFrac(u, v)
+  local sr = rayCam.skyRay
+  local d1 = sr.base[1] + u * sr.du[1] + v * sr.dv[1]
+  local d2 = sr.base[2] + u * sr.du[2] + v * sr.dv[2]
+  local d3 = sr.base[3] + u * sr.du[3] + v * sr.dv[3]
+  local x = rm[1] * d1 + rm[2] * d2 + rm[3] * d3
+  local y = rm[5] * d1 + rm[6] * d2 + rm[7] * d3
+  local ww = rm[13] * d1 + rm[14] * d2 + rm[15] * d3
+  return x / ww * 0.5 + 0.5, y / ww * 0.5 + 0.5
+end
+local fu, fv = rayFrac(0.3, 0.8)
+T.check(near(fu, 0.3, 1e-4) and near(fv, 0.8, 1e-4),
+  "the sky's ray fan round-trips the eye's own projection")
+local fu2, fv2 = rayFrac(0.9, 0.1)
+T.check(near(fu2, 0.9, 1e-4) and near(fv2, 0.1, 1e-4),
+  "at every corner of the frame alike")
+
 -- ------- the hand prop: the pokedex rides the same mapping as the eyes
 --
 -- propMatrix carries a hand pose through worldFromXr: an identity hand at
@@ -3895,6 +3949,31 @@ local bex, bey, bez = apply(fxb, ea[1] / 160 - 0.5, 1 - ea[2] / 144, 0)
 T.check(near(bex, 96, 1e-3) and near(bey, 10, 1e-3) and near(bez, 192, 1e-3),
   "and the enemy mark over the enemy's")
 V3D_.eye = hadEye
+
+-- the FLAT first-person rig's sky fan: a placed eye/focus camera through
+-- viewProjection carries a ray fan of its own, and it round-trips that
+-- projection exactly like the VR eyes' does -- the flat 1ST sky is a
+-- skybox by the same math
+local hadCam = V3D_.camera
+V3D_.camera = { eye = { 100, 13, 200 }, focus = { 130, 18, 160 },
+                fov = 1.1, up = { 0, 1, 0 } }
+local pvp = V3D_.viewProjection(0, 0, 320, 288)
+local psr = V3D_.skyRayLive
+T.check(psr ~= nil, "a placed free-pitch camera carries a ray fan")
+local function pFrac(u, v)
+  local d1 = psr.base[1] + u * psr.du[1] + v * psr.dv[1]
+  local d2 = psr.base[2] + u * psr.du[2] + v * psr.dv[2]
+  local d3 = psr.base[3] + u * psr.du[3] + v * psr.dv[3]
+  local x = pvp[1] * d1 + pvp[2] * d2 + pvp[3] * d3
+  local y = pvp[5] * d1 + pvp[6] * d2 + pvp[7] * d3
+  local ww = pvp[13] * d1 + pvp[14] * d2 + pvp[15] * d3
+  return x / ww * 0.5 + 0.5, y / ww * 0.5 + 0.5
+end
+local pu, pv = pFrac(0.25, 0.6)
+T.check(near(pu, 0.25, 1e-4) and near(pv, 0.6, 1e-4),
+  "and it round-trips the placed camera's own projection")
+V3D_.camera = hadCam
+V3D_.skyRayLive = nil
 
 -- ------- VR owns the battle rows while it is on
 local VRSet = run.loader.exports.DRAMATIC_SHAPE.lib.require("VR").setting

@@ -501,6 +501,29 @@ local HOTKEYS = {
   ["9"] = Water.setting,
 }
 
+-- One step of the VOXEL angle ladder: everything a "3" press does, named
+-- so the pad's SELECT button (below) can make exactly the same step. The
+-- gate is the registry's own; the tilt/GBC FX clearing is the engine work
+-- the key has always delegated (see the wrap below for why).
+local function cycleVoxel(game)
+  local Pipelines = require("src.render.Pipelines")
+  local top = game.stack and game.stack:top()
+  if not Pipelines.canToggle("voxel", top, game.overworld) then return false end
+  Pipelines.setLevel("voxel", Voxel.nextHotkeyLevel(Pipelines.level("voxel")))
+  Pipelines.syncOptions(game.save.options)
+  -- 3 is the key that used to turn TILT on and sits next to the one that
+  -- used to turn GBC FX on, and this mod has taken both away. A player who
+  -- left either running before enabling the mod would otherwise have no
+  -- way back to off, and both fight the diorama -- so the VOXEL step
+  -- clears them on EVERY press, not just the press that switches on.
+  game.save.options.tilt = 0
+  game.save.options.gbcfx = 0
+  require("src.render.GBCFX").setLevel(0)
+  require("src.render.Tilt").setLevel(game.save.options.tilt or 0)
+  game:writeOptions()
+  return true
+end
+
 do
   local Game = require("src.core.Game")
   local Pipelines = require("src.render.Pipelines")
@@ -517,32 +540,12 @@ do
         -- 3 walks the ANGLE rungs and steps over FULL (Voxel.HOTKEY_ORDER),
         -- so the registry's plain "advance one and wrap" is not what it
         -- wants; 6 still is. The gate is the registry's own either way.
-        local stepped = false
+        -- The whole of 3's step lives in cycleVoxel, because the pad's
+        -- SELECT button makes the same step (see the handleInput wrap).
         if key == "3" then
-          if Pipelines.canToggle("voxel", top, self.overworld) then
-            Pipelines.setLevel("voxel",
-              Voxel.nextHotkeyLevel(Pipelines.level("voxel")))
-            stepped = true
-          end
-        else
-          stepped = Pipelines.hotkey(key, top, self.overworld) and true
-        end
-        if stepped then
+          if cycleVoxel(self) then return end
+        elseif Pipelines.hotkey(key, top, self.overworld) then
           Pipelines.syncOptions(self.save.options)
-          -- 3 is the key that used to turn TILT on and sits next to the one
-          -- that used to turn GBC FX on, and this mod has taken both away.
-          -- A player who left either running before enabling the mod would
-          -- otherwise have no way back to off, and both fight the diorama:
-          -- TILT is the flat fake of what this mode does for real, and GBC
-          -- FX is a full-screen present pass over the top of it. So the
-          -- VOXEL key clears them on EVERY press, not just the press that
-          -- switches the mode on -- cycling back round to OFF leaves them
-          -- off too, which is the state the key is now the only route to.
-          if key == "3" then
-            self.save.options.tilt = 0
-            self.save.options.gbcfx = 0
-            require("src.render.GBCFX").setLevel(0)
-          end
           require("src.render.Tilt").setLevel(self.save.options.tilt or 0)
           self:writeOptions()
           return
@@ -878,6 +881,38 @@ OverworldBattle.install()
 FirstPerson.install()
 FreeMove.install()
 
+-- ------- SELECT walks the angle ladder
+--
+-- The same step the "3" key makes, on the pad's own button: a phone (and
+-- a controller) has no number row, and SELECT has no overworld job in
+-- Gen 1 -- its work is all in-menu, which this wrap never sees. The seam
+-- is OverworldState:handleInput, the same choke point the free walk
+-- replaced: every gate above it -- menus, dialogs, scripted moves,
+-- transitions -- already decided the overworld owns the buttons, so a
+-- SELECT here is free-roam by construction, exactly like the key. When
+-- the step is refused (mid-warp, no 3D pass) the press falls through to
+-- the engine's own handling, which is a no-op, as ever.
+--
+-- Installed AFTER FreeMove.install, deliberately: its wrap must sit
+-- OUTSIDE the free walk's, or first person -- where FreeMove.tick takes
+-- the frame and never calls further in -- would eat the button, and the
+-- one rung SELECT could not step off of would be 1ST itself.
+do
+  local OverworldState = require("src.world.OverworldController")
+  if not OverworldState.dramaticShapeSelectHook then
+    local inner = OverworldState.handleInput
+    function OverworldState:handleInput(...)
+      local Game = require("src.core.Game")
+      local input = Game.input
+      if input and input.wasPressed and input:wasPressed("select") then
+        if cycleVoxel(Game) then return end
+      end
+      return inner(self, ...)
+    end
+    OverworldState.dramaticShapeSelectHook = true
+  end
+end
+
 -- The overworld's own pushBattle is the choke point for a wild encounter or
 -- a trainer, and it is wrapped. A battle that arrives some other way -- a
 -- link battle, a script pushing a BattleState directly -- reaches this
@@ -979,7 +1014,7 @@ mod.hooks:wrap("world.tod", function(next, tod, ctx)
   return DayNight.tod()
 end)
 
-mod.exports.version = "1.6.0"
+mod.exports.version = "1.5.2"
 -- exposed so a companion mod can pin its own tiles' shapes or read the
 -- camera without reaching into this mod's file layout
 mod.exports.lib = V

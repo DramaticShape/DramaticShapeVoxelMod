@@ -444,6 +444,13 @@ end
 -- way either way.
 Voxel3D.camera = nil
 
+-- This frame's camera RAY FAN, set by viewProjection alongside vp: the
+-- world direction a canvas point looks along (see Sky.paint's `ray`).
+-- Present for every free-pitch camera -- the VR eyes bring theirs
+-- (VRRig.eyeCamera), a placed eye/focus camera gets one built -- and nil
+-- for the orbit, whose frame-hung sky is the classic look.
+Voxel3D.skyRayLive = nil
+
 -- ------- which way, and how steeply, this camera looks
 --
 -- Two facts about the view direction, set alongside the eye and the focus
@@ -495,6 +502,8 @@ function Voxel3D.viewProjection(cx, cy, vw, vh)
     -- reason as every other branch here
     if cam.view and cam.proj then
       Voxel3D.fovY = cam.fov
+      -- the VR eyes bring their fan with them (VRRig.eyeCamera)
+      Voxel3D.skyRayLive = cam.skyRay
       return Mat4.mul(Mat4.mul(Mat4.scale(1, -1, 1), cam.proj), cam.view)
     end
     local dx = eye[1] - focus[1]
@@ -510,6 +519,35 @@ function Voxel3D.viewProjection(cx, cy, vw, vh)
     -- the same clip-space Y flip the orbit needs, for the same reason: we
     -- bypass LOVE's transform_projection and canvas coordinates run Y down
     proj = Mat4.mul(Mat4.scale(1, -1, 1), proj)
+    -- The camera's RAY FAN, for the sky's skybox path (Sky.paint's `ray`):
+    -- a placed camera with a FREE PITCH -- the first-person rig, steered
+    -- by a mouse on the flat screen -- must not hang its gradient off the
+    -- frame, or looking up and down drags the bands with the view. Built
+    -- from the very basis the view below is: forward, the true right, the
+    -- true up, and the symmetric frustum's tangents.
+    local upv = cam.up or { 0, 1, 0 }
+    local fx, fy, fz = -dx / dist, -dy / dist, -dz / dist
+    local crx = fy * upv[3] - fz * upv[2]
+    local cry = fz * upv[1] - fx * upv[3]
+    local crz = fx * upv[2] - fy * upv[1]
+    local crl = math.sqrt(crx * crx + cry * cry + crz * crz)
+    if crl > 1e-6 then
+      crx, cry, crz = crx / crl, cry / crl, crz / crl
+      local cux = cry * fz - crz * fy
+      local cuy = crz * fx - crx * fz
+      local cuz = crx * fy - cry * fx
+      local tanY = math.tan(cam.fov / 2)
+      local tanX = tanY * (vw / vh)
+      Voxel3D.skyRayLive = {
+        base = { fx - crx * tanX + cux * tanY,
+                 fy - cry * tanX + cuy * tanY,
+                 fz - crz * tanX + cuz * tanY },
+        du = { crx * 2 * tanX, cry * 2 * tanX, crz * 2 * tanX },
+        dv = { cux * -2 * tanY, cuy * -2 * tanY, cuz * -2 * tanY },
+      }
+    else
+      Voxel3D.skyRayLive = nil
+    end
     -- world up by default, so the horizon stays level -- a placed camera
     -- that rolled with its own pitch would tip the whole arena. A caller
     -- may hand its own up: the first-person BLEND does, because its far
@@ -517,6 +555,10 @@ function Voxel3D.viewProjection(cx, cy, vw, vh)
     -- orbit's steep end degenerates against a straight-down view.
     return Mat4.mul(proj, Mat4.lookAt(eye, focus, cam.up or { 0, 1, 0 }))
   end
+
+  -- the orbit: a fixed pitch per rung, and the classic frame-hung sky --
+  -- no ray fan wanted
+  Voxel3D.skyRayLive = nil
 
   local a = Voxel.angle
   local focal = Voxel.FOCAL
@@ -685,6 +727,72 @@ function Voxel3D.skyBody(w, h)
   }
 end
 
+-- ------- the VR sky's world-anchored pieces
+--
+-- Both exist because a headset showed the shortcuts: a gradient painted
+-- off the frame moved with the head that carried the frame, and a
+-- screen-space disc re-snapped its cell grid with every head movement
+-- and held its face square to the canvas instead of to the world. The
+-- gradient's fix rides the camera record itself (skyRay -- see VRRig and
+-- Sky's useRay path); the disc's is below.
+
+-- The sun or moon as a QUAD IN THE WORLD: the baked cell art
+-- (Sky.discImage) on a square spanned about the hour's direction, its
+-- corners projected through this very eye -- so the disc is pinned to
+-- the sky like the terrain is to the ground, stable under every head
+-- motion, its face upright over the world. Runs inside beginScene's sky
+-- window, before the depth mode is set, so the world draws over it.
+local discMesh = nil
+
+local function drawWorldDisc(w, h)
+  local b = DayNight.body()
+  if not (b and b.dy and b.dy > 0.005) then return end
+  local amt = DayNight.glow()
+  local img = Sky.discImage(b.moon, Sky.discLooming(amt, b.moon))
+  if not img then return end
+  local m = Voxel3D.vp
+  if not m then return end
+  local hl = math.sqrt(b.dx * b.dx + b.dz * b.dz)
+  if hl < 1e-6 then return end
+  -- right = horizontal, perpendicular to the direction; up completes it
+  local rx, rz = b.dz / hl, -b.dx / hl
+  local ux = -rz * b.dy
+  local uy = rz * b.dx - rx * b.dz
+  local uz = rx * b.dy
+  local ul = math.sqrt(ux * ux + uy * uy + uz * uz)
+  if ul < 1e-6 then return end
+  ux, uy, uz = ux / ul, uy / ul, uz / ul
+  if uy < 0 then ux, uy, uz = -ux, -uy, -uz end
+  -- apparent size is an ANGLE, the same fraction of the view the flat
+  -- screen's disc takes of its frame; the low sun looms exactly as there
+  local ang = Sky.DISC_FRAC * (Voxel3D.fovY or 1)
+  if Sky.discLooming(amt, b.moon) then ang = ang * 1.4 end
+  local k = math.tan(ang)
+  local verts = {}
+  local corners = { { -1, -1, 0, 1 }, { 1, -1, 1, 1 },
+                    { 1, 1, 1, 0 }, { -1, 1, 0, 0 } }
+  for i, c in ipairs(corners) do
+    local vx = b.dx + (rx * c[1] + ux * c[2]) * k
+    local vy = b.dy + (uy * c[2]) * k
+    local vz = b.dz + (rz * c[1] + uz * c[2]) * k
+    local x = m[1] * vx + m[2] * vy + m[3] * vz
+    local y = m[5] * vx + m[6] * vy + m[7] * vz
+    local ww = m[13] * vx + m[14] * vy + m[15] * vz
+    if ww <= 1e-6 then return end
+    verts[i] = { (x / ww * 0.5 + 0.5) * w, (y / ww * 0.5 + 0.5) * h,
+                 c[3], c[4] }
+  end
+  pcall(function()
+    if not discMesh then
+      discMesh = love.graphics.newMesh(4, "fan", "stream")
+    end
+    discMesh:setVertices(verts)
+    discMesh:setTexture(img)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(discMesh)
+  end)
+end
+
 -- ----------------------------------------------------------------- scene --
 
 -- Begin the 3D pass into a `w` x `h` pixel canvas centred on world
@@ -739,38 +847,20 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
   -- screen. The sky's dither grid is cut to it, and so is the water's --
   -- one number, so the two break up on the same checkerboard.
   Voxel3D.cell = w / math.max(1, vw or w)
-  -- A VR eye's sky is ANCHORED IN SPACE, where the flat screen's is glued
-  -- to the frame. The differences all key off the raw-matrix camera only
-  -- the VR eyes bring: the horizon must really be in frame for any band
-  -- to paint (no Sky.SPAN fallback -- that slice pinned to the top of the
-  -- view is exactly "the sky moves with the headset"); the gradient hangs
-  -- over a fixed ELEVATION span above the horizon rather than filling up
-  -- to the frame's edge; the whole painting runs along the horizon's OWN
-  -- AXIS (horizonLine), so a rolled head sees the horizon hold level in
-  -- the world instead of hinging with the ears; and the sun or moon was
-  -- already honest -- skyBody projects the hour's direction through this
-  -- very eye.
-  local vrEye = Voxel3D.camera and Voxel3D.camera.view and Voxel3D.camera.proj
-                and true or false
+  -- A FREE-PITCH camera's sky is ANCHORED IN SPACE, where the orbit's is
+  -- glued to the frame. One discriminator: skyRayLive, set by
+  -- viewProjection above for every camera whose pitch the player steers
+  -- -- the VR eyes and the flat first-person rig alike. With a fan, the
+  -- gradient is a SKYBOX (every pixel takes its band, and its GBC
+  -- checker, from its ray's true elevation -- no motion of the camera
+  -- moves a band, only the clock recolours them) and the sun or moon
+  -- hangs in the WORLD (drawWorldDisc). Without one -- the orbit, whose
+  -- pitch is the rung's -- the classic frame-hung painting stands.
+  local skyRay = Voxel3D.skyRayLive
   local hy = Voxel3D.horizonY(h)
-  local ax, ay, edgeT, topT
-  if vrEye then
-    ax, ay, edgeT, topT = Voxel3D.horizonLine(w, h, Sky.ELEV_SPAN)
-  end
-  -- any sky in frame at all? the corner most toward the sky must sit
-  -- above the horizon's line
-  local skyUp = false
-  if sky and sky.bands then
-    if not vrEye then
-      skyUp = true
-    elseif edgeT then
-      local minT = math.min(0, w * ax, h * ay, w * ax + h * ay)
-      skyUp = edgeT > minT + 1
-    end
-  end
-  -- and where the sky's bottom edge lands, which is what the reflection
+  -- where the sky's bottom edge lands, which is what the reflection
   -- reads its bands against (see Water). nil when nothing painted bands.
-  Voxel3D.skyEdge = skyUp and Sky.region(h, hy) or nil
+  Voxel3D.skyEdge = (sky and sky.bands) and Sky.region(h, hy) or nil
   if sky then
     love.graphics.clear(sky[1], sky[2], sky[3], sky[4] or 1, true, true)
     -- The sky goes down here, in the one window in this function where a
@@ -783,24 +873,14 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
     -- are the same size as the world's own and follow every resize and zoom.
     -- The banded sky also hangs the hour's sun or moon (skyBody projects it
     -- through this very camera); a flat sky has no bands and hangs nothing.
-    if not vrEye then
+    if skyRay and sky.bands then
+      Sky.paint(w, h, sky, nil, Voxel3D.cell, Voxel3D.skyBody(w, h),
+                nil, nil, skyRay)
+      drawWorldDisc(w, h)
+    else
       Sky.paint(w, h, sky, hy, Voxel3D.cell,
                 sky.bands and Voxel3D.skyBody(w, h) or nil)
-    elseif skyUp then
-      -- the gradient's far end: the ELEV_SPAN direction's own projection
-      -- when the frustum holds it (horizonLine's `top` -- exact, so a
-      -- pitch slides the frame over bands that stay put), and the
-      -- pixels-per-radian estimate when it does not
-      local top = topT
-      if not (top and top < edgeT - 1) then
-        local radPerPx = math.max(1e-6, (Voxel3D.fovY or 1) / h)
-        top = edgeT - Sky.ELEV_SPAN / radPerPx
-      end
-      Sky.paint(w, h, sky, edgeT, Voxel3D.cell,
-                Voxel3D.skyBody(w, h), top, { ax, ay })
     end
-    -- a VR eye with no horizon in frame paints nothing: everything in view
-    -- is below the horizon, and the haze clear above already filled it
   else
     love.graphics.clear(0, 0, 0, 0, true, true)
   end
@@ -1273,6 +1353,9 @@ function Voxel3D.invalidate()
   end
   canvas, canvasW, canvasH = nil, 0, 0
   held = nil
+  -- the VR sky's disc mesh belongs to this context like the canvases do
+  if discMesh and discMesh.release then pcall(discMesh.release, discMesh) end
+  discMesh = nil
   ShadowMap.invalidate()
   -- the sky is part of this pass and holds a shader of its own
   Sky.invalidate()

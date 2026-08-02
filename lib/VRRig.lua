@@ -156,6 +156,29 @@ function VRRig.eyeCamera(pose, fov, pivot, anchor, scale, yaw)
                                   fov.angleUp, fov.angleDown,
                                   VRRig.NEAR, VRRig.FAR)
 
+  -- The eye's RAY FAN, in world axes: the direction a canvas point
+  -- (u, v in 0..1, left-to-right and top-to-bottom) looks along is
+  -- base + u * du + v * dv. The sky reads its per-pixel TRUE elevation
+  -- off this (a real skybox cannot be painted from any per-frame row
+  -- mapping -- that is exact only at the view's own azimuth and swims
+  -- everywhere else). Directions only, so the mapping's scale drops out;
+  -- the yaw must not (the battle mount and the snap turn swing the world).
+  local Rw = R
+  if yaw and yaw ~= 0 then Rw = Mat4.mul(Mat4.rotateY(yaw), R) end
+  local tl, tr = math.tan(fov.angleLeft), math.tan(fov.angleRight)
+  local tu, td = math.tan(fov.angleUp), math.tan(fov.angleDown)
+  -- world columns of the head's rotation: right (X), up (Y), forward (-Z)
+  local rxc, ryc, rzc = Rw[1], Rw[5], Rw[9]
+  local uxc, uyc, uzc = Rw[2], Rw[6], Rw[10]
+  local fxc, fyc, fzc = -Rw[3], -Rw[7], -Rw[11]
+  local skyRay = {
+    base = { fxc + rxc * tl + uxc * tu,
+             fyc + ryc * tl + uyc * tu,
+             fzc + rzc * tl + uzc * tu },
+    du = { rxc * (tr - tl), ryc * (tr - tl), rzc * (tr - tl) },
+    dv = { uxc * (td - tu), uyc * (td - tu), uzc * (td - tu) },
+  }
+
   -- the eye and its forward, in world pixels: worldFromEye applied to the
   -- origin and to -Z
   local ax, ay, az = px - anchor[1], py - anchor[2], pz - anchor[3]
@@ -177,6 +200,7 @@ function VRRig.eyeCamera(pose, fov, pivot, anchor, scale, yaw)
     focus = { ex + fx * scale, ey + fy * scale, ez + fz * scale },
     fov = fov.angleUp - fov.angleDown,
     curve = 0,
+    skyRay = skyRay,
   }
 end
 
