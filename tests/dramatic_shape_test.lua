@@ -140,6 +140,7 @@ T.check(not fullIds["pipeline:tiltshift"],
   "FULL takes T-SHIFT off the menu -- it owns the blur")
 T.check(not fullIds["DRAMATIC_SHAPE:grid"], "and V-GRID")
 T.check(not fullIds["DRAMATIC_SHAPE:curve"], "and V-CURVE")
+T.check(not fullIds["DRAMATIC_SHAPE:shelf_top"], "and SHELF TOPS")
 T.check(not fullIds["DRAMATIC_SHAPE:daytime"], "and DAYTIME")
 
 -- but the battle rows survive it: they are not knobs on the look, and FULL
@@ -310,6 +311,8 @@ T.eq(order["DRAMATIC_SHAPE:battles"] - order["pipeline:tiltshift"], 4,
   "and sit in one unbroken block, not scattered to the end of the list")
 T.check(order["void_fill"] > order["DRAMATIC_SHAPE:battles"],
   "with the engine's own later rows still after them")
+T.check(order["DRAMATIC_SHAPE:shelf_top"] > order["DRAMATIC_SHAPE:aa"],
+  "SHELF TOPS sits at the end of the mode's settings block")
 
 -- ------- the open menu notices when FULL is stepped onto or off
 --
@@ -387,7 +390,7 @@ end
 Pipelines.setLevel("voxel", 2)
 local hookedRows = Runtime.call("ui.options.rows", function(_, r) return r end,
                                { data = Data }, { { id = "text_speed" } })
-T.eq(#hookedRows, 9, "the options hook added a row per setting")
+T.eq(#hookedRows, 10, "the options hook added a row per setting")
 local grid, curve, water = hookedRows[2], hookedRows[3], hookedRows[4]
 local battles, backRow, daytime = hookedRows[5], hookedRows[6], hookedRows[7]
 -- the AA row is hookedRows[8]; it is read in its own block below, because
@@ -415,6 +418,10 @@ T.eq(backRow.value(), "OFF",
   .. "map, so the classic slot is opt-in")
 T.check(backRow.id ~= battles.id and backRow.id:find("battleBack", 1, true),
   "on its own key, so it persists beside 3D-BTL rather than over it")
+T.eq(hookedRows[#hookedRows].label, "SHELF TOPS",
+  "SHELF TOPS is the last of the mode's settings")
+T.eq(hookedRows[#hookedRows].value(), "TILE",
+  "and defaults to TILE -- shelves wear their drawn top or cap trim")
 
 -- stepping writes through to the one place both rows read
 local settingGame = { save = { options = {} }, mods = { modOptions = {} } }
