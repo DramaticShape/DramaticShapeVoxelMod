@@ -186,7 +186,11 @@ end
 local function getCanvas(res)
   if canvas == false then return nil end
   if canvas and canvasRes == res then return canvas end
-  local ok, c = pcall(love.graphics.newCanvas, res, res)
+  -- dpiscale 1: `res` is the map's edge in TEXELS, and a highdpi default
+  -- would cube the memory for texels the filter never asks for (see
+  -- Voxel3D.newDepth) -- sunTexel = 1/res in the main pass assumes the
+  -- stored map is exactly res texels across
+  local ok, c = pcall(love.graphics.newCanvas, res, res, { dpiscale = 1 })
   if not (ok and c) then
     canvas = false
     return nil
