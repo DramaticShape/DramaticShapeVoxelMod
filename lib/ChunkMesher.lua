@@ -370,12 +370,22 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
 
   -- `to` routes the quad somewhere other than the main sink -- the water
   -- surface is the only caller that ever does (see runGeometry's header).
-  local function topQuad(x0, z0, h, tile, shade, to)
-    local u0, u1, v0, v1 = uvRect(tile, 0, 8)
+  -- `solid` paints the plateau as one texel: the majority body colour of
+  -- `tile` (see Structures.faceCapUV).  Interior walls have no top-view
+  -- art, and stretching any strip of the face still reads as a smeared
+  -- facade -- a flat of the face's own fill does not.
+  local function topQuad(x0, z0, h, tile, shade, to, solid)
+    local uvs
+    if solid then
+      local u, v = Structures.faceCapUV(tileset, tile, atlasW, atlasH)
+      uvs = { { u, v }, { u, v }, { u, v }, { u, v } }
+    else
+      local u0, u1, v0, v1 = uvRect(tile, 0, 8)
+      uvs = { { u0, v0 }, { u1, v0 }, { u1, v1 }, { u0, v1 } }
+    end
     ;(to or push)({ { x0, h, z0 }, { x0 + 8, h, z0 },
                     { x0 + 8, h, z0 + 8 }, { x0, h, z0 + 8 } },
-                  { { u0, v0 }, { u1, v0 }, { u1, v1 }, { u0, v1 } },
-                  aoShades(x0 / 8, z0 / 8, h, shade))
+                  uvs, aoShades(x0 / 8, z0 / 8, h, shade))
   end
 
   -- vertical quad for face direction `d` of the tile column at (x0, z0),
@@ -528,19 +538,38 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
                  { x0 + 8, neY, z0 }, { x0, nwY, z0 } },
                { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } }, 0.95)
         elseif run then
-          local m = math.min(2, run.extent)
-          local topTile = map:tileAt(tx, run.north + ((ty - run.north) % m))
-          topQuad(x0, z0, h, topTile, VOLUME_TOP_SHADE)
+          -- Indoors a volume has no roof rows: its north tiles are the
+          -- top of a face-on drawing (Oak's Lab wall band, unpinned
+          -- partitions).  A solid of that face's majority body colour
+          -- -- sampled once from the run's north row, so every cell of
+          -- a deep wall shares one flat -- keeps panels on the south
+          -- face; outdoors the north tiles really are roof art and the
+          -- top rows tile across the footprint as before.
+          local solid = not S.outdoor and run.rise == 0
+          local topTile
+          if solid then
+            topTile = map:tileAt(tx, run.north)
+          else
+            local m = math.min(2, run.extent)
+            topTile = map:tileAt(tx, run.north + ((ty - run.north) % m))
+          end
+          topQuad(x0, z0, h, topTile, VOLUME_TOP_SHADE, nil, solid)
         else
           local topTile = tile
+          -- When a fully-folded upright has no trim row above it, only its
+          -- face-on north tile is left for the plateau.  Stretching that
+          -- tile (or even its top edge) lays windows and posters across
+          -- the top; a solid of the face's majority fill does not.
+          local solidTop = false
           if s.art == "upright" and s.authored then
             -- Top art for a pinned box.  A furniture drawing is top-view
             -- rows over floor(h/8) face-on rows the fold stands upright;
             -- a face row's top would repeat its front art lying flat, so
             -- it wears the nearest row above the face block instead --
             -- the drawn tabletop (and whatever sits on it) stays on top,
-            -- and a fully-folded structure (wall, desk) tops with its
-            -- northmost row.
+            -- and a fully-folded structure (wall, desk) tops with a
+            -- solid of its northmost face when nothing above supplies a
+            -- trim.
             local north, front = ty, ty
             while ty - north < 6 do
               local bs = S.shapeAt[keyOf(tx, north - 1)]
@@ -562,11 +591,15 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
             if row < north then
               -- the whole run folded onto the face: top with the drawn
               -- row just above it when that row is furniture too (a
-              -- bookcase wearing its shelf-top trim), else with the
-              -- run's own top row
+              -- bookcase wearing its shelf-top trim), else with a solid
+              -- of the run's own face colour
               local above = S.shapeAt[keyOf(tx, north - 1)]
-              row = (above and above.authored and above.art == "upright")
-                    and (north - 1) or north
+              if above and above.authored and above.art == "upright" then
+                row = north - 1
+              else
+                row = north
+                solidTop = true
+              end
             end
             topTile = S.tileAt[keyOf(tx, row)]
           end
@@ -577,7 +610,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink)
           -- on the pond.
           topQuad(x0, z0, h, topTile,
                   s.art == "upright" and VOLUME_TOP_SHADE or 1,
-                  (s.class == "water") and waterPush or nil)
+                  (s.class == "water") and waterPush or nil,
+                  solidTop)
         end
 
         -- sides: 8px bands wherever the neighbour is lower. Band k spans
