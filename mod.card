@@ -26,6 +26,8 @@ return {
       "WATER on hotkey 9 (FULL / SKY / OFF, FULL by default): the water surface becomes a field of pixel-tall voxel columns rising and falling as waves, reflecting the sky, the sun, the moon and the cast standing beside it -- and, on FULL, the shoreline, trees and buildings behind it, by a screen-space ray march",
       "3D-BTL on hotkey 8 (ON / OFF, on by default), battles fought on the world map",
       "BACK SPRITES options row (OFF / ON, off by default), which keeps your own Pokemon on the battle menu in its classic slot while the foe stands out on the map",
+      "VR options row (OFF / ON, off by default): PCVR through OpenXR on Windows -- the diorama as a head-tracked tabletop model presented at the rung's own angle and framing on the orbit rungs, life-size first person on 1ST, staged battles standing on the map in both, menus on a floating panel, the window as mirror; needs a runtime (SteamVR/Oculus/WMR) and the mod on a real folder",
+      "VR controllers (Touch/Index/WMR, rebindable in the runtime): left stick moves, A/B are A/B, either trigger is START, left stick click toggles first/third person; in the diorama the right stick zooms, right stick click cycles the angle, and a squeezed grip drags the table's height",
       "a day/night clock that reaches the flat 2D overworld as well as the diorama -- outdoor maps only, and only when the hour is not midday",
       "an over-the-shoulder battle camera on a slow parallax orbit, with a depth-of-field pass that holds both mons sharp",
       "a sky behind the diorama at the 75-degree rung, outdoor maps only, coloured by the active palette mode",
@@ -44,10 +46,13 @@ return {
       "1ST needs the 3D pass like every rung; without it the level still persists but the world stays 2D and the grid walk stays in charge",
       "in 1ST, scripted walks, ledge hops and spinner slides play out as the grid moves they are, with the camera riding along; free control resumes when they land",
       "rooms have no ceilings, so a first-person look over an interior wall shows the void the diorama always had behind it",
+      "VR is Windows x64 only (the shipped loader and the Win32 GL binding), renders the scene once per eye (heavy with WATER FULL or AA up), has no XR controller bindings in v1 (pad/keyboard/mouse still work), and cannot start from a mounted .love archive -- the FFI needs the loader DLL on a real disk path",
+      "VR swapchains prefer plain RGBA8; a runtime that only offers sRGB shows slightly lifted colours",
     },
   },
   credits = {
     { who = "pret/pokered", for_ = "the tile and sprite data the geometry is derived from" },
+    { who = "The Khronos Group", for_ = "the OpenXR loader shipped unmodified in assets/vr (Apache-2.0; full license text alongside the DLL)" },
   },
   compat = { engine = ">=0.1.37 <2.0.0", modApi = 2 },
 }

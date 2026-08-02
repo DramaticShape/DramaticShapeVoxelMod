@@ -150,6 +150,9 @@ T.check(fullIds["DRAMATIC_SHAPE:battleBack"], "and BACK SPRITES with it")
 -- and AA, for the opposite reason: it is not a knob on the look at all, it is
 -- what the look COSTS, and only the player knows what their machine can carry
 T.check(fullIds["DRAMATIC_SHAPE:aa"], "and AA, which FULL neither sets nor owns")
+-- VR survives FULL on AA's reasoning: whether a headset is on the desk is
+-- not the diorama's to decide
+T.check(fullIds["DRAMATIC_SHAPE:vr"], "and VR, likewise the hardware's question")
 
 -- DAYTIME is not only hidden under FULL, it is HELD at SYNC: the row cannot
 -- be reached while FULL owns it, so a value changed underneath (the mod
@@ -384,7 +387,7 @@ end
 Pipelines.setLevel("voxel", 2)
 local hookedRows = Runtime.call("ui.options.rows", function(_, r) return r end,
                                { data = Data }, { { id = "text_speed" } })
-T.eq(#hookedRows, 8, "the options hook added a row per setting")
+T.eq(#hookedRows, 9, "the options hook added a row per setting")
 local grid, curve, water = hookedRows[2], hookedRows[3], hookedRows[4]
 local battles, backRow, daytime = hookedRows[5], hookedRows[6], hookedRows[7]
 -- the AA row is hookedRows[8]; it is read in its own block below, because
@@ -3642,6 +3645,146 @@ T.eq(blocked(state, p, 6, 5), "entity",
 FirstPerson.blend = 0
 VoxelState.reset()
 end
+
+-- ------- the VR rig's arithmetic
+--
+-- VRRig is the deliberately pure half of the VR stack: headset poses in,
+-- placed cameras out, with no FFI anywhere -- so the suite can hold a
+-- synthetic head still and check the world lands where the design says.
+-- (The FFI half -- VRXR, VRGL -- is exercised by tests/vr_probe.lua
+-- against a real runtime, which a headless suite cannot be.)
+
+-- an immediately-run function rather than a bare do-block: the main chunk
+-- is brushing LuaJIT's 200-active-locals ceiling, and a function scope
+-- keeps this section's locals off the chunk's own count
+local function vrRigSection()
+local VRRig = run.loader.exports.DRAMATIC_SHAPE.lib.require("VRRig")
+local Mat4 = run.loader.exports.DRAMATIC_SHAPE.lib.require("Mat4")
+
+local function near(a, b, eps) return math.abs(a - b) < (eps or 1e-5) end
+
+-- a Mat4 applied to a point, for reading results back out
+local function apply(m, x, y, z)
+  return m[1] * x + m[2] * y + m[3] * z + m[4],
+         m[5] * x + m[6] * y + m[7] * z + m[8],
+         m[9] * x + m[10] * y + m[11] * z + m[12]
+end
+
+-- identity quaternion, head at the LOCAL origin: the eye lands ON the
+-- pivot offset by the anchor, and the view carries a world point at the
+-- pivot to `anchor` metres in eye space
+local pose = { pos = { 0, 0, 0 }, quat = { 0, 0, 0, 1 } }
+local fov = { angleLeft = -0.7, angleRight = 0.7,
+              angleUp = 0.6, angleDown = -0.6 }
+local pivot = { 1000, 0, 2000 }
+
+local S = 128    -- an arbitrary table scale; eyeCamera takes any
+local cam = VRRig.eyeCamera(pose, fov, pivot, VRRig.TABLE, S)
+T.check(near(cam.eye[1], 1000 - VRRig.TABLE[1] * S)
+        and near(cam.eye[2], -VRRig.TABLE[2] * S)
+        and near(cam.eye[3], 2000 - VRRig.TABLE[3] * S),
+  "the diorama eye stands the table's offset from the pivot, scaled")
+T.eq(cam.curve, 0, "a VR camera declines the world curve outright")
+T.check(near(cam.fov, 1.2), "fov is the vertical angular span")
+
+-- the view ends in METRES: the pivot itself lands at `anchor` in eye
+-- space, however big the scale is
+local vx, vy, vz = apply(cam.view, pivot[1], pivot[2], pivot[3])
+T.check(near(vx, VRRig.TABLE[1]) and near(vy, VRRig.TABLE[2])
+        and near(vz, VRRig.TABLE[3]),
+  "the view un-scales the world: the pivot sits at the table offset, "
+  .. "in metres")
+
+-- a point one metre of world east of the pivot lands one metre east in
+-- eye space -- the scale cancels end to end
+local ex, ey, ez = apply(cam.view, pivot[1] + S, pivot[2], pivot[3])
+T.check(near(ex - vx, 1) and near(ey, vy) and near(ez, vz),
+  "one scale's worth of world east is one metre east in eye space")
+
+-- ------- the diorama presents at the rung's own angle and framing
+--
+-- The anchor sits VIEW_DIST along the rung's viewing angle: at 35 degrees
+-- mostly below the head, at 75 mostly ahead of it -- so the resting head
+-- looks at the model along exactly the line the flat camera uses.
+local a35 = VRRig.dioramaAnchor(math.rad(35), 0)
+T.check(near(a35[2], -VRRig.VIEW_DIST * math.cos(math.rad(35)))
+        and near(a35[3], -VRRig.VIEW_DIST * math.sin(math.rad(35))),
+  "the 35-degree anchor hangs the table down-and-ahead at the rung's angle")
+local a75 = VRRig.dioramaAnchor(math.rad(75), 0)
+T.check(a75[3] < a35[3] and a75[2] > a35[2],
+  "75 degrees brings the table up toward eye level and further out")
+T.check(near(VRRig.dioramaAnchor(math.rad(35), 0.25)[2], a35[2] + 0.25),
+  "the grab-drag height rides the anchor straight up")
+
+-- and the scale reproduces the flat screen's framing: vh world pixels
+-- subtend the flat lens's field at VIEW_DIST
+local sc = VRRig.dioramaScale(432, 1.0)
+T.check(near(sc, 432 / VRRig.VIEW_DIST),
+  "the diorama scale is the flat framing carried to arm's length")
+
+-- first person: anchor at the origin pins the head to the pivot exactly
+local fpCam = VRRig.eyeCamera(pose, fov, { 108, 13, 208 }, { 0, 0, 0 },
+                              VRRig.FP_SCALE)
+T.check(near(fpCam.eye[1], 108) and near(fpCam.eye[2], 13)
+        and near(fpCam.eye[3], 208),
+  "first person pins the start-of-session head to the player's head")
+
+-- head motion moves the eye by metres-times-scale
+local moved = VRRig.eyeCamera({ pos = { 0.1, 0.2, -0.3 },
+                                quat = { 0, 0, 0, 1 } },
+                              fov, { 108, 13, 208 }, { 0, 0, 0 },
+                              VRRig.FP_SCALE)
+T.check(near(moved.eye[1], 109) and near(moved.eye[2], 15)
+        and near(moved.eye[3], 205),
+  "a headset step moves the eye by metres times the scale")
+
+-- with no rotation, the eye looks along LOCAL -Z, which is world NORTH
+T.check(fpCam.focus[3] < fpCam.eye[3] - 1,
+  "an identity orientation looks north, the LOCAL -Z convention")
+
+-- headYawPitch round-trips this mod's conventions: identity looks north
+-- (yaw pi), and a quarter turn about +Y (counterclockwise from above)
+-- swings the forward from north to WEST (yaw -pi/2)
+local yaw, pitch = VRRig.headYawPitch({ 0, 0, 0, 1 })
+T.check(near(math.abs(yaw), math.pi) and near(pitch, 0),
+  "an identity head faces north, level")
+local s = math.sin(math.pi / 4)
+yaw = VRRig.headYawPitch({ 0, s, 0, math.cos(math.pi / 4) })
+T.check(near(yaw, -math.pi / 2),
+  "a quarter turn about +Y faces west -- the compass agrees with the "
+  .. "right-hand rule")
+
+-- the asymmetric projection: a point ON the left frustum plane lands at
+-- clip x = -w, one on the up plane at clip y = +w
+local proj = Mat4.fovProjection(-0.5, 0.3, 0.4, -0.2, 0.1, 100)
+local px_, py_, pz_ = nil, nil, nil
+local function clip(m, x, y, z)
+  local cx = m[1] * x + m[2] * y + m[3] * z + m[4]
+  local cy = m[5] * x + m[6] * y + m[7] * z + m[8]
+  local cw = m[13] * x + m[14] * y + m[15] * z + m[16]
+  return cx / cw, cy / cw
+end
+local lx = math.tan(-0.5) * 2      -- on the left plane, 2 units out
+local cxL = clip(proj, lx, 0, -2)
+T.check(near(cxL, -1, 1e-4), "the left fov angle lands on clip x = -1")
+local uy = math.tan(0.4) * 2
+local _, cyU = clip(proj, 0, uy, -2)
+T.check(near(cyU, 1, 1e-4), "the up fov angle lands on clip y = +1")
+
+-- Mat4.fromQuat: a quarter turn about Y takes +X to -Z
+local R = Mat4.fromQuat(0, s, 0, math.cos(math.pi / 4))
+local rx, ry, rz = apply(R, 1, 0, 0)
+T.check(near(rx, 0) and near(ry, 0) and near(rz, -1),
+  "fromQuat: a quarter turn about +Y carries east into north")
+
+-- and the VR row exists, shaped like every other mod setting
+local VRMod = run.loader.exports.DRAMATIC_SHAPE.lib.require("VR")
+T.eq(VRMod.setting.key, "vr", "the VR row persists under its own key")
+T.eq(VRMod.setting:get(), false, "and ships OFF")
+T.eq(VRMod.status(), "off", "with the status agreeing")
+T.check(not VRMod.active(), "no session without a runtime, and no crash")
+end
+vrRigSection()
 
 Pipelines.reset()
 run.release()

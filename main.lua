@@ -92,6 +92,7 @@ local Water = V.require("Water")
 local AntiAlias = V.require("AntiAlias")
 local FirstPerson = V.require("FirstPerson")
 local FreeMove = V.require("FreeMove")
+local VR = V.require("VR")
 
 -- Forward declaration: the voxel pipeline's update hook (registered below)
 -- calls this, and it is defined further down with the settings it drives.
@@ -200,6 +201,13 @@ mod.content.render_pipelines:register("voxel", {
     -- them announces it. Ahead of the active() gate, so switching it
     -- while voxel mode is OFF still invalidates what is cached.
     voidFill.check()
+    -- The whole VR frame -- session lifecycle, xrWaitFrame's pacing, both
+    -- eye renders, the layer submit -- rides this hook, because it is the
+    -- one tick that runs through menus, dialogs and battles, which is
+    -- what a headset needs the world (or at least the UI panel) to do.
+    -- Ahead of the active() gate: with the mode off, the headset still
+    -- shows the flat screen on the floating panel.
+    VR.update(dt)
     if not Voxel.active() then return end
     local Game = require("src.core.Game")
     local ow = Game and Game.overworld
@@ -211,6 +219,19 @@ mod.content.render_pipelines:register("voxel", {
   end,
 
   drawWorld = function(ctx)
+    -- the palette closure, stashed for the VR frame: it renders from the
+    -- update hook, where no ctx exists to carry one
+    VR.paletteFor = ctx.paletteFor
+    -- With a headset running, the window's world pass becomes the MIRROR
+    -- -- the left eye, fitted to the window -- rather than a third full
+    -- render of the scene. Everything else about the frame (the UI the
+    -- engine composites over this) is unchanged, which is exactly what
+    -- the headset's floating panel photographs.
+    if VR.active() then
+      local sw, sh = sceneSize(ctx)
+      local m = VR.mirror(sw, sh)
+      if m then return m end
+    end
     -- Terrain and characters are geometry; the field FX stay ordinary 2D
     -- draws composited on top, anchored through the same camera the 3D
     -- pass used (ctx.drawFx below).  The scene renders at the window's
@@ -247,6 +268,7 @@ mod.content.render_pipelines:register("voxel", {
     OverworldBattle.invalidate()
     AntiAlias.invalidate()
     ChunkMesher.invalidate()   -- no map id = every cached mesh
+    VR.invalidate()            -- the mirror, and FBO ids of dead canvases
   end,
 })
 
@@ -404,6 +426,16 @@ local SETTINGS = {
     .. "reads smoother rather than sharper. 2X costs half again as many "
     .. "pixels in each direction and 4X twice, which makes this the most "
     .. "expensive row in the mod.",
+    full = true },
+  -- `full` for the same reason as AA: not a knob on the look, a question
+  -- about the hardware on the desk.
+  { VR.setting,
+    "PCVR through OpenXR (SteamVR, Oculus, WMR). The diorama becomes a "
+    .. "tabletop model your head moves around; the 1ST rung stands you "
+    .. "inside the world at life size, looking where the headset looks. "
+    .. "Menus and dialogs float on a panel. Needs a Windows OpenXR runtime "
+    .. "and the mod running from a real folder; without them the row stays "
+    .. "and the game stays flat, with the reason on the console.",
     full = true },
 }
 
@@ -930,7 +962,7 @@ mod.hooks:wrap("world.tod", function(next, tod, ctx)
   return DayNight.tod()
 end)
 
-mod.exports.version = "1.5.0"
+mod.exports.version = "1.6.0"
 -- exposed so a companion mod can pin its own tiles' shapes or read the
 -- camera without reaching into this mod's file layout
 mod.exports.lib = V

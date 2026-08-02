@@ -1,5 +1,68 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+
+- **PCVR, in-process, through OpenXR -- with no change to the parent
+  app.** A new **VR** row (OFF / ON, off by default; on the OPTIONS menu
+  and the mod manager's page). The whole stack rides LuaJIT's FFI from
+  inside the mod: the Khronos OpenXR loader ships in `assets/vr/` (with
+  its Apache-2.0 license alongside), the session binds to LOVE's own
+  OpenGL context, each eye is rendered by the mod's existing scene pass
+  under a placed camera built from the tracked pose, and the finished
+  canvases are blitted straight into the runtime's swapchain images.
+  Works with any Windows OpenXR runtime (SteamVR, Oculus, WMR).
+
+  - **What you see mirrors the VOXEL ladder.** On the orbit rungs the
+    world is a TABLETOP DIORAMA hung at the RUNG'S own viewing angle and
+    at the scale that reproduces the flat screen's framing -- step onto
+    35 and the model presents at 35 degrees, onto 75 and it rises toward
+    eye level, easing between rungs; lean in and the town grows, walk
+    around the table and honest occlusion shows you the far side of the
+    buildings. On **1ST** you stand inside the world at life size (a
+    tile is a stride), the headset steers the same yaw and pitch the
+    flat screen's mouse does, and FreeMove walks where you look.
+
+  - **VR controllers.** One OpenXR action set, suggested onto Touch,
+    Index and WMR (plus the khr/simple fallback), rebindable in the
+    runtime's own UI. In both modes: **left stick** moves (through the
+    engine's own stick path, so it grid-walks the diorama and free-walks
+    1ST), **A/B** are A/B, **either trigger** is START, and **clicking
+    the left stick** toggles first/third person (returning to the orbit
+    rung you left). In the diorama: **right stick up/down** zooms the
+    model, **clicking the right stick** cycles the viewing angle through
+    the orbit rungs (the table re-tilts on the rung's own tween), and
+    **squeezing a grip** while moving that hand up or down drags the
+    whole table with it.
+
+  - **Battles happen ON the world.** While a staged fight runs, the
+    headset keeps looking at the map -- both mons stand on their arena
+    cells in the VR eyes' own view, yawed per eye, casting real shadows,
+    wearing the hit flash -- while the battle UI reads from the floating
+    panel. (The flat screen keeps its composed battle shot, untouched.)
+    And the battle camera's parallax drift holds still while a headset
+    is watching: the sway is a flat screen's depth cue, and inside VR it
+    read as the world lurching -- most of all on the floating panel.
+
+  - **Menus, dialogs, battles and wipes float on a panel** (an OpenXR
+    quad layer fed from the window), so everything the flat screen can
+    show, the headset can read. The window itself becomes the VR mirror
+    -- the left eye, fitted to the window -- and every existing input
+    keeps working; v1 deliberately has no XR controller bindings.
+
+  - The two eyes share one shadow map, one pose capture and one glint
+    step per frame (VoxelScene.render's `eyes` path), so they can never
+    disagree about anything but their viewpoint. xrWaitFrame paces the
+    app at headset rate while FixedStep keeps game logic at its own 60
+    Hz; vsync is handed off while the session runs and put back after.
+
+  - Failure is a status, never a crash: no runtime, no headset, no GL
+    interop, or a session lost mid-play all land back on the flat screen
+    with the reason printed (`XR_ERROR_FORM_FACTOR_UNAVAILABLE` means
+    "plug the headset in, then toggle the row"). Needs the mod running
+    from a real folder (the FFI cannot load a DLL out of an archive).
+
 ## 1.5.0
 
 ### Added

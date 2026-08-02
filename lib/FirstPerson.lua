@@ -164,6 +164,16 @@ function FirstPerson.cardBlend()
   return ease(FirstPerson.blend)
 end
 
+-- A VR eye stepping into the rig's shoes: the VR pass builds its own
+-- placed cameras (one per eye) and hands each one here as it draws, so
+-- everything keyed to "the first-person rig is drawing" -- the billboard
+-- yaw, the frame remap, the hidden player card -- answers for that eye.
+-- In the diorama (blend 0) adoption is inert: cardBlend still reports
+-- zero and the cards keep their lean.
+function FirstPerson.adoptVReye(record)
+  rig = record
+end
+
 -- Whether the player's own card should be left out of the camera draw:
 -- deep enough into the blend that the card would fill the lens from
 -- inside. The sun pass keeps drawing it either way -- a first-person

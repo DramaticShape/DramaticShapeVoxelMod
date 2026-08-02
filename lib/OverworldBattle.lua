@@ -473,6 +473,11 @@ function OverworldBattle.update(dt)
   -- inside somebody else's frame means putting the frame back afterwards.
   local okTex, textures = pcall(OverworldBattle.textures, session.battle)
   if not okTex then textures = nil end
+  -- stashed for the VR eye pass, which stands these same pics on the map
+  -- in ITS view of the world (VoxelScene's eyes path). Stashed HERE
+  -- because rendering them binds canvases, which the eye pass -- mid-scene
+  -- when it wants them -- must never do; reading a stashed canvas is free.
+  session.textures = textures
   session.token = (session.token or 0) + 1
   local ok, shot = pcall(BattleScene.render, session.state, session.arena,
                          textures, session.token)
@@ -529,6 +534,23 @@ function OverworldBattle.shot()
   local s = session.shot
   if s and s.canvas then return s end
   return nil
+end
+
+-- The staged fight's WORLD-side pieces, for a pass that stands the mons in
+-- its own view of the map rather than in the arena's composed shot -- the
+-- VR eyes. Returns the two cards as BattleScene.monCards builds them (yawed
+-- toward whatever Voxel3D.eye is at CALL time, so a per-eye caller gets
+-- per-eye cards), the live textures table (for the hit-flash flag), and the
+-- token the shadow signature keys on. nil while nothing is staged, the
+-- arena is broken, or the pics have not been rendered yet.
+function OverworldBattle.worldCards()
+  if not (session and session.arena and not session.broken) then return nil end
+  local tex = session.textures
+  if not tex then return nil end
+  local host = (session.state and session.state.map) or nil
+  if not host then return nil end
+  local groundY = BattleScene.groundY(host, session.arena)
+  return BattleScene.monCards(session.arena, groundY, tex), tex, session.token
 end
 
 function OverworldBattle.invalidate()

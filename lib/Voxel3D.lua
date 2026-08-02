@@ -424,6 +424,12 @@ end
 -- { eye = {x,y,z}, focus = {x,y,z}, fov = radians, curve = k or nil,
 --   up = {x,y,z} or nil }.
 --
+-- A caller with matrices of its own -- the VR eyes, whose view comes from
+-- a tracked pose and whose projection is an off-centre frustum no
+-- eye/focus/fov triple can express -- sets `view` and `proj` instead, and
+-- the eye/focus fields stay for everything that reasons about the camera
+-- rather than projecting with it (setLook, the sky, the water's lean).
+--
 -- The orbit is the free-roam camera and it is described entirely by ONE
 -- number, the pitch, because that is all a camera following the player over
 -- their own map ever needs. A staged shot -- the overworld battle's
@@ -484,6 +490,13 @@ function Voxel3D.viewProjection(cx, cy, vw, vh)
     -- question about which way this camera looks, and only these two answer it
     Voxel3D.focus = focus
     setLook(eye, focus)
+    -- a camera that brought its own matrices (a VR eye) projects with
+    -- them; only the clip-space Y flip is added, for the same canvas
+    -- reason as every other branch here
+    if cam.view and cam.proj then
+      Voxel3D.fovY = cam.fov
+      return Mat4.mul(Mat4.mul(Mat4.scale(1, -1, 1), cam.proj), cam.view)
+    end
     local dx = eye[1] - focus[1]
     local dy = eye[2] - focus[2]
     local dz = eye[3] - focus[3]
