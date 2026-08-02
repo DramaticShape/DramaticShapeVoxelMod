@@ -66,7 +66,13 @@
 --                           so the books stand in the shelf instead of
 --                           being painted on it.  A tileset that
 --                           borrows the collapse for something that is
---                           not a shelf says `bookcase_relief = false`
+--                           not a shelf says `bookcase_relief = false`.
+--                           A tileset that borrows it for a MACHINE
+--                           whose "lid" still reads as face art on the
+--                           plateau (Bill's transporter drums) says
+--                           `bookcase_solid_top = true` and the top
+--                           wears a solid of the face's majority fill,
+--                           the same rule interior walls use
 --   cylinder / canopy       round scenery (tree canopies): a voxel hull
 --   / stump                 cut from the art's own darkest-pixel outline,
 --                           round in depth -- one 16px cell, a 2x2-cell
@@ -1901,6 +1907,11 @@ return {
       -- light regions are the barrel's own lit face and not panes
       -- behind a frame.  Sinking them would dent the drum.
       bookcase_relief = false,
+      -- Same reason the top is a solid of the face colour rather than
+      -- the lid tile laid flat: 7/8/9/10 is the drum's drawn lid, but
+      -- laid across the plateau it still reads as the barrel's circles
+      -- smeared on top.  Interior walls already take this path.
+      bookcase_solid_top = true,
       -- The big OCTAGONAL boardroom table -- the Fan Club's and Silph
       -- 11F's, the same drawing in both -- half a cell high, and half a
       -- cell on purpose.  A `counter` is ONE band: exactly the drawing's
