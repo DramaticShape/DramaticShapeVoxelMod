@@ -1130,6 +1130,23 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
     Voxel3D.glass(true)
   end
 
+  -- HORDE MODE's handgun, in the same slot and for the same reasons: a
+  -- prop over the world with real depth, no wireframe and no glass. In VR
+  -- it rides the tracked right hand (lib/VR placed it this frame); on the
+  -- flat screen it is carried by the camera, which is why it draws here
+  -- rather than in the overlay -- a view model that is 2D cannot be
+  -- occluded by the wall the player just backed into.
+  do
+    local HordeGun = V.require("HordeGun")
+    if HordeGun.visible() then
+      Voxel3D.glass(false)
+      Voxel3D.seams(false)
+      HordeGun.draw()
+      Voxel3D.seams(true)
+      Voxel3D.glass(true)
+    end
+  end
+
   end   -- drawScene
 
   if not eyes then
