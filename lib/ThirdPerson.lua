@@ -67,6 +67,43 @@ ThirdPerson.SHOULDER = 4
 -- dive so stepping 75 -> 1ST -> 3RD reads as one continuous camera
 ThirdPerson.BOOM_TIME = 0.35
 
+-- ------- the player's own zoom
+--
+-- A multiplier on BOOM, stepped by the wheel, Q/E or a pinch (see
+-- CamControl, which owns every one of those and decides which camera a
+-- given input is aimed at). The range is deliberately wider IN than OUT:
+-- close is the shot people reach for, and far enough out the character is
+-- a few pixels and the rung may as well be an orbit rung.
+--
+-- Stepped in fractions rather than world pixels so a notch feels the same
+-- at both ends -- the near end of a linear step would crawl and the far
+-- end would leap.
+ThirdPerson.ZOOM_MIN = 0.45           -- ~22px: over the shoulder, close
+ThirdPerson.ZOOM_MAX = 2.4            -- ~115px: the character in a landscape
+ThirdPerson.ZOOM_STEP = 1.18          -- one wheel notch / key press
+ThirdPerson.ZOOM_TIME = 0.18          -- how fast the eye eases to a new one
+
+ThirdPerson.zoom = 1                  -- eased, what place() actually uses
+ThirdPerson.zoomGoal = 1              -- what the input asked for
+
+-- Step the zoom by `notches` (positive pulls the camera OUT). Returns true
+-- when the goal actually moved, so a caller can tell "zoomed" from "already
+-- at the stop" and let the input fall through.
+function ThirdPerson.stepZoom(notches)
+  local was = ThirdPerson.zoomGoal
+  local goal = was * (ThirdPerson.ZOOM_STEP ^ (notches or 0))
+  ThirdPerson.zoomGoal = math.max(ThirdPerson.ZOOM_MIN,
+                          math.min(ThirdPerson.ZOOM_MAX, goal))
+  return ThirdPerson.zoomGoal ~= was
+end
+
+-- Scale the zoom by a continuous factor -- what a pinch hands over, where
+-- the gesture's own scale IS the answer and there are no notches.
+function ThirdPerson.scaleZoom(factor)
+  if not (factor and factor > 0) then return false end
+  return ThirdPerson.stepZoom(math.log(factor) / math.log(ThirdPerson.ZOOM_STEP))
+end
+
 -- ------- the collision's numbers
 --
 -- STEP is how far apart the samples along the boom line are, in world
@@ -263,10 +300,20 @@ end
 -- target rather than easing, so picking 3RD from an orbit rung is one
 -- motion (the dive) rather than two (a dive, then a slide backwards).
 function ThirdPerson.update(dt, blend)
+  -- the player's own zoom FIRST, so everything below measures itself
+  -- against the boom length this frame actually wants. A step is a request
+  -- rather than a jump: three notches of wheel should read as one glide.
+  local zg = ThirdPerson.zoomGoal
+  if ThirdPerson.zoom ~= zg then
+    local k = math.min(1, dt / ThirdPerson.ZOOM_TIME)
+    local z = ThirdPerson.zoom + (zg - ThirdPerson.zoom) * k
+    ThirdPerson.zoom = (math.abs(zg - z) < 1e-4) and zg or z
+  end
+
   local target = ThirdPerson.selected() and 1 or 0
   if (blend or 0) <= 0 then
     ThirdPerson.out = target
-    ThirdPerson.len = ThirdPerson.BOOM * target
+    ThirdPerson.len = ThirdPerson.reachFor() * target
     -- and the wanted length with it: place() is what normally maintains it
     -- and it does not run at all while the rig is out of the frame, so a
     -- stale want left here would have the recovery below creeping the boom
@@ -290,6 +337,13 @@ function ThirdPerson.update(dt, blend)
   end
 end
 
+-- The boom's full length right now, before the world has its say: BOOM at
+-- the player's own zoom. Named so the collision march and the shoulder
+-- fade measure themselves against the same number.
+function ThirdPerson.reachFor()
+  return ThirdPerson.BOOM * ThirdPerson.zoom
+end
+
 -- ------- the eye
 --
 -- Where the camera stands, given the pivot the first-person rig would have
@@ -310,7 +364,7 @@ function ThirdPerson.place(pivot, lx, ly, lz, focus)
   local up = ThirdPerson.PIVOT_LIFT * e
   local orbit = { pivot[1], pivot[2] + up, pivot[3] }
 
-  local want = ThirdPerson.BOOM * e
+  local want = ThirdPerson.reachFor() * e
   ThirdPerson.want = want
   local room = ThirdPerson.reach(overworld(), orbit, -lx, -ly, -lz, want)
   -- in instantly, out only as fast as update() allows
@@ -322,10 +376,14 @@ function ThirdPerson.place(pivot, lx, ly, lz, focus)
   -- distance. Right of the look, flat: cross(look, worldUp) normalized,
   -- which for a look of (sin y, *, cos y) is (-cos y, 0, sin y) -- the same
   -- right hand FirstPerson.moveWorld strafes along.
+  -- The rail rides the ZOOM as well, so it stays the same fraction of the
+  -- frame at every distance: a fixed four pixels would swamp the close shot
+  -- and vanish from the wide one.
   local flat = math.sqrt(lx * lx + lz * lz)
   local sx, sz = 0, 0
   if flat > 1e-6 then
-    local s = ThirdPerson.SHOULDER * e * (len / math.max(want, 1e-6))
+    local s = ThirdPerson.SHOULDER * ThirdPerson.zoom * e
+              * (len / math.max(want, 1e-6))
     sx, sz = -lz / flat * s, lx / flat * s
   end
 

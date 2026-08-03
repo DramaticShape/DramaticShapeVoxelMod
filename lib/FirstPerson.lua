@@ -149,16 +149,50 @@ function FirstPerson.engaged()
   return Voxel.isFreeCam(Voxel.level) and Voxel3D.available()
 end
 
--- Whether first person should be READING the player's inputs right now:
--- engaged, with the overworld on top of the stack (a menu, a dialog or a
--- battle above it owns the buttons, exactly as it does for grid walking).
-function FirstPerson.driving()
-  if not FirstPerson.engaged() then return false end
+-- Whether the overworld is what the player is looking at: nothing pushed
+-- over it, so the buttons are free-roam's. Shared with everything else in
+-- the mod that asks the same question of the same stack (CamControl's
+-- zooms above all), rather than each restating the pcall.
+function FirstPerson.onTop()
   local ok, top, ow = pcall(function()
     local Game = require("src.core.Game")
     return Game.stack and Game.stack:top(), Game.overworld
   end)
   return ok and top ~= nil and top == ow
+end
+
+-- Whether first person should be READING the player's inputs right now:
+-- engaged, with the overworld on top of the stack (a menu, a dialog or a
+-- battle above it owns the buttons, exactly as it does for grid walking).
+function FirstPerson.driving()
+  return FirstPerson.engaged() and FirstPerson.onTop()
+end
+
+-- The right stick's live X, for a camera that is not this one: while a
+-- battle is staged the free-roam look is not driving, but the axes are
+-- still arriving on the wrap below (which records whatever the rung), and
+-- the battle's orbit wants them. Reading them here rather than wrapping
+-- the same seam twice.
+function FirstPerson.stickX()
+  return stick.x or 0
+end
+
+-- ------- lending the look finger out
+--
+-- A pinch needs both fingers on the screen, and one of them is very likely
+-- the finger this module claimed as the look drag. Rather than have the
+-- pinch fight for it, CamControl asks for it: dropLook while the gesture
+-- runs, reseatLook on whichever finger survives it. Re-seating rather than
+-- simply releasing is what stops the view snapping by however far the
+-- pinch travelled -- the finger carries on as the look drag from where it
+-- now is, which is what it looks like it should do.
+function FirstPerson.dropLook()
+  lookTouch = nil
+end
+
+function FirstPerson.reseatLook(id, x, y)
+  if id == nil then lookTouch = nil return end
+  lookTouch = { id = id, x = x, y = y }
 end
 
 -- The eased blend, 0 at the orbit and 1 in the head.

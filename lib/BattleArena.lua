@@ -242,7 +242,10 @@ end
 -- Whether both mons would be in plain view from the battle camera.
 function BattleArena.clearance(map, arena)
   local BattleCam = V.require("BattleCam")
-  local ok, rig = pcall(BattleCam.rig, arena, 0)
+  -- the CANONICAL shot: whether a fight fits somewhere is a fact about the
+  -- ground, so it must not depend on the drift's phase or on where the
+  -- player last swung the camera (see BattleCam.rig's third argument)
+  local ok, rig = pcall(BattleCam.rig, arena, 0, true)
   if not (ok and rig and rig.eye) then return true end
   local eye = rig.eye
   local H = BattleArena.MON_H

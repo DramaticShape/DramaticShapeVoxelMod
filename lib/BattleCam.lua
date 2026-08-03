@@ -124,6 +124,50 @@ BattleCam.PAN_PERIOD = 26         -- seconds for one there-and-back
 BattleCam.PAN_DOLLY = 0.02        -- how far the eye breathes, as a fraction
 BattleCam.DOLLY_PERIOD = 37
 
+-- ------- the player's own orbit
+--
+-- The drift above is the shot breathing. THIS is the player steering it:
+-- a right stick, a drag across the screen or the mouse walks the eye
+-- around the arena's axis, and it stops at both ends.
+--
+-- 0 is the shot the rig was solved for and the LEFT stop, because there is
+-- nothing to the left of it -- the composition below is what the whole
+-- module exists to land, and past it the two mons start swapping sides.
+--
+-- 1 is SIDE-ON: the eye swung round until it is square to the arena's
+-- north-south axis, where the two mons stand at the same distance instead
+-- of one behind the other. That is as far as the picture stays a battle
+-- rather than a diorama with two Pokemon in it, and it is a different angle
+-- for each rig -- the tele lens starts 28 degrees off the axis and the wide
+-- one 45 -- so the stop is COMPUTED from the rig rather than written down,
+-- and retuning either moves its own stop with it.
+--
+-- The input is deliberately not 1:1 with the pixels: it accumulates into
+-- `orbitGoal` and the live angle eases after it, so a flick reads as the
+-- camera being pushed rather than as the camera being dragged.
+BattleCam.ORBIT_TIME = 0.22       -- seconds for the eye to catch its goal
+BattleCam.ORBIT_DRAG = 1.15       -- fraction of the range per screen width
+BattleCam.ORBIT_STICK = 0.9       -- fraction of the range per second, full tilt
+BattleCam.ORBIT_MOUSE = 0.0011    -- fraction of the range per mouse count
+BattleCam.STICK_DEAD = 0.2
+
+-- ------- and the player's own zoom
+--
+-- How much world the frame holds, as a multiple of the rig's own frameH:
+-- BELOW one is zoomed in. It has to be the LENS rather than the distance,
+-- because the rig derives its field of view from frameH and the distance
+-- together -- so moving the eye alone changes the perspective and not the
+-- framing, which is exactly what the dolly breath above is for.
+BattleCam.ZOOM_MIN = 0.45         -- the pair filling the frame
+BattleCam.ZOOM_MAX = 2.0          -- the fight in its own landscape
+BattleCam.ZOOM_STEP = 1.15
+BattleCam.ZOOM_TIME = 0.18
+
+BattleCam.orbit = 0
+BattleCam.orbitGoal = 0
+BattleCam.zoom = 1
+BattleCam.zoomGoal = 1
+
 -- Hold the rig perfectly still (VR sets this while a session runs). The
 -- drift exists to give a FLAT screen the depth cue the picture cannot
 -- have; a headset gets real parallax from the player's own head, and a
@@ -134,8 +178,79 @@ BattleCam.still = false
 
 BattleCam.t = 0
 
+-- Every fight opens on the shot the rig was solved for: the orbit and the
+-- zoom are a way of LOOKING at this battle, not a preference carried into
+-- the next one, and a player who left the camera side-on an hour ago should
+-- not have the next encounter open there.
 function BattleCam.reset()
   BattleCam.t = 0
+  BattleCam.orbit, BattleCam.orbitGoal = 0, 0
+  BattleCam.zoom, BattleCam.zoomGoal = 1, 1
+end
+
+-- How far the eye may swing, in radians, before it is square to the arena's
+-- axis. The rig's own stance decides it: `side` and `back` are the offset
+-- it starts at, so the bearing it starts on is atan2(side, back) and what
+-- is left to a quarter turn is the room the player has.
+function BattleCam.orbitRange(arena)
+  local R = BattleCam.rigFor(arena)
+  return math.max(0, math.pi / 2 - math.atan2(R.side, R.back))
+end
+
+-- ------- what the player's inputs reach
+--
+-- All four take a signed amount and clamp; positive is RIGHTWARD, toward
+-- the side-on stop. Returning whether the goal actually moved lets a
+-- caller tell "steered" from "already against the stop".
+
+local function setOrbit(goal)
+  local was = BattleCam.orbitGoal
+  BattleCam.orbitGoal = math.max(0, math.min(1, goal))
+  return BattleCam.orbitGoal ~= was
+end
+
+-- A drag, in fractions of the screen's width.
+function BattleCam.dragOrbit(fraction)
+  return setOrbit(BattleCam.orbitGoal + (fraction or 0) * BattleCam.ORBIT_DRAG)
+end
+
+-- Relative mouse motion, in counts.
+function BattleCam.mouseOrbit(dx)
+  return setOrbit(BattleCam.orbitGoal + (dx or 0) * BattleCam.ORBIT_MOUSE)
+end
+
+-- A stick held for `dt` seconds, as a rate with a squared response -- the
+-- first half of the throw aims and the rest travels, the same curve the
+-- free-roam look uses.
+function BattleCam.stickOrbit(x, dt)
+  local a = math.abs(x or 0)
+  if a < BattleCam.STICK_DEAD then return false end
+  a = (a - BattleCam.STICK_DEAD) / (1 - BattleCam.STICK_DEAD)
+  local v = ((x < 0) and -1 or 1) * a * a
+  return setOrbit(BattleCam.orbitGoal
+                  + v * BattleCam.ORBIT_STICK * (dt or 0))
+end
+
+-- The zoom, in notches (positive pulls OUT, like every other zoom here).
+function BattleCam.stepZoom(notches)
+  local was = BattleCam.zoomGoal
+  BattleCam.zoomGoal = math.max(BattleCam.ZOOM_MIN,
+                        math.min(BattleCam.ZOOM_MAX,
+                                 was * (BattleCam.ZOOM_STEP ^ (notches or 0))))
+  return BattleCam.zoomGoal ~= was
+end
+
+-- How much world the frame holds right now: the rig's own reach at the
+-- player's zoom. The sun's box is fitted to this too, so a zoomed shot
+-- lights exactly the ground it shows.
+function BattleCam.frameH(arena)
+  return BattleCam.rigFor(arena).frameH * BattleCam.zoom
+end
+
+local function chase(now, goal, dt, time)
+  if now == goal then return goal end
+  local v = now + (goal - now) * math.min(1, (dt or 0) / time)
+  return (math.abs(goal - v) < 1e-4) and goal or v
 end
 
 -- Real frame time, like every other presentational tween in this mod: a
@@ -146,6 +261,12 @@ function BattleCam.update(dt)
   -- float precision in the sines below
   local wrap = BattleCam.PAN_PERIOD * BattleCam.DOLLY_PERIOD
   if BattleCam.t > wrap then BattleCam.t = BattleCam.t - wrap end
+  -- and the steered pair easing after whatever the player last asked for,
+  -- which is what keeps a flick of the stick from being a cut
+  BattleCam.orbit = chase(BattleCam.orbit, BattleCam.orbitGoal, dt,
+                          BattleCam.ORBIT_TIME)
+  BattleCam.zoom = chase(BattleCam.zoom, BattleCam.zoomGoal, dt,
+                         BattleCam.ZOOM_TIME)
 end
 
 local function phase(t, period)
@@ -163,17 +284,32 @@ end
 --
 -- `groundY` is the height of the arena floor, so a fight staged on a ledge
 -- or a raised walkway is shot from above THAT rather than from inside it.
-function BattleCam.rig(arena, groundY)
+-- `canonical` asks for the shot the rig was SOLVED for -- no drift, no
+-- breath, no steer, no zoom -- from a caller that is reasoning about the
+-- arena rather than drawing it. BattleArena's clearance test is the one
+-- that needs it: whether a fight can be staged somewhere is a fact about
+-- the ground, and answering it through whatever angle the player happened
+-- to leave the last battle on would pick a different arena depending on
+-- where they had swung the camera an hour ago.
+function BattleCam.rig(arena, groundY, canonical)
   groundY = groundY or 0
   local R = BattleCam.rigFor(arena)
   local mx, mz = arena.mid[1], arena.mid[2]
+  -- VR asks for the same stillness for its own reason (see BattleCam.still)
+  local fixed = BattleCam.still or canonical
 
-  local yaw = BattleCam.still and 0
-              or BattleCam.PAN_YAW * phase(BattleCam.t, BattleCam.PAN_PERIOD)
+  -- The drift, plus wherever the player has steered to. The steer is
+  -- NEGATIVE because the rotation below runs the other way from the bearing
+  -- it turns: rotating (side, back) by +yaw carries the eye back toward the
+  -- arena's own axis, and the room the player has is all on the far side of
+  -- that -- out toward square-on. (orbitRange measures exactly that room.)
+  local steer = fixed and 0 or -BattleCam.orbit * BattleCam.orbitRange(arena)
+  local yaw = steer + (fixed and 0
+              or BattleCam.PAN_YAW * phase(BattleCam.t, BattleCam.PAN_PERIOD))
   local c, s = math.cos(yaw), math.sin(yaw)
   -- the breath scales the whole offset, height included, so the eye moves
   -- along its own line to the arena and the pitch of the shot never changes
-  local k = BattleCam.still and 1
+  local k = fixed and 1
             or 1 + BattleCam.PAN_DOLLY
                    * phase(BattleCam.t, BattleCam.DOLLY_PERIOD)
   local dx = (R.side * c - R.back * s) * k
@@ -188,10 +324,17 @@ function BattleCam.rig(arena, groundY)
   local dist = math.max(1, math.sqrt(ex * ex + ey * ey + ez * ez))
   local horiz = math.sqrt(ex * ex + ez * ez)
 
+  -- The lens carries the player's zoom: how much world the frame holds is
+  -- the one thing that actually changes the framing here, because the field
+  -- of view is DERIVED from that reach and the distance. Moving the eye
+  -- instead would leave the picture the same size and only change its
+  -- perspective -- which is what the dolly breath above is deliberately
+  -- for, and is not what "zoom" means to anyone holding a wheel.
+  local frameH = fixed and R.frameH or BattleCam.frameH(arena)
   return {
     eye = eye,
     focus = focus,
-    fov = 2 * math.atan((R.frameH / 2) / dist),
+    fov = 2 * math.atan((frameH / 2) / dist),
     -- the world curve is a free-roam flourish that bends the horizon away
     -- from the player; a fixed camera on a staged shot has no player to bend
     -- around, and the bend would tip the arena floor out from under the mons

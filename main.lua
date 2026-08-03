@@ -93,6 +93,7 @@ local Water = V.require("Water")
 local AntiAlias = V.require("AntiAlias")
 local FirstPerson = V.require("FirstPerson")
 local FreeMove = V.require("FreeMove")
+local CamControl = V.require("CamControl")
 local VR = V.require("VR")
 
 -- Forward declaration: the voxel pipeline's update hook (registered below)
@@ -538,6 +539,17 @@ do
   function Game:keypressed(key)
     local claim = HOTKEYS[key]
     local top = self.stack and self.stack:top()
+    -- Q and E work whichever camera is in front of the player -- the
+    -- battle's lens, the third-person boom, or the engine's own survey
+    -- zoom on an orbit rung. CamControl answers which, and answers "none"
+    -- for 1ST and for every screen with no camera of ours behind it, in
+    -- which case the key falls through untouched. Ahead of the hotkey
+    -- table because unlike those it is NOT free-roam only: a staged battle
+    -- is exactly where the zoom is most wanted.
+    if (key == "q" or key == "e")
+       and not (top and top.onKeyPressed) then
+      if CamControl.zoomBy(key == "q" and 1 or -1) then return end
+    end
     -- A screen with its own key handler gets the key first, exactly as the
     -- engine's first branch does: typing a nickname must not toggle a
     -- render mode. Only free-roam presses are ours to take.
@@ -888,6 +900,17 @@ OverworldBattle.install()
 -- file argues the whole arrangement.
 FirstPerson.install()
 FreeMove.install()
+
+-- ------- the zooms, and the battle camera the player can steer
+--
+-- CamControl claims the wheel, Q/E, the mouse and the touch screen for
+-- whichever camera is actually in front of the player -- the staged
+-- battle's, the third-person boom, or the engine's own survey zoom -- and
+-- forwards everything else. Installed AFTER the two above deliberately: a
+-- wrap installed later is the OUTER one, so a fight gets first refusal on
+-- the mouse and the fingers, which is right, because while one is staged
+-- the free-roam look is not driving.
+CamControl.install()
 
 -- ------- SELECT walks the angle ladder
 --
