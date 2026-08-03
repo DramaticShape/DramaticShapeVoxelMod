@@ -234,11 +234,19 @@ function FreeMove.tick(state)
   -- which way a bonk points
   p.facing = FirstPerson.compassFacing()
 
-  if input:wasPressed("a") then
+  -- HORDE MODE takes both of these away for as long as it runs: there is
+  -- no pausing (START), and nobody stops to read a sign with the horde
+  -- coming (A, which is also the button the mode's own GAME OVER card
+  -- wants left unspent). Everything below -- the walk, the wall slide and
+  -- the blocked-push verbs, warps included -- keeps working, because the
+  -- crowd has to be able to follow the player through a door.
+  local suppressed = V.require("Horde").suppressWorldInput()
+
+  if not suppressed and input:wasPressed("a") then
     state:interact()
     return
   end
-  if input:wasPressed("start") then
+  if not suppressed and input:wasPressed("start") then
     require("src.core.Sound").play(Game.data, "Start_Menu")
     require("src.ui.Screens").push(Game, "StartMenu")
     return

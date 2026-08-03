@@ -93,6 +93,13 @@ local AntiAlias = V.require("AntiAlias")
 local FirstPerson = V.require("FirstPerson")
 local FreeMove = V.require("FreeMove")
 local VR = V.require("VR")
+-- HORDE MODE: the konami code's minigame. Horde owns the state machine and
+-- every hook; the other four are the gun, the crowd, the readout and the
+-- chip-synthesized sounds it fires. See lib/Horde.lua for the whole design.
+local Horde = V.require("Horde")
+local HordeGun = V.require("HordeGun")
+local HordeHud = V.require("HordeHud")
+local HordeSfx = V.require("HordeSfx")
 
 -- Forward declaration: the voxel pipeline's update hook (registered below)
 -- calls this, and it is defined further down with the settings it drives.
@@ -191,6 +198,12 @@ mod.content.render_pipelines:register("voxel", {
     -- and the whole battle. Ahead of the active() gate below, because a 3D
     -- battle does not require the free-roam mode to be switched on.
     OverworldBattle.update(dt)
+    -- The horde, on the same always-running tick and for the same reason:
+    -- it owns no pass of the frame, it is a MODE over the overworld, and
+    -- it has to keep thinking while a warp's wipe covers the screen (the
+    -- crowd follows the player through the door) and under the GAME OVER
+    -- card, which is a pushed state that stops everything below it.
+    Horde.update(dt)
     -- VOID FILL picks the block the border ring is made of, and in this
     -- mode that ring is BAKED INTO THE MESH rather than drawn each frame.
     -- So the option has to reach the cache or nothing happens on screen
@@ -256,6 +269,12 @@ mod.content.render_pipelines:register("voxel", {
       -- pixels, so only the scale needs saying.
       ctx.drawFx(function(wx, wy) return Voxel3D.project(wx, 0, wy) end,
                  ctx.scale * AntiAlias.factor())
+      -- the horde's readout rides the same overlay, over the FX: health,
+      -- ammunition, the crosshair and the banners, sized in the same
+      -- supersampled canvas pixels everything else here is drawn in. A
+      -- headset never reaches this line (drawWorld returns the mirror
+      -- above) -- lib/VR draws the same HUD onto each eye instead.
+      HordeHud.drawFlat(rw, rh, ctx.scale * AntiAlias.factor())
       Voxel3D.endOverlay()
     end
     -- and back to the window's own size, which is what the engine composites
@@ -507,6 +526,11 @@ local HOTKEYS = {
 -- the key has always delegated (see the wrap below for why).
 local function cycleVoxel(game)
   local Pipelines = require("src.render.Pipelines")
+  -- HORDE MODE holds the rung at 1ST for as long as it runs. Refused HERE
+  -- rather than at each caller because this one function IS every way a
+  -- player can step the ladder: the "3" key, the pad's SELECT, and the VR
+  -- left-stick click all come through it.
+  if Horde.viewLocked() then return false end
   local top = game.stack and game.stack:top()
   if not Pipelines.canToggle("voxel", top, game.overworld) then return false end
   Pipelines.setLevel("voxel", Voxel.nextHotkeyLevel(Pipelines.level("voxel")))
@@ -535,6 +559,16 @@ do
   local inner = Game.keypressed
 
   function Game:keypressed(key)
+    -- HORDE MODE owns the keyboard's spare keys while it runs: R reloads,
+    -- and the mode keys are swallowed rather than left to change the rung
+    -- or the post-processing out from under a locked camera.
+    if Horde.active then
+      if key == "r" then
+        HordeGun.reload()
+        return
+      end
+      if HOTKEYS[key] then return end
+    end
     local claim = HOTKEYS[key]
     local top = self.stack and self.stack:top()
     -- A screen with its own key handler gets the key first, exactly as the
@@ -886,6 +920,59 @@ OverworldBattle.install()
 FirstPerson.install()
 FreeMove.install()
 
+-- ------- horde mode
+--
+-- The sounds are registered before anything can ask for one; the hooks go
+-- in AFTER FreeMove (and, below, after the SELECT wrap) so the mode's own
+-- handleInput reasoning sits outside both of theirs, for the same reason
+-- the SELECT hook does.
+--
+-- The GAME OVER card is a screens-registry record rather than a state
+-- this file pushes directly: that is the engine's own seam for a mod
+-- owning a screen, and it means the card is reachable by id from a driver
+-- or a test without going through a death.
+HordeSfx.register(mod)
+
+mod.content.screens:register("HordeGameOver", {
+  new = function(game) return V.require("HordeGameOver").new(game) end,
+})
+
+-- The gamepad's triggers, which nothing else in the engine or this mod
+-- claims: the RIGHT one fires and the LEFT one aims. Read as axes because
+-- that is what SDL calls them; the 0.5 crossing is the press. Installed
+-- beside the other input wraps, and inert with the mode off.
+do
+  local Game = require("src.core.Game")
+  if not Game.dramaticShapeHordeTriggers then
+    local inner = Game.gamepadaxis
+    local rightDown = false
+    function Game:gamepadaxis(joystick, axis, value)
+      if Horde.playing() then
+        if axis == "triggerright" then
+          local down = (value or 0) > 0.5
+          if down and not rightDown then HordeGun.fire() end
+          rightDown = down
+        elseif axis == "triggerleft" then
+          HordeGun.setAds((value or 0) > 0.35)
+        end
+      elseif rightDown then
+        rightDown = false
+      end
+      return inner(self, joystick, axis, value)
+    end
+    -- and X reloads, the only pad button the overworld does not already use
+    local innerBtn = Game.gamepadpressed
+    function Game:gamepadpressed(joystick, button)
+      if Horde.playing() and button == "x" then
+        HordeGun.reload()
+        return
+      end
+      return innerBtn(self, joystick, button)
+    end
+    Game.dramaticShapeHordeTriggers = true
+  end
+end
+
 -- ------- SELECT walks the angle ladder
 --
 -- The same step the "3" key makes, on the pad's own button: a phone (and
@@ -917,6 +1004,15 @@ do
     OverworldState.dramaticShapeSelectHook = true
   end
 end
+
+-- ------- the konami code, and everything it turns on
+--
+-- Installed last of the input seams so its handleInput reasoning sits
+-- outside FreeMove's and SELECT's. The detector itself does not live on
+-- handleInput at all -- it reads the fixed step's own press queue, which
+-- is where keyboard, pad, touch and the VR controllers have all already
+-- become the same eight buttons. See lib/Horde.lua.
+Horde.install()
 
 -- ------- edge-anchored menus stay in the GB frame while a headset is live
 --
@@ -1044,7 +1140,7 @@ mod.hooks:wrap("world.tod", function(next, tod, ctx)
   return DayNight.tod()
 end)
 
-mod.exports.version = "1.5.2"
+mod.exports.version = "1.6.0"
 -- exposed so a companion mod can pin its own tiles' shapes or read the
 -- camera without reaching into this mod's file layout
 mod.exports.lib = V

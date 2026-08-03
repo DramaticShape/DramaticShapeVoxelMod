@@ -316,6 +316,22 @@ local function renderWorld(views, ctl)
     Pokedex.clear()
   end
 
+  -- and the horde's gun on the tracked RIGHT hand, under the same
+  -- mapping. The AIM pose where the runtime offers one -- the barrel
+  -- should point where the player is pointing, not along their wrist --
+  -- and the grip pose as the fallback. Placed here rather than in the
+  -- draw because the shot is traced down the model's own axis, so the
+  -- matrix has to exist before anything can be hit with it.
+  do
+    local HordeGun = V.require("HordeGun")
+    local right = ctl and (ctl.aimr or ctl.handr) or nil
+    if right and fp and not battle and V.require("Horde").active then
+      HordeGun.place(right, pivot, anchor, scale, mountYaw)
+    else
+      HordeGun.clear()
+    end
+  end
+
   local eyes = {}
   for i = 1, 2 do
     local v = views[i]
@@ -339,14 +355,26 @@ local function renderWorld(views, ctl)
   end
 
   -- the snap's fade, over the finished eyes: plain black at this moment's
-  -- strength, drawn before the blit so the headset never sees the swap
-  if fadeAlpha > 0 then
+  -- strength, drawn before the blit so the headset never sees the swap.
+  -- The horde's HUD goes on in the same pass and for the same reason:
+  -- this is the one place the mod draws 2D over a finished eye. It cannot
+  -- ride the window's overlay -- with a headset live that pass returns
+  -- the mirror and never runs.
+  local hordeUp = V.require("Horde").active
+  if fadeAlpha > 0 or hordeUp then
     pcall(function()
+      local HordeHud = hordeUp and V.require("HordeHud") or nil
       for i = 1, 2 do
         local c = canvases[i]
         love.graphics.setCanvas(c)
-        love.graphics.setColor(0, 0, 0, math.min(1, fadeAlpha))
-        love.graphics.rectangle("fill", 0, 0, c:getWidth(), c:getHeight())
+        if fadeAlpha > 0 then
+          love.graphics.setColor(0, 0, 0, math.min(1, fadeAlpha))
+          love.graphics.rectangle("fill", 0, 0, c:getWidth(), c:getHeight())
+        end
+        if HordeHud then
+          love.graphics.setColor(1, 1, 1, 1)
+          HordeHud.drawEye(c:getWidth(), c:getHeight())
+        end
       end
       love.graphics.setCanvas()
       love.graphics.setColor(1, 1, 1, 1)
@@ -501,9 +529,25 @@ local function driveControls(ctl, dt, fp)
   if not (ok and Game.input) then return end
   local inp = Game.input
 
-  setGB(inp, "a", ctl.a)
-  setGB(inp, "b", ctl.b)
-  setGB(inp, "start", ctl.start)
+  -- HORDE MODE re-reads the right hand as a weapon: the trigger fires
+  -- (its own OpenXR action, suggested alongside START on the same input
+  -- -- see VRXR.setupInput), and B reloads. START is dropped rather than
+  -- forwarded, because the mode does not pause. Everything else -- the
+  -- stick's walk, the snap turn, A -- keeps working, so the player can
+  -- still move and look while they are being chased.
+  local Horde = V.require("Horde")
+  if Horde.playing() then
+    local Gun = V.require("HordeGun")
+    if ctl.fireChanged and ctl.fire then Gun.fire() end
+    if ctl.bChanged and ctl.b then Gun.reload() end
+    setGB(inp, "a", ctl.a)
+    setGB(inp, "b", false)
+    setGB(inp, "start", false)
+  else
+    setGB(inp, "a", ctl.a)
+    setGB(inp, "b", ctl.b)
+    setGB(inp, "start", ctl.start)
+  end
 
   -- the left stick, through the engine's OWN stick handler: it quantises
   -- to the grid d-pad for the diorama, and FirstPerson.moveVector reads
@@ -675,6 +719,7 @@ function VR.invalidate()
   if dexCanvas and dexCanvas.release then pcall(dexCanvas.release, dexCanvas) end
   dexCanvas = nil
   Pokedex.invalidate()
+  V.require("HordeGun").invalidate()
   for k in pairs(fboCache) do fboCache[k] = nil end
 end
 

@@ -19,6 +19,7 @@ return {
       "SELECT in free roam steps the VOXEL ladder exactly as hotkey 3 does -- the button has no overworld job in Gen 1, and phones and pads have no number row; menus keep it untouched",
       "on the 1ST rung ONLY, the grid walk is replaced by free camera-relative movement: collision, warps, ledges, encounters and scripts still run through the engine's own machinery, and every other rung leaves movement untouched",
       "on the 1ST rung the mouse cursor is captured for free look; left click is A, right click is B, and any touch off the overlay's controls drags the view",
+      "while HORDE MODE runs, the world is held still around it: no wild encounters, no trainers walking up, no talking to anyone, no START menu and no changing the camera rung -- doors and warps keep working, because the crowd follows the player through them",
     },
     added = {
       "VOXEL options row and hotkey 3 (OFF / 15 / 35 / 50 / 75 degrees / 1ST, a first-person camera with free look and free movement)",
@@ -33,6 +34,8 @@ return {
       "an over-the-shoulder battle camera on a slow parallax orbit, with a depth-of-field pass that holds both mons sharp",
       "a sky behind the diorama at the 75-degree rung, outdoor maps only, coloured by the active palette mode",
       "a hand-authored tile shape profile (data/voxel_heights.lua) a mod can extend",
+      "HORDE MODE, on the konami code (Up Up Down Down Left Right Left Right B A) standing in the overworld: the sky drops to a starless violet night, the Lavender Town theme comes up, the camera locks into the player's own head (in VR too), a voxel handgun with working iron sights appears in the right hand, and waves of people -- the map's own NPCs among them -- walk out of the dark to kill you. Score per kill, a random Pokemon cry for each one that falls, no pausing; the horde follows you through doors. Health out is a GAME OVER card with the score and PRESS A, which puts the map, the cell, the facing, the camera rung, the hour, the music and every NPC back exactly as they were. Fire on left click, the pad's right trigger or B, a tap on a touch screen, or the right trigger in VR; reload on R, the pad's X, or B on the right controller; aim down the sights on right click or the left trigger",
+      "the horde's gunshot, dry fire, magazine and slide sounds, synthesized on the game's own emulated Game Boy sound hardware (no audio files ship with the mod)",
     },
     known = {
       "needs shader and depth-canvas support; without them the rows still cycle but the world stays 2D and battles draw plainly",
@@ -53,6 +56,9 @@ return {
       "while the VR row is ON, 3D-BTL is held ON and BACK SPRITES held OFF (the headset's battle staging assumes both), and both rows leave the OPTIONS menu until VR goes off -- their stored values come back with them",
       "while a headset is live the battle HUDs keep their classic in-frame slots instead of snapping to the window's edges, and the engine's edge-anchored menus (the START menu above all) are held inside the frame the same way, on the flat mirror too -- both VR screens crop to the GB frame, and a block at the window's edge would be cropped away with it",
       "VR swapchains prefer plain RGBA8; a runtime that only offers sRGB shows slightly lifted colours",
+      "HORDE MODE needs the 3D pass, like every rung that has a camera in it: without one the code is refused and nothing happens",
+      "the horde's crowd are the overworld's own sprite billboards, so at close range they are flat cards the size of a person -- they hold two cells off the player for that reason, close enough to swing and far enough to be seen past",
+      "a run is not saved: the score and the best score ride the save slot, but the mode itself has no state to resume, and quitting mid-run simply ends it",
     },
   },
   credits = {

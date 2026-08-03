@@ -528,6 +528,18 @@ local function setupInput()
     gripr = makeAction(set, "grip_r", XR.ACTION_TYPE_FLOAT, "Right Grip"),
     handl = makeAction(set, "hand_l", XR.ACTION_TYPE_POSE, "Left Hand"),
     handr = makeAction(set, "hand_r", XR.ACTION_TYPE_POSE, "Right Hand"),
+    -- HORDE MODE's two. `fire` is bound ALONGSIDE start on the right
+    -- trigger rather than instead of it: bindings are suggested once,
+    -- before the session attaches its action sets, so they cannot be
+    -- swapped when the mode starts -- and OpenXR is happy for two actions
+    -- to share an input. Outside the mode nothing reads `fire`, so the
+    -- trigger is START exactly as it always was; inside it, lib/VR reads
+    -- `fire` and drops START on the floor (there is no pausing anyway).
+    -- `aimr` is the pose a runtime defines as "where the user is
+    -- pointing", which is what a gun wants -- the grip pose points along
+    -- the controller's own body, which is a wrist, not a barrel.
+    fire = makeAction(set, "fire", XR.ACTION_TYPE_BOOLEAN, "Fire"),
+    aimr = makeAction(set, "aim_r", XR.ACTION_TYPE_POSE, "Right Aim"),
   }
 
   local function suggest(profile, list)
@@ -560,6 +572,8 @@ local function setupInput()
     { A.gripr, "/user/hand/right/input/squeeze/value" },
     { A.handl, "/user/hand/left/input/grip/pose" },
     { A.handr, "/user/hand/right/input/grip/pose" },
+    { A.fire, "/user/hand/right/input/trigger/value" },
+    { A.aimr, "/user/hand/right/input/aim/pose" },
   }
   -- Index has X/Y on no hand -- its A/B exist on BOTH -- so the two X/Y
   -- rows are swapped for left A/B there
@@ -582,6 +596,8 @@ local function setupInput()
     { A.gripr, "/user/hand/right/input/squeeze/click" },
     { A.handl, "/user/hand/left/input/grip/pose" },
     { A.handr, "/user/hand/right/input/grip/pose" },
+    { A.fire, "/user/hand/right/input/trigger/value" },
+    { A.aimr, "/user/hand/right/input/aim/pose" },
   })
   pcall(suggest, "/interaction_profiles/khr/simple_controller", {
     { A.a, "/user/hand/right/input/select/click" },
@@ -599,7 +615,11 @@ local function setupInput()
     check(xr.xrCreateActionSpace(session, info, out), "xrCreateActionSpace")
     return out[0]
   end
+  -- the aim pose gets a space of its own; a runtime that refused the
+  -- binding simply never locates it, and the gun falls back to the grip
   local spaces = { handl = handSpace(A.handl), handr = handSpace(A.handr) }
+  local okAim, aimSpace = pcall(handSpace, A.aimr)
+  if okAim and aimSpace then spaces.aimr = aimSpace end
 
   local sets = ffi.new("XrActionSet[1]")
   sets[0] = set
@@ -660,6 +680,7 @@ function VRXR.input(time)
     o.b, o.bChanged = readBool(A.b)
     o.start, o.startChanged = readBool(A.start)
     o.toggle, o.toggleChanged = readBool(A.toggle)
+    o.fire, o.fireChanged = readBool(A.fire)
     o.gripL = readFloat(A.gripl)
     o.gripR = readFloat(A.gripr)
 
