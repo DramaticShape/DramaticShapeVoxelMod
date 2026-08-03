@@ -54,6 +54,32 @@ the NPCs', the figures drawn into the furniture — turns to face the camera
 and shows the frame it would look like from where the camera actually
 stands, so walking behind someone shows you their back.
 
+## The battle camera
+
+A fight staged on the map (**3D-BTL**, on by default) is shot with a solved
+over-the-shoulder rig — and you can steer it.
+
+| control | does |
+| --- | --- |
+| right stick, a touch drag, or the mouse | swing the shot around the arena (→) and raise the seat (↑) |
+| wheel, `Q` / `E`, pinch, or a stick click | the lens (`Q` / left stick click out, `E` / right stick click in) |
+
+Both axes stop where the composition does. Left stops at the shot the rig was
+solved for — there is nothing to the left of it. Right ends **side-on**: the
+eye square to the arena's axis, both Pokémon at the same distance instead of
+one behind the other. Down stops at the rig's own low stance; up is 45° above
+it. The lens opens as you swing or climb, by exactly the amount the two
+Pokémon spread apart, so they stay framed at every angle. Move animations
+follow the pair's position *and* its separation, so a beam still lands on the
+Pokémon it was aimed at.
+
+Where you leave the camera is where the next battle opens.
+
+**BACK SPRITES locks it.** That setting pins your own Pokémon to the GB's slot
+on the menu while the foe stands out on the map, and no angle holds a
+composition that is half frame and half world — so with it on, the shot holds
+the one the rig was solved for.
+
 ## VR
 
 The **VR** options row (OFF / ON, off by default) drives a PCVR headset
