@@ -1,4 +1,4 @@
--- Voxel world mode: the first-person camera -- the 1ST rung.
+-- Voxel world mode: the free-roam camera -- the 1ST and 3RD rungs.
 --
 -- Every other rung is the same camera at a different pitch: an orbit over
 -- the view centre, described by one number. 1ST is a different rig
@@ -8,6 +8,13 @@
 -- already proved out. Everything downstream of that seam -- the shader
 -- uniforms, project(), the sky's vanishing line, the water's lean -- reads
 -- eye and focus the same way it always has.
+--
+-- 3RD is that same rig with the eye pulled back onto a boom behind the
+-- player's shoulder (lib/ThirdPerson.lua). Everything in this file is
+-- already general over where the eye stands -- the attitude, the look
+-- inputs, the move intent, the cards that turn to face the eye -- so the
+-- third-person rung is one number applied at the very end of frame(),
+-- rather than a second camera to keep in step with this one.
 --
 -- What this module owns:
 --
@@ -47,6 +54,7 @@ local Mat4 = V.require("Mat4")
 local Voxel = V.require("VoxelState")
 local Voxel3D = V.require("Voxel3D")
 local WorldCurve = V.require("WorldCurve")
+local ThirdPerson = V.require("ThirdPerson")
 
 local FirstPerson = {}
 
@@ -142,21 +150,62 @@ end
 
 -- ------- gates
 
--- Whether the 1ST rung is selected and the 3D pass can carry it.
+-- Whether a free-roam rung -- 1ST or 3RD -- is selected and the 3D pass can
+-- carry it. Both stand the camera with the player, so both read the look
+-- inputs, both walk free, and both turn the cards; how far behind the head
+-- the eye ends up is ThirdPerson's business alone.
 function FirstPerson.engaged()
-  return Voxel.isFirstPerson(Voxel.level) and Voxel3D.available()
+  return Voxel.isFreeCam(Voxel.level) and Voxel3D.available()
+end
+
+-- Whether the overworld is what the player is looking at: nothing pushed
+-- over it, so the buttons are free-roam's. Shared with everything else in
+-- the mod that asks the same question of the same stack (CamControl's
+-- zooms above all), rather than each restating the pcall.
+function FirstPerson.onTop()
+  local ok, top, ow = pcall(function()
+    local Game = require("src.core.Game")
+    return Game.stack and Game.stack:top(), Game.overworld
+  end)
+  return ok and top ~= nil and top == ow
 end
 
 -- Whether first person should be READING the player's inputs right now:
 -- engaged, with the overworld on top of the stack (a menu, a dialog or a
 -- battle above it owns the buttons, exactly as it does for grid walking).
 function FirstPerson.driving()
-  if not FirstPerson.engaged() then return false end
-  local ok, top, ow = pcall(function()
-    local Game = require("src.core.Game")
-    return Game.stack and Game.stack:top(), Game.overworld
-  end)
-  return ok and top ~= nil and top == ow
+  return FirstPerson.engaged() and FirstPerson.onTop()
+end
+
+-- The right stick's live X, for a camera that is not this one: while a
+-- battle is staged the free-roam look is not driving, but the axes are
+-- still arriving on the wrap below (which records whatever the rung), and
+-- the battle's orbit wants them. Reading them here rather than wrapping
+-- the same seam twice.
+function FirstPerson.stickX()
+  return stick.x or 0
+end
+
+function FirstPerson.stickY()
+  return stick.y or 0
+end
+
+-- ------- lending the look finger out
+--
+-- A pinch needs both fingers on the screen, and one of them is very likely
+-- the finger this module claimed as the look drag. Rather than have the
+-- pinch fight for it, CamControl asks for it: dropLook while the gesture
+-- runs, reseatLook on whichever finger survives it. Re-seating rather than
+-- simply releasing is what stops the view snapping by however far the
+-- pinch travelled -- the finger carries on as the look drag from where it
+-- now is, which is what it looks like it should do.
+function FirstPerson.dropLook()
+  lookTouch = nil
+end
+
+function FirstPerson.reseatLook(id, x, y)
+  if id == nil then lookTouch = nil return end
+  lookTouch = { id = id, x = x, y = y }
 end
 
 -- The eased blend, 0 at the orbit and 1 in the head.
@@ -187,7 +236,16 @@ end
 -- deep enough into the blend that the card would fill the lens from
 -- inside. The sun pass keeps drawing it either way -- a first-person
 -- player still throws a shadow on the ground ahead.
+--
+-- Never while 3RD's boom is genuinely out, whatever the blend: the whole
+-- point of a boom is that the character it is booming away from is on
+-- screen. (Nor the silhouette that rides the same answer -- seeing your own
+-- outline through the building you just walked behind is what a
+-- third-person camera owes the player.) A boom SQUEEZED into the head by a
+-- wall answers false there and the card comes out again, because at that
+-- range it is the first-person problem word for word.
 function FirstPerson.hidePlayer()
+  if ThirdPerson.showsPlayer() then return false end
   return FirstPerson.cardBlend() > 0.9
 end
 
@@ -202,15 +260,77 @@ function FirstPerson.lookBy(dyaw, dpitch)
                                 FirstPerson.pitch + dpitch))
 end
 
--- The view direction's flat compass facing, for everything that still
--- thinks in the grid's four directions: the cell A interacts with, the
--- sprite the sun sees, the direction a blocked slide bonks in.
-function FirstPerson.compassFacing()
-  local s, c = math.sin(FirstPerson.yaw), math.cos(FirstPerson.yaw)
+-- A bearing as one of the grid's four directions -- the 45-degree
+-- quantisation every facing in this file is made with, in one place so the
+-- compass, the body and the card frames can never disagree about where a
+-- boundary is.
+local function facingOf(a)
+  local s, c = math.sin(a), math.cos(a)
   if math.abs(s) > math.abs(c) then
     return s > 0 and "right" or "left"
   end
   return c > 0 and "down" or "up"
+end
+
+-- The view direction's flat compass facing, for everything that still
+-- thinks in the grid's four directions: the cell A interacts with, the
+-- sprite the sun sees, the direction a blocked slide bonks in.
+function FirstPerson.compassFacing()
+  return facingOf(FirstPerson.yaw)
+end
+
+-- Which way the BODY points, as a continuous world bearing, given the
+-- world-space direction it is walking (0, 0 while standing). In the head,
+-- the body is the head: you face what you look at. On the boom you can see
+-- yourself, and a character sliding sideways while facing the lens reads as
+-- a bug rather than as a strafe -- so a walking body turns to face its own
+-- travel, and a standing one comes back round to the camera's bearing,
+-- which is the one A talks along.
+function FirstPerson.bodyBearing(wx, wz)
+  if ThirdPerson.extended() and wx and wz and (wx ~= 0 or wz ~= 0) then
+    return math.atan2(wx, wz)
+  end
+  return FirstPerson.yaw
+end
+
+-- The same answer as one of the four facings, which is what the grid game
+-- (and the sprite sheet) reasons in.
+function FirstPerson.bodyFacing(wx, wz)
+  return facingOf(FirstPerson.bodyBearing(wx, wz))
+end
+
+-- ------- the body's live bearing
+--
+-- The bearing the player's own body is actually pointing along RIGHT NOW,
+-- or nil whenever the free walk is not the thing pointing it (a scripted
+-- move, a cutscene, the grid walk with the rung off). FreeMove maintains
+-- it; only the player's own card reads it.
+--
+-- It exists because the card's frame is chosen by the angle BETWEEN the
+-- body and the eye, and quantising the body to a compass direction first
+-- throws away exactly the precision that choice needs. A standing body is
+-- pointed along the camera's own yaw, so the true angle between them is a
+-- flat 180 degrees and the card should show its back and nothing else --
+-- but snap the body to one of four directions on the game tick, then
+-- measure it against an eye that has kept turning since, and the pair can
+-- read as 135 degrees and pick the PROFILE frame instead. Spin the camera
+-- fast and the character flicks to a mirrored side view for a frame or
+-- two. Keeping the bearing continuous gives the measurement a full 45
+-- degrees of slack before it can cross a boundary, which no frame's worth
+-- of turning comes close to spending.
+FirstPerson.bodyYaw = nil
+
+-- Point the body along the direction it is walking (or, standing, along
+-- the camera): records the continuous bearing and hands back the compass
+-- facing the caller wants for p.facing.
+function FirstPerson.pointBody(wx, wz)
+  FirstPerson.bodyYaw = FirstPerson.bodyBearing(wx, wz)
+  return facingOf(FirstPerson.bodyYaw)
+end
+
+-- Hand the body back to whatever else is turning it.
+function FirstPerson.releaseBody()
+  FirstPerson.bodyYaw = nil
 end
 
 -- The unit look direction, and its flat (ground-plane) part.
@@ -243,21 +363,43 @@ function FirstPerson.cardYaw(wx, wz)
   return math.atan2(dx, dz)
 end
 
+-- Which of the four sprite frames a body at world bearing `phi` shows an
+-- eye looking at (wx, wz): the bearing rotated into the viewer's own frame,
+-- quantised. nil when there is no rig to be seen from.
+local function frameFor(phi, wx, wz)
+  local eye = rig and rig.eye
+  if not (eye and phi) then return nil end
+  local dx, dz = eye[1] - wx, eye[3] - wz
+  if dx * dx + dz * dz < 1e-9 then return nil end
+  local rel = wrapPi(phi - math.atan2(dx, dz))
+  local idx = math.floor((rel + math.pi / 4) / (math.pi / 2)) % 4
+  return FACING_ORDER[idx + 1]
+end
+
 -- Which of the four sprite frames an entity shows THIS eye: its facing
 -- rotated into the viewer's own frame, quantised. The flat game's frames
 -- are "how this pose looks from the south", so the apparent facing is the
 -- pose rotated by where the viewer actually stands -- walk behind an NPC
 -- and you see their back, circle to their flank and you see the profile,
 -- exactly as the four frames Gen 1 drew intend.
+--
+-- An NPC's facing IS one of the four and nothing finer, so this is the
+-- whole story for everyone in the world except the one body the camera is
+-- attached to -- see playerFacing.
 function FirstPerson.apparentFacing(facing, wx, wz)
-  local eye = rig and rig.eye
-  local phi = FACING_ANGLE[facing]
-  if not (eye and phi) then return facing end
-  local dx, dz = eye[1] - wx, eye[3] - wz
-  if dx * dx + dz * dz < 1e-9 then return facing end
-  local rel = wrapPi(phi - math.atan2(dx, dz))
-  local idx = math.floor((rel + math.pi / 4) / (math.pi / 2)) % 4
-  return FACING_ORDER[idx + 1]
+  return frameFor(FACING_ANGLE[facing], wx, wz) or facing
+end
+
+-- The PLAYER's own card, which is the one case where the body's bearing is
+-- known to better than a compass point (bodyYaw, above) -- and the one case
+-- where it matters, because the eye is derived FROM that bearing rather
+-- than independent of it. Measured continuously, a standing body reads as
+-- a flat 180 degrees from its own camera and shows its back, steadily,
+-- however fast the camera is spun. Falls back to the four-direction answer
+-- whenever something other than the free walk is turning the body.
+function FirstPerson.playerFacing(facing, wx, wz)
+  return frameFor(FirstPerson.bodyYaw, wx, wz)
+         or FirstPerson.apparentFacing(facing, wx, wz)
 end
 
 -- ------- the move intent
@@ -352,6 +494,12 @@ function FirstPerson.update(dt)
     if Voxel3D.camera == rig then Voxel3D.camera = nil end
     rig = nil
   end
+
+  -- the boom, on the same tick and for the same reason: it has to keep
+  -- easing after 3RD is left, and it needs the blend to know whether a
+  -- change of rung is a SLIDE (already inside the world, 1ST <-> 3RD) or
+  -- part of the dive in from the orbit, which carries the eye anyway
+  ThirdPerson.update(dt, FirstPerson.blend)
 
   -- mouse capture follows engagement: captured whenever the rung is on and
   -- the window has focus, released the moment either ends. Checked against
@@ -453,6 +601,12 @@ function FirstPerson.frame(me, cx, cy, vw, vh)
                     head[2] + ly * FirstPerson.FOCUS_DIST,
                     head[3] + lz * FirstPerson.FOCUS_DIST }
 
+  -- 3RD: the eye walks back off the head along the very direction it looks,
+  -- as far as the world allows. Fully in (1ST, and every frame of the
+  -- diorama) this hands back the head and the focus untouched, so the two
+  -- rungs are one rig with one number between them.
+  local camEye, camFocus = ThirdPerson.place(head, lx, ly, lz, fpFocus)
+
   local oEye, oFocus, oFov, oUp = orbitRig(cx, cy, vh)
   local function mix(p, q)
     return { p[1] + (q[1] - p[1]) * e,
@@ -471,9 +625,9 @@ function FirstPerson.frame(me, cx, cy, vw, vh)
   local k = WorldCurve.k(vh) * (1 - e)
 
   rig = {
-    eye = mix(oEye, head),
-    focus = mix(oFocus, fpFocus),
-    fov = oFov + (FirstPerson.FOV * FirstPerson.fovScale - oFov) * e,
+    eye = mix(oEye, camEye),
+    focus = mix(oFocus, camFocus),
+    fov = oFov + (FirstPerson.FOV - oFov) * e,
     up = up,
     curve = k,
   }
@@ -512,7 +666,9 @@ function FirstPerson.signature()
     math.floor(b * 64),
     math.floor(FirstPerson.yaw * 64),
     math.floor(FirstPerson.pitch * 64),
-    math.floor(FirstPerson.fovScale * 64),
+    -- and how far back the boom stands the eye: a wall shortening it moves
+    -- the camera the sun's box is fitted around, standing still or not
+    ThirdPerson.signature(),
   }, ",")
 end
 

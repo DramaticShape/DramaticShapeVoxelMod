@@ -281,6 +281,11 @@ local function renderWorld(views, ctl)
   VoxelScene.spriteLean = math.rad(75)
 
   local pivot, anchor, scale, mountYaw
+  -- Either free-roam rung puts the headset in the player's head: 3RD's boom
+  -- is a FLAT-SCREEN framing device, and a headset that stands its wearer
+  -- three cells behind their own body is a well-known way to make people
+  -- ill. The rung still changes the walk and the cards the same way; only
+  -- the eye stays where a head belongs.
   local fp = FirstPerson.engaged()
   local battle, battleFloor
   if camMode == "battle" then battle, battleFloor = battleStage() end

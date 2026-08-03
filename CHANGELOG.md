@@ -1,73 +1,132 @@
 # Changelog
 
-## 1.5.4
+## 1.5.5
 
 ### Added
 
-- **HORDE MODE.** Enter the konami code -- Up Up Down Down Left Right
-  Left Right B A -- standing in the overworld, and Kanto turns on you.
-  The sky drops to a starless violet night, the Lavender Town theme
-  comes up, the camera locks into the player's own head, a voxel
-  handgun with working iron sights appears in their right hand, and
-  waves of people walk out of the dark to kill them. The map's own NPCs
-  join in. Every mob that falls screams as a random Pokemon. Score goes
-  up per kill and per wave cleared; there is no pausing. When the health
-  runs out, a GAME OVER card offers the score and PRESS A -- and pressing
-  it puts the map, the cell, the facing, the camera rung, the hour, the
-  music and every NPC back exactly as they were.
+- **A third-person camera: the 3RD rung.** The VOXEL ladder's eighth rung
+  (`3` / SELECT walk onto it after 1ST, and it is on the OPTIONS row)
+  stands the camera on a boom behind the player's shoulder. It is the
+  first-person rig with one number added, so everything 1ST already did
+  it does: the look steers on a mouse, the right stick or a touch drag,
+  and the grid walk is replaced by continuous camera-relative movement --
+  push in any direction and you go there, at any angle, with collision,
+  warps, ledges, encounters and scripts still running through the
+  engine's own machinery.
 
-  The code is read off GAME BOY BUTTONS rather than off keys, so it
-  works on a keyboard, a pad, a phone's touch overlay and a pair of VR
-  controllers without knowing which one is in use. Fire on left click,
-  the pad's right trigger or B, a tap on a touch screen, or the right
-  trigger in VR; reload on R, the pad's X, or B on the right hand; aim
-  down the sights on right click or the left trigger (in VR you aim by
-  pointing, and the sights are real geometry to line up).
+  The boom **collides**: it marches back through the terrain height field
+  and the map's own walkability, so backing into a wall walks the camera
+  in to your shoulders instead of through it, and rounding a corner eases
+  it back out rather than snapping. Squeezed all the way into the head it
+  simply draws as 1ST until you step clear. It also carries a small
+  over-the-shoulder rail offset, which fades out as the boom shortens.
 
-  The crowd walks the same grid the game walks, chases along a flow
-  field swept out from the player -- so they come through doorways and
-  around buildings rather than into walls -- and they follow the player
-  through a door into the building on the far side of it.
+  Every sprite in the world **turns to face it** -- yours, the NPCs', the
+  figures drawn into the furniture -- and shows the frame it would look
+  like from where the camera actually stands, so walking behind someone
+  shows you their back. Your own character is drawn (with the
+  through-the-wall silhouette 1ST had no use for) and **turns to face
+  where they are walking** rather than where the camera looks, so a strafe
+  reads as one; standing still they come back round to the camera's
+  bearing, which is the one A talks along.
 
-- **The horde's gun, on the Game Boy's own sound hardware.** The
-  gunshot, the dry fire, the magazine dropping out and seating, and the
-  slide coming home are all authored as channel programs and
-  synthesized by the game's emulated APU (`lib/HordeSfx.lua`). No audio
-  files ship with the mod. Three shot variants round-robin so a fast
-  trigger finger overlaps its own echoes instead of cutting them off.
+  Your card's frame is chosen from your body's **continuous** bearing
+  rather than from the compass direction the grid game stores. An NPC's
+  facing really is one of four directions, but yours is the angle the
+  camera itself is hung off, and quantising it before measuring it against
+  the eye leaves no margin for the shoulder rail's few degrees of offset:
+  in a band just short of each 45-degree boundary the pair read as 135
+  degrees apart and picked the mirrored PROFILE frame. Standing still.
+  Spinning the camera swept four of those bands a revolution, which showed
+  up as the character flicking sideways for a split second.
 
-### Changed
+  In VR the boom is declined outright and 3RD presents as 1ST does: a
+  headset that seats its wearer three cells behind their own body is a
+  well-known way to make people ill. The rung still changes the walk and
+  the sprites the same way.
 
-- **SMOOTH TURN**, a new options row under VR (OFF by default), turns the
-  right stick into a continuous turn instead of the 45-degree snap. The
-  snap stays the default deliberately -- a software turn moves the world
-  past a head that did not move, which is the most reliable way to make
-  somebody ill in a headset -- but it costs continuity, so the choice is
-  the player's. The row only exists while VR is ON: a comfort setting for
-  a device that is not plugged in decides nothing.
+- **Every camera zooms, on whatever the machine has.** The mouse wheel,
+  `Q`/`E`, a two-finger pinch and the pad's two stick clicks all reach
+  whichever camera is actually in front of you -- the third-person boom,
+  the staged battle's lens, or the engine's own survey zoom on an orbit
+  rung. One module (`lib/CamControl.lua`) answers "which camera is this
+  aimed at" so the four cameras never race each other for an event, and
+  forwards everything it does not claim. 1ST claims nothing: the eye is in
+  the player's head, and a pinch there would only wind the survey zoom for
+  whenever they stepped back out.
 
-- **The wall bump is silent in first person**, on the flat screen and in
-  VR alike. On the grid a blocked step is a discrete event -- you pressed
-  a direction, the game refused, and the bump answers you once. The free
-  walk has no such moment: the body slides along whatever it grazes, so
-  walking a fence line or rounding a doorframe is blocked on one axis
-  continuously and the sound came out as a rattle rather than as an
-  answer. The grid walk keeps its own bump untouched.
+- **The battle camera is yours to steer.** The right stick, a drag across
+  the screen or the mouse walks the staged shot around the arena and raises
+  the seat; the wheel, `Q`/`E`, a pinch or a stick click work the lens.
 
-- **`FirstPerson.fovScale`** is a new seam on the first-person rig: a
-  plain multiplier on the field of view, for anything that wants to
-  narrow the lens without owning the camera. Horde mode's iron sights
-  ease it from 65 degrees to 40. It is folded into the orbit blend and
-  into the shadow signature, so a lens that narrows while the player
-  stands still still re-fits the sun's box.
+  Both axes stop where the composition does. LEFT stops at the shot the rig
+  was solved for, because there is nothing to the left of it. RIGHT ends
+  SIDE-ON -- the eye square to the arena's axis, both Pokemon at the same
+  distance instead of one behind the other -- computed from each rig's own
+  stance rather than written down. DOWN stops at the rig's low stance and
+  UP is 45 degrees above it, raised about the focus at a constant radius so
+  climbing never doubles as zooming. Input accumulates into a goal the eye
+  eases after, so a flick reads as the camera being pushed rather than
+  dragged.
 
-- **VR gains an aim pose and a fire action** (`lib/VRXR.lua`). The fire
-  action is suggested ALONGSIDE START on the right trigger rather than
-  instead of it -- bindings are suggested once, before the session
-  attaches its action sets, so they cannot be swapped when a mode
-  starts, and OpenXR is happy for two actions to share an input.
-  Outside horde mode nothing reads it and the trigger is START exactly
-  as it was.
+  The lens **opens by exactly the amount the pair spreads**: the solved
+  shot looks along the arena's axis at a shallow angle, which foreshortens
+  the gap between the two mons to less than half its length, and swinging
+  round or climbing un-foreshortens it. Left alone that threw both Pokemon
+  off the edges of the frame at the far end of either range, which made the
+  whole far end unusable.
+
+  Where you leave the camera is where the next battle opens. An angle and a
+  lens you chose are how you want to watch battles, not a fact about one
+  encounter.
+
+- **Move animations track the camera.** They already slid to follow the
+  pair's midpoint; now they follow its SEPARATION too. Both mons are
+  geometry standing on the map, so the camera sizes them -- and an effects
+  layer that kept the authored 106-pixel spacing through a zoom and a
+  60-degree swing fired its beams into the air beside the Pokemon they were
+  aimed at.
+
+- **BACK SPRITES locks the battle camera.** That setting pins your own mon
+  to the GB's slot on the menu while the foe stands out on the map, and no
+  angle holds a composition that is half frame and half world. The steer,
+  the climb and the lens all stand down -- in the rig as well as at the
+  inputs, so an angle stored from before the row was switched on cannot
+  leave it steered anyway. The slow drift stays: it was always there under
+  BACK SPRITES and two degrees is not a composition problem.
+
+- **BATTLE BG is pinned to WHITE and its row comes off the menu.** The row
+  picks what fills the screen AROUND the battle, and this mode fills the
+  window with the map the fight is standing on -- there are no voids left
+  for it to be about. WORLD was actively wrong under it: it makes the
+  battle non-opaque so the engine draws a second, dimmed copy of the
+  overworld beneath the arena pass's own. Pinned rather than merely hidden,
+  so a save written before the mod was installed cannot carry a value the
+  menu can no longer reach. Uninstall and the row is back.
+
+### Fixed
+
+- **Grass and flowers are closed off at the sides.** Both stand as
+  per-pixel slabs built from runs of lit pixels, and only the front, the
+  back and a lid were ever emitted -- so from any angle off square you
+  looked straight in through the open end of every run and out the far
+  side. At the low cameras this release adds, that is most of the time.
+  Each run now wears end walls in the colour of the pixel they close off.
+
+  Flowers needed more than that, because a flower SWAYS: the mesh spans the
+  union of every animation frame and each frame is cut back out in texture
+  space, so a pixel that drops out of a frame takes the union's wall with
+  it and leaves an interior boundary that never had one. The first cut of
+  this looked solid on the base frame and still had gaps on every other.
+  Every pixel of a flower now carries a cap on all four of its remaining
+  faces: enclosed and invisible while its neighbour is there, and already
+  in place the moment the animation takes that neighbour away.
+
+- **No more machine-gun bonking in 1ST and 3RD.** The grid walk's collision
+  sound marks a discrete event -- a direction pressed, a step refused. A
+  free walk has no such moment: the body slides along every wall it grazes,
+  continuously, so a corridor taken at a slight angle rang the bonk twice a
+  second from end to end. The wall stopping you is the feedback.
 
 ## 1.5.2
 

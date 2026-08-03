@@ -24,10 +24,11 @@
 -- below.  This file declares; lib/ draws.
 --
 -- Voxel mode is presentational: it changes what the world LOOKS like and
--- nothing about what it IS.  ONE rung is the deliberate exception. 1ST --
--- the first-person camera -- replaces the grid WALK with a free,
--- camera-relative one while it is selected (lib/FreeMove.lua), because a
--- head you can steer with a mouse demands feet that go where it looks.
+-- nothing about what it IS.  TWO rungs are the deliberate exception. 1ST
+-- (the camera in the player's own eyes) and 3RD (the same rig, boomed back
+-- behind their shoulder) replace the grid WALK with a free,
+-- camera-relative one while either is selected (lib/FreeMove.lua), because
+-- a camera you can steer with a mouse demands feet that go where it looks.
 -- Even there the game is untouched: the walk asks the engine's own
 -- collision the same questions a grid step asks, keeps the player's
 -- logical cell synced, and fires the engine's own landing pipeline per
@@ -92,6 +93,7 @@ local Water = V.require("Water")
 local AntiAlias = V.require("AntiAlias")
 local FirstPerson = V.require("FirstPerson")
 local FreeMove = V.require("FreeMove")
+local CamControl = V.require("CamControl")
 local VR = V.require("VR")
 -- HORDE MODE: the konami code's minigame. Horde owns the state machine and
 -- every hook; the other four are the gun, the crowd, the readout and the
@@ -582,6 +584,17 @@ do
     end
     local claim = HOTKEYS[key]
     local top = self.stack and self.stack:top()
+    -- Q and E work whichever camera is in front of the player -- the
+    -- battle's lens, the third-person boom, or the engine's own survey
+    -- zoom on an orbit rung. CamControl answers which, and answers "none"
+    -- for 1ST and for every screen with no camera of ours behind it, in
+    -- which case the key falls through untouched. Ahead of the hotkey
+    -- table because unlike those it is NOT free-roam only: a staged battle
+    -- is exactly where the zoom is most wanted.
+    if (key == "q" or key == "e")
+       and not (top and top.onKeyPressed) then
+      if CamControl.zoomBy(key == "q" and 1 or -1) then return end
+    end
     -- A screen with its own key handler gets the key first, exactly as the
     -- engine's first branch does: typing a nickname must not toggle a
     -- render mode. Only free-roam presses are ours to take.
@@ -678,6 +691,25 @@ end
 --
 -- Everything they did is still reachable: uninstall the mod and both rows are
 -- back, at whatever they were last set to.
+-- BATTLE BG rides the same reasoning, and comes off for a reason of its own.
+-- The row picks what fills the screen AROUND the battle's 160x144 field --
+-- WHITE paper, BLACK bars, or the frozen overworld dimmed behind it -- and
+-- all three were answers to the same question: what to do with the voids,
+-- given the battle is a small picture in the middle of a big window.
+--
+-- This mod answers that question differently and permanently. A staged fight
+-- fills the whole window with the map the fight is standing on, and the
+-- flat battle screen it composites over it is drawn on the mode's own
+-- surface; there are no voids left for the row to fill. WORLD is the worst
+-- of the three under it -- it makes the battle non-opaque so the engine
+-- draws the overworld underneath, which is a SECOND copy of the world drawn
+-- under the one the arena pass already put there, dimmed and at a different
+-- camera. BLACK bars over a diorama read as a letterboxed screenshot.
+--
+-- So the value is pinned at WHITE, which is the one the mode was composed
+-- against, and the row comes off the menu on the same reasoning as TILT and
+-- GBC FX: a row that no longer decides anything is worse than no row.
+-- Uninstall the mod and it is back, at whatever it was last set to.
 local function pinEngineFx(game)
   game = game or require("src.core.Game")
   local opts = game and game.save and game.save.options
@@ -686,7 +718,9 @@ local function pinEngineFx(game)
   local changed = false
   if opts then
     changed = (opts.tilt or 0) ~= 0 or (opts.gbcfx or 0) ~= 0
+                or (opts.battleBg or "white") ~= "white"
     opts.tilt, opts.gbcfx = 0, 0
+    opts.battleBg = "white"
   end
   pcall(Tilt.setLevel, 0)
   pcall(GBCFX.setLevel, 0)
@@ -704,6 +738,10 @@ mod.hooks:wrap("ui.options.rows", function(next, game, rows)
   pinEngineFx(game)
   dropRow(out, "tilt")
   dropRow(out, "gbcfx")
+  -- and BATTLE BG with them: this mode fills the window with the map, so
+  -- the row's whole question -- what to put in the voids around the battle
+  -- -- no longer has voids to be about (see pinEngineFx)
+  dropRow(out, "battleBg")
   -- BATTLE LAYOUT is the ENGINE's row, and this is the one place the mod takes
   -- one away. While a fight can be staged on the map, OG is the only layout it
   -- can be composed in (OverworldBattle.forceOG), so the value is pinned there
@@ -905,9 +943,11 @@ end
 -- so this file keeps naming every engine seam the mod touches.
 OverworldBattle.install()
 
--- ------- the first-person rung's inputs and its walk
+-- ------- the free-roam rungs' inputs and their walk
 --
--- 1ST needs two things no other rung does, and each is a named seam:
+-- 1ST and 3RD need two things no other rung does, and each is a named seam.
+-- Both rungs are one rig -- the boom behind the shoulder is a number inside
+-- it (lib/ThirdPerson.lua) -- so both are installed by the same two calls:
 --
 -- FirstPerson.install claims the LOOK inputs the engine ignores: the right
 -- stick's axes (Game:gamepadaxis passes them to Input, which returns early
@@ -919,11 +959,11 @@ OverworldBattle.install()
 -- open screen is the look; the d-pad and buttons still go to
 -- TouchControls, whose own d-pad finger is also read back analog as the
 -- move vector). Every wrap forwards whatever it does not claim, and claims
--- only while 1ST is actually driving.
+-- only while one of the two rungs is actually driving.
 --
 -- FreeMove.install wraps OverworldState:handleInput -- the one choke point
 -- where the grid walk reads the pad, and the same seam the engine's own
--- Cycling Road pull lives behind. While 1ST drives, the walk is continuous
+-- Cycling Road pull lives behind. While either drives, the walk is continuous
 -- and camera-relative; the player's logical cell stays synced and every
 -- per-cell consequence still runs through the engine's own machinery
 -- (onStepComplete, checkEdgeExit, checkLedgeHop, checkBoulderPush). The
@@ -931,62 +971,16 @@ OverworldBattle.install()
 FirstPerson.install()
 FreeMove.install()
 
--- ------- horde mode
+-- ------- the zooms, and the battle camera the player can steer
 --
--- The sounds are registered before anything can ask for one; the hooks go
--- in AFTER FreeMove (and, below, after the SELECT wrap) so the mode's own
--- handleInput reasoning sits outside both of theirs, for the same reason
--- the SELECT hook does.
---
--- The GAME OVER card is a screens-registry record rather than a state
--- this file pushes directly: that is the engine's own seam for a mod
--- owning a screen, and it means the card is reachable by id from a driver
--- or a test without going through a death.
-HordeSfx.register(mod)
-
-mod.content.screens:register("HordeGameOver", {
-  new = function(game) return V.require("HordeGameOver").new(game) end,
-})
-
-mod.content.screens:register("HordeExitPrompt", {
-  new = function(game) return V.require("HordeExitPrompt").new(game) end,
-})
-
--- The gamepad's triggers, which nothing else in the engine or this mod
--- claims: the RIGHT one fires and the LEFT one aims. Read as axes because
--- that is what SDL calls them; the 0.5 crossing is the press. Installed
--- beside the other input wraps, and inert with the mode off.
-do
-  local Game = require("src.core.Game")
-  if not Game.dramaticShapeHordeTriggers then
-    local inner = Game.gamepadaxis
-    local rightDown = false
-    function Game:gamepadaxis(joystick, axis, value)
-      if Horde.playing() then
-        if axis == "triggerright" then
-          local down = (value or 0) > 0.5
-          if down and not rightDown then HordeGun.fire() end
-          rightDown = down
-        elseif axis == "triggerleft" then
-          HordeGun.setAds((value or 0) > 0.35)
-        end
-      elseif rightDown then
-        rightDown = false
-      end
-      return inner(self, joystick, axis, value)
-    end
-    -- and X reloads, the only pad button the overworld does not already use
-    local innerBtn = Game.gamepadpressed
-    function Game:gamepadpressed(joystick, button)
-      if Horde.playing() and button == "x" then
-        HordeGun.reload()
-        return
-      end
-      return innerBtn(self, joystick, button)
-    end
-    Game.dramaticShapeHordeTriggers = true
-  end
-end
+-- CamControl claims the wheel, Q/E, the mouse and the touch screen for
+-- whichever camera is actually in front of the player -- the staged
+-- battle's, the third-person boom, or the engine's own survey zoom -- and
+-- forwards everything else. Installed AFTER the two above deliberately: a
+-- wrap installed later is the OUTER one, so a fight gets first refusal on
+-- the mouse and the fingers, which is right, because while one is staged
+-- the free-roam look is not driving.
+CamControl.install()
 
 -- ------- SELECT walks the angle ladder
 --
@@ -1155,7 +1149,7 @@ mod.hooks:wrap("world.tod", function(next, tod, ctx)
   return DayNight.tod()
 end)
 
-mod.exports.version = "1.5.4"
+mod.exports.version = "1.5.5"
 -- exposed so a companion mod can pin its own tiles' shapes or read the
 -- camera without reaching into this mod's file layout
 mod.exports.lib = V

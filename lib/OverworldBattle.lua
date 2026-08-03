@@ -249,6 +249,31 @@ OverworldBattle.TEXT_RECT = {
   mimic = { 0, 56, 128, 40 },
 }
 
+-- How far apart the two anchors are: the spacing every move animation was
+-- authored against, and so the yardstick the live pair is measured with.
+OverworldBattle.ANCHOR_SPAN = math.sqrt(
+  (OverworldBattle.ANCHOR.enemy[1] - OverworldBattle.ANCHOR.player[1]) ^ 2
+  + (OverworldBattle.ANCHOR.enemy[2] - OverworldBattle.ANCHOR.player[2]) ^ 2)
+
+-- The effects layer's scale for this shot: how far apart the two mons
+-- actually are on screen, over how far apart the slots they were authored
+-- for were. Clamped hard at both ends -- an effect is pixel art and a wild
+-- factor is worse than a slightly wrong one -- and held at exactly 1 when
+-- the marks coincide, which is a projection about to degenerate rather
+-- than a pair that has genuinely closed up.
+OverworldBattle.ANIM_SCALE_MIN = 0.5
+OverworldBattle.ANIM_SCALE_MAX = 2.0
+
+function OverworldBattle.animScale(shot, px, py)
+  if not (shot and shot.enemy and px and py) then return 1 end
+  local dx, dy = shot.enemy[1] - px, shot.enemy[2] - py
+  local span = math.sqrt(dx * dx + dy * dy)
+  if not (span > 1) then return 1 end
+  local k = span / OverworldBattle.ANCHOR_SPAN
+  return math.max(OverworldBattle.ANIM_SCALE_MIN,
+                  math.min(OverworldBattle.ANIM_SCALE_MAX, k))
+end
+
 function OverworldBattle.textRects(battle)
   if not battle or battle.blankForAskName then return {} end
   local r = OverworldBattle.TEXT_RECT
@@ -478,6 +503,19 @@ function OverworldBattle.update(dt)
     return
   end
 
+  -- Whether the shot is the player's to steer at all. BACK SPRITES pins
+  -- their own mon to the GB's slot on the menu while the foe stands out on
+  -- the map, and there is no angle that half-framed, half-solid
+  -- composition survives -- so under it the camera holds the shot the rig
+  -- was solved for (the slow drift aside, which was always there). Polled
+  -- per frame rather than latched at battle start: the row is reachable
+  -- from the mod manager's page mid-session.
+  BattleCam.steerable = not OverworldBattle.backPinned()
+  -- the right stick, read as a rate before the rig is built from it: the
+  -- wheel, the keys, the mouse and a drag all arrive as events and have
+  -- already landed, but a stick is a HELD position and only a tick can
+  -- turn it into travel (CamControl, which owns every one of those inputs)
+  pcall(V.require("CamControl").tick, dt)
   BattleCam.update(dt)
   -- the battle only exists once it has been pushed; a session opened at
   -- pushBattle time has it, one opened from battle.started was handed it
@@ -1120,16 +1158,36 @@ function OverworldBattle.install()
     -- give them. They ride to where the PAIR went: the midpoint of the two
     -- mons' projected positions, less the midpoint of the slots they used to
     -- sit in. A hit still lands on the mon it is aimed at.
+    --
+    -- And they ride the pair's SEPARATION as well, because the mons
+    -- themselves do. Both are geometry standing on the map, so the camera
+    -- sizes them: zoom in and they grow, swing round to side-on and the two
+    -- marks close up as the axis foreshortens. A layer that only slid would
+    -- have held the authored 106-pixel spacing through all of it -- a beam
+    -- fired between two mons that are no longer that far apart, ending in
+    -- the air beside the one it was aimed at. Scaling about the same
+    -- midpoint keeps every authored offset the same fraction of the gap it
+    -- was authored as.
     local a = OverworldBattle.ANCHOR
     -- BACK SPRITES leaves the player's mon exactly where the GB put it, so that side
     -- contributes no movement at all and the pair's centre has gone half as
     -- far as the foe's mark did.
     local px, py = shot.player[1], shot.player[2]
     if OverworldBattle.backPinned() then px, py = a.player[1], a.player[2] end
-    local dx = (shot.enemy[1] + px) / 2 - (a.enemy[1] + a.player[1]) / 2
-    local dy = (shot.enemy[2] + py) / 2 - (a.enemy[2] + a.player[2]) / 2
+    local cx, cy = (shot.enemy[1] + px) / 2, (shot.enemy[2] + py) / 2
+    local ax = (a.enemy[1] + a.player[1]) / 2
+    local ay = (a.enemy[2] + a.player[2]) / 2
     love.graphics.push()
-    love.graphics.translate(math.floor(dx + 0.5), math.floor(dy + 0.5))
+    love.graphics.translate(cx - ax, cy - ay)
+    -- Clamped, and skipped outright if the marks ever coincide: a
+    -- degenerate projection must leave the effects the size they were
+    -- rather than collapse them to nothing or blow them across the screen.
+    local k = OverworldBattle.animScale(shot, px, py)
+    if k ~= 1 then
+      love.graphics.translate(ax, ay)
+      love.graphics.scale(k, k)
+      love.graphics.translate(-ax, -ay)
+    end
     local ok, err = pcall(innerAnim, self, colorized)
     love.graphics.pop()
     if not ok then error(err, 0) end

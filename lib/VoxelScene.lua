@@ -226,8 +226,16 @@ end
 -- reads its own shadowing with must describe the same frame, or the
 -- mirror-flip half of the pair asks the map about texels the sun filed
 -- under the other cheek.
+-- The player's own card asks a different function for the same answer:
+-- their body's bearing is what the camera is derived FROM, so it is known
+-- continuously rather than as one of four directions, and measuring
+-- against the compass point instead flicks the card to a profile for a
+-- frame or two when the camera is spun fast (see playerFacing).
 local function viewFacing(p)
   if FirstPerson.cardBlend() > 0.5 then
+    if p.isPlayer then
+      return FirstPerson.playerFacing(p.facing, p.px + 8, p.py + 8)
+    end
     return FirstPerson.apparentFacing(p.facing, p.px + 8, p.py + 8)
   end
   return p.facing

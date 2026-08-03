@@ -33,17 +33,18 @@ local Voxel = {}
 -- in the table is deliberate: the ladder is a list of what each rung LOOKS
 -- like, and two rungs may look the same while meaning different things.
 --
--- 1ST is the other rung that is more than an angle: the camera steps off its
--- orbit entirely and stands in the player's own eyes (lib/FirstPerson.lua),
--- with free look and free movement. Its ANGLE entry is 75 -- the orbit rung
--- it hands over from -- because the tween in and out of first person starts
--- from whatever the orbit shows, and the lowest rung is the one a dive into
--- a head should start from. Everything angle-derived (the sky's fade, the
--- billboard lean the blend eases away) reads that 75 while the first-person
--- rig owns the actual camera.
-Voxel.ANGLES_DEG = { 0, 35, 15, 35, 50, 75, 75 }
+-- 1ST and 3RD are the other rungs that are more than an angle: the camera
+-- steps off its orbit entirely and stands with the player -- in their eyes
+-- (lib/FirstPerson.lua), or on a boom behind their shoulder
+-- (lib/ThirdPerson.lua) -- with free look and free movement on both. Their
+-- ANGLE entries are 75 -- the orbit rung they hand over from -- because the
+-- tween in and out starts from whatever the orbit shows, and the lowest rung
+-- is the one a dive into a head should start from. Everything angle-derived
+-- (the sky's fade, the billboard lean the blend eases away) reads that 75
+-- while the free-roam rig owns the actual camera.
+Voxel.ANGLES_DEG = { 0, 35, 15, 35, 50, 75, 75, 75 }
 Voxel.ANGLE_LABELS = { "OFF", "FULL", "15", "35", "50", "75",
-                       "1ST (EXPERIMENTAL)" }
+                       "1ST (EXPERIMENTAL)", "3RD (EXPERIMENTAL)" }
 Voxel.MAX_LEVEL = #Voxel.ANGLES_DEG - 1
 
 -- the rung FULL sits on, so nothing has to hunt for it by label
@@ -60,6 +61,23 @@ function Voxel.isFirstPerson(level)
   return (level or Voxel.level) == Voxel.FP_LEVEL
 end
 
+-- and the third-person one, which is the same rig with the eye boomed off
+-- the back of the head (lib/ThirdPerson.lua)
+Voxel.TP_LEVEL = 7
+
+function Voxel.isThirdPerson(level)
+  return (level or Voxel.level) == Voxel.TP_LEVEL
+end
+
+-- The two of them together: the rungs where the camera stands WITH the
+-- player rather than orbiting the view centre, which is what decides that
+-- the look inputs are read, the walk goes free and the cards turn to face
+-- the eye. Everything that used to ask isFirstPerson for those asks this.
+function Voxel.isFreeCam(level)
+  level = level or Voxel.level
+  return Voxel.isFirstPerson(level) or Voxel.isThirdPerson(level)
+end
+
 -- ------- what the hotkey walks
 --
 -- The ANGLE rungs only, with FULL left out. The key is a display-mode
@@ -69,11 +87,11 @@ end
 -- with no indication that a keypress had done so. FULL stays on the OPTIONS
 -- row, which is where a preset that changes other rows belongs.
 --
--- 1ST is on the path: it changes the camera and only the camera, which is
--- exactly what the key promises -- and the key is also the way back OUT of
--- first person on a keyboard, where the mouse is captured and the OPTIONS
+-- 1ST and 3RD are on the path: they change the camera and only the camera,
+-- which is exactly what the key promises -- and the key is also the way back
+-- OUT of them on a keyboard, where the mouse is captured and the OPTIONS
 -- menu is a trip.
-Voxel.HOTKEY_ORDER = { 0, 2, 3, 4, 5, 6 }   -- OFF, 15, 35, 50, 75, 1ST
+Voxel.HOTKEY_ORDER = { 0, 2, 3, 4, 5, 6, 7 }  -- OFF,15,35,50,75,1ST,3RD
 
 -- The rung a press moves to from `level`.
 --
