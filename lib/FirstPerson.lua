@@ -47,6 +47,7 @@ local Mat4 = V.require("Mat4")
 local Voxel = V.require("VoxelState")
 local Voxel3D = V.require("Voxel3D")
 local WorldCurve = V.require("WorldCurve")
+local ModSetting = V.require("ModSetting")
 
 local FirstPerson = {}
 
@@ -93,6 +94,34 @@ FirstPerson.STICK_DEAD = 0.18
 FirstPerson.TOUCH_TURN = 2.2 * math.pi
 FirstPerson.MOVE_DEAD = 0.25
 
+-- ------- the player's own look preferences
+--
+-- SPEED multiplies every look input rather than any one of them, so the
+-- stick, the mouse and a drag all move together -- a player who finds the
+-- view too twitchy means the view, not the device they happened to use.
+--
+-- INVERT Y is not a nicety: a substantial minority of people fly a camera
+-- pull-back-to-look-up and cannot use one that does the opposite. It
+-- negates pitch only, which is the axis that convention actually splits on.
+--
+-- STICK hides the on-screen stick for anyone playing with a controller, or
+-- who prefers the drag-anywhere look and would rather have the glass back.
+-- Hiding it also stops it claiming touches, or it would be an invisible
+-- control swallowing thumbs.
+FirstPerson.stickSetting = ModSetting.new("lookstick", "LOOK STICK",
+                                          { true, false }, { "ON", "OFF" })
+FirstPerson.speedSetting = ModSetting.new("lookspeed", "LOOK SPEED",
+                                          { 0.6, 1.0, 1.6 },
+                                          { "SLOW", "NORMAL", "FAST" }, 2)
+FirstPerson.invertSetting = ModSetting.new("lookinvert", "INVERT Y",
+                                           { false, true }, { "OFF", "ON" })
+
+function FirstPerson.stickShown()
+  local ok, v = pcall(function() return FirstPerson.stickSetting:get() end)
+  if not ok or v == nil then return true end
+  return v and true or false
+end
+
 -- ------- state
 --
 -- Yaw is a world bearing: 0 faces south (+Z, the way a resting sprite
@@ -113,6 +142,7 @@ FirstPerson.fovScale = 1
 
 local wasEngaged = false
 local stick = { x = 0, y = 0 }        -- right stick, latest event values
+local stickTouch = nil                -- the finger holding the on-screen look stick
 local mouseDX, mouseDY = 0, 0         -- relative counts since last update
 local lookTouch = nil                 -- { id, x, y } of the claimed finger
 local touchMove = nil                 -- the touch d-pad's analog deflection
@@ -200,6 +230,23 @@ function FirstPerson.lookBy(dyaw, dpitch)
   FirstPerson.pitch = math.max(FirstPerson.PITCH_UP,
                        math.min(FirstPerson.PITCH_DOWN,
                                 FirstPerson.pitch + dpitch))
+end
+
+-- Every look input goes through here rather than calling lookBy directly,
+-- so the mouse, the stick and a drag cannot drift apart -- and a fourth
+-- input added later inherits both preferences without knowing they exist.
+--
+-- Deliberately NOT inside lookBy: that is the primitive the rig and the
+-- tests drive, and a turn of exactly 2*pi has to come out as exactly one
+-- turn whatever the player has the sensitivity set to.
+function FirstPerson.steer(dyaw, dpitch)
+  local okS, mul = pcall(function() return FirstPerson.speedSetting:get() end)
+  if okS and type(mul) == "number" then
+    dyaw, dpitch = dyaw * mul, dpitch * mul
+  end
+  local okI, inv = pcall(function() return FirstPerson.invertSetting:get() end)
+  if okI and inv then dpitch = -dpitch end
+  return FirstPerson.lookBy(dyaw, dpitch)
 end
 
 -- The view direction's flat compass facing, for everything that still
@@ -382,8 +429,8 @@ function FirstPerson.update(dt)
   local dx, dy = mouseDX, mouseDY
   mouseDX, mouseDY = 0, 0
   if driving and (dx ~= 0 or dy ~= 0) then
-    FirstPerson.lookBy(-dx * FirstPerson.MOUSE_SENS,
-                       dy * FirstPerson.MOUSE_SENS)
+    FirstPerson.steer(-dx * FirstPerson.MOUSE_SENS,
+                      dy * FirstPerson.MOUSE_SENS)
   end
 
   -- the right stick is a rate: radians per second, squared response so
@@ -399,8 +446,8 @@ function FirstPerson.update(dt)
     local cy, cp = curve(rx), curve(ry)
     if cy ~= 0 or cp ~= 0 then
       -- negated yaw for the same reason as the mouse above
-      FirstPerson.lookBy(-cy * FirstPerson.STICK_YAW * dt,
-                         cp * FirstPerson.STICK_PITCH * dt)
+      FirstPerson.steer(-cy * FirstPerson.STICK_YAW * dt,
+                        cp * FirstPerson.STICK_PITCH * dt)
     end
   end
 end
@@ -525,6 +572,51 @@ end
 -- forwards everything it does not claim, and claims only while first
 -- person is actually driving -- so with the rung off, every byte flows
 -- exactly where it always did.
+
+-- ------- drawing the look stick
+--
+-- Called from the flat overlay pass, which draws into the world canvas in
+-- SUPERSAMPLED canvas pixels -- hence the scale, the same one HordeHud is
+-- handed. The engine's own pad is composited over the top of this canvas
+-- afterwards, which is exactly why the stick sits ABOVE A/B rather than
+-- under them: anything overlapping a button would be drawn beneath it.
+--
+-- Nothing here is load-bearing. A failure to work out where the pad is
+-- (headless, no overlay) simply draws nothing, and drag-anywhere still
+-- steers the view.
+function FirstPerson.drawLookStick(rw, rh)
+  if not FirstPerson.driving() then return end
+  if not FirstPerson.stickShown() then return end
+  local z = FirstPerson.lookStick and FirstPerson.lookStick()
+  if not z then return end
+  local TouchControls = require("src.core.TouchControls")
+  if not TouchControls:visible() then return end
+  -- The pad's layout is in LOVE UNITS; this canvas is in framebuffer pixels
+  -- (times the AA factor). The ratio between the canvas we were handed and
+  -- the window's unit width is the exact conversion -- and it stays exact
+  -- whatever the density or the supersampling, which is why it is measured
+  -- rather than assumed. Passing ctx.scale here (the world-pixel scale the
+  -- FX closures use) put the stick hundreds of pixels off-screen.
+  local ww = love.graphics.getWidth()
+  if not (ww and ww > 0 and rw and rw > 0) then return end
+  local s = rw / ww
+  local cx, cy, r = z.cx * s, z.cy * s, z.r * s
+  local held = stickTouch ~= nil
+  love.graphics.push("all")
+  -- the well: dark ring, faint fill, matching the pad's own restraint so it
+  -- reads as part of the overlay rather than as HUD
+  love.graphics.setColor(0, 0, 0, held and 0.30 or 0.20)
+  love.graphics.circle("fill", cx, cy, r)
+  love.graphics.setColor(1, 1, 1, held and 0.45 or 0.28)
+  love.graphics.setLineWidth(math.max(1, 2 * s))
+  love.graphics.circle("line", cx, cy, r)
+  -- the knob, sitting where the thumb has pushed it
+  local kx = cx + (stick.x or 0) * r * 0.62
+  local ky = cy + (stick.y or 0) * r * 0.62
+  love.graphics.setColor(1, 1, 1, held and 0.55 or 0.34)
+  love.graphics.circle("fill", kx, ky, r * 0.38)
+  love.graphics.pop()
+end
 
 local installed = false
 
@@ -676,10 +768,55 @@ function FirstPerson.install()
     return ok and v or nil
   end
 
+  -- ------- the on-screen look stick
+  --
+  -- A thumbstick above A/B, drawn only while 1ST PERSON is driving. It
+  -- writes into the SAME `stick` table the physical right stick writes to,
+  -- so it inherits the rate-based response already implemented for a
+  -- gamepad: a held deflection keeps turning, and the squared curve means
+  -- small pushes aim while full ones spin. A drag would only turn by how far
+  -- the finger travelled, which runs out at the edge of the glass.
+  --
+  -- Drag-anywhere is deliberately left in place underneath. The stick is an
+  -- affordance for the thumb that is already over there, not a replacement
+  -- for a flick with whatever finger is free.
+  local function lookStick()
+    local ok, z = pcall(function()
+      local L = TouchControls:layout()
+      local a, b = L.a, L.b
+      if not (a and b) then return nil end
+      -- centred on the A/B cluster horizontally, sitting above the higher
+      -- of the two so it never overlaps a button the engine draws on top
+      local r = a.w * 1.15
+      return { cx = (a.cx + b.cx) / 2,
+               cy = math.min(a.cy, b.cy) - a.w * 0.75 - r,
+               r = r }
+    end)
+    return ok and z or nil
+  end
+  FirstPerson.lookStick = lookStick
+
+  -- deflection of a point within the stick, clamped to the rim, or nil
+  local function stickDeflect(z, x, y)
+    local dx, dy = (x - z.cx) / z.r, (y - z.cy) / z.r
+    local m = math.sqrt(dx * dx + dy * dy)
+    if m > 1 then dx, dy = dx / m, dy / m end
+    return dx, dy
+  end
+
   do
     local inner = Game.touchpressed
     function Game:touchpressed(id, x, y)
       if FirstPerson.driving() then
+        local z = FirstPerson.stickShown() and lookStick() or nil
+        if z and not stickTouch then
+          local dx, dy = (x - z.cx) / z.r, (y - z.cy) / z.r
+          if dx * dx + dy * dy <= 1 then
+            stickTouch = { id = id, z = z }
+            stick.x, stick.y = stickDeflect(z, x, y)
+            return
+          end
+        end
         local onControl = nil
         pcall(function() onControl = TouchControls:hitTest(x, y) end)
         if not onControl and not lookTouch then
@@ -706,6 +843,10 @@ function FirstPerson.install()
   do
     local inner = Game.touchmoved
     function Game:touchmoved(id, x, y)
+      if stickTouch and stickTouch.id == id then
+        stick.x, stick.y = stickDeflect(stickTouch.z, x, y)
+        return
+      end
       if lookTouch and lookTouch.id == id then
         local w = 1280
         pcall(function() w = love.graphics.getWidth() end)
@@ -713,8 +854,8 @@ function FirstPerson.install()
         if FirstPerson.driving() then
           -- negated yaw for the same reason as the mouse (see update):
           -- drag right, look right, the mobile-shooter convention
-          FirstPerson.lookBy(-(x - lookTouch.x) * per,
-                             (y - lookTouch.y) * per)
+          FirstPerson.steer(-(x - lookTouch.x) * per,
+                            (y - lookTouch.y) * per)
         end
         lookTouch.x, lookTouch.y = x, y
         return
@@ -728,6 +869,11 @@ function FirstPerson.install()
   do
     local inner = Game.touchreleased
     function Game:touchreleased(id, x, y)
+      if stickTouch and stickTouch.id == id then
+        stickTouch = nil
+        stick.x, stick.y = 0, 0
+        return
+      end
       if lookTouch and lookTouch.id == id then
         lookTouch = nil
         return

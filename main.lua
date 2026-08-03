@@ -275,6 +275,7 @@ mod.content.render_pipelines:register("voxel", {
       -- headset never reaches this line (drawWorld returns the mirror
       -- above) -- lib/VR draws the same HUD onto each eye instead.
       HordeHud.drawFlat(rw, rh, ctx.scale * AntiAlias.factor())
+      FirstPerson.drawLookStick(rw, rh)
       Voxel3D.endOverlay()
     end
     -- and back to the window's own size, which is what the engine composites
@@ -404,6 +405,19 @@ local function stagedBattles()
 end
 
 local SETTINGS = {
+  -- First-person look preferences. `when` keeps them off the menu on every
+  -- other rung: three rows about a stick that is not on screen are noise.
+  { FirstPerson.stickSetting,
+    "Show the on-screen look stick above A/B. Off leaves the drag-anywhere "
+    .. "look, which is what a controller or a spare thumb uses anyway.",
+    when = function() return FirstPerson.engaged() end },
+  { FirstPerson.speedSetting,
+    "How fast the view turns. Applies to the stick, a controller and a "
+    .. "drag alike.",
+    when = function() return FirstPerson.engaged() end },
+  { FirstPerson.invertSetting,
+    "Push down to look up, the flight-stick convention.",
+    when = function() return FirstPerson.engaged() end },
   { VoxelGrid.setting, "One-pixel wireframe along every voxel edge." },
   { WorldCurve.setting,
     "Bend the world down over the horizon, Animal Crossing style." },
