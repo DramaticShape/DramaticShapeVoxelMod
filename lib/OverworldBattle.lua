@@ -326,6 +326,10 @@ end
 -- not nest.
 local session = nil
 
+local function isIOS()
+  return love.system and love.system.getOS and love.system.getOS() == "iOS"
+end
+
 local function game()
   return require("src.core.Game")
 end
@@ -540,11 +544,15 @@ function OverworldBattle.update(dt)
     -- reason the scene is: it binds a canvas of its own. After the frost, so
     -- the glass is frosted from the world alone and never from the glyphs
     -- about to sit on it.
-    local okHud, up = pcall(OverworldBattle.snapHUDs, session.battle, shot)
+    local ios = isIOS()
+    local okHud, up = false, false
+    if not ios then
+      okHud, up = pcall(OverworldBattle.snapHUDs, session.battle, shot)
+    end
     session.snapped = (okHud and up) and true or false
     -- once per battle, not once per frame: a driver that cannot do this cannot
     -- do it sixty times a second either, and the fallback is silent and fine
-    if not okHud and not session.hudWarned then
+    if not ios and not okHud and not session.hudWarned then
       session.hudWarned = true
       V.mod.log:warn("overworld battle HUD snap failed: %s -- the HUDs draw "
                      .. "in the battle frame this battle", tostring(up))
@@ -1090,6 +1098,7 @@ function OverworldBattle.install()
   local innerText = BattleState.drawTextArea
   function BattleState:drawTextArea()
     if not self.dramaticShapeShot then return innerText(self) end
+    if isIOS() then return innerText(self) end
     local battle = self
     if not self.dramaticShapeDark then return withoutBoxFill(battle, innerText) end
     BattleHud.flipGlyphs(BattleScene.GB_W, BattleScene.GB_H, function()
@@ -1315,6 +1324,17 @@ function OverworldBattle.drawHudPanels(battle)
   local shot = battle.dramaticShapeShot
   battle.dramaticShapeDark = nil
   if not shot then return end
+  if isIOS() then
+    local slide = (battle.introSlide or 0) * 4
+    local enemy, player = OverworldBattle.hudLive(battle, slide)
+    local rect = OverworldBattle.HUD_RECT
+    love.graphics.setColor(1, 1, 1, 0.84)
+    if enemy then love.graphics.rectangle("fill", rect.enemy[1], rect.enemy[2], rect.enemy[3], rect.enemy[4]) end
+    if player then love.graphics.rectangle("fill", rect.player[1], rect.player[2], rect.player[3], rect.player[4]) end
+    love.graphics.setColor(1, 1, 1, 1)
+    battle.dramaticShapeDark = nil
+    return
+  end
   if snapped() then
     battle.dramaticShapeDark = session and session.dark or nil
     return
