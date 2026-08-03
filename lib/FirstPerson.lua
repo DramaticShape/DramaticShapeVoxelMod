@@ -110,6 +110,15 @@ FirstPerson.yaw = 0
 FirstPerson.pitch = FirstPerson.PITCH_DEFAULT
 FirstPerson.blend = 0
 
+-- A multiplier on the first-person field of view, for anything that wants
+-- to narrow the lens without owning the rig: 1 is the ordinary 65
+-- degrees, and horde mode's iron sights ease it down toward 40 while the
+-- player is looking down them (lib/HordeGun). Kept here rather than in
+-- the caller because the fov is folded into the orbit blend below, and
+-- because signature() has to know -- a lens that narrows while the player
+-- stands still still has to re-fit the shadow box.
+FirstPerson.fovScale = 1
+
 local wasEngaged = false
 local stick = { x = 0, y = 0 }        -- right stick, latest event values
 local mouseDX, mouseDY = 0, 0         -- relative counts since last update
@@ -752,11 +761,30 @@ function FirstPerson.install()
   -- pressed is remembered per button, so the release always reaches the
   -- overlay even if the capture ended while the button was down --
   -- otherwise a click that outlives the rung strands A held forever.
+  --
+  -- HORDE MODE re-reads the same two buttons as a weapon: left fires,
+  -- right holds the sights. Claimed BEFORE the A/B mapping below rather
+  -- than on top of it, so a click during the mode never also lands as a
+  -- GB button -- otherwise the A that ends the GAME OVER card would be
+  -- spent by the shot that ended the run.
   local mouseHeld = {}
   local MOUSE_BTN = { [1] = "a", [2] = "b" }
+  local function hordeMouse(button, down)
+    local Horde = V.require("Horde")
+    if not Horde.playing() then return false end
+    if button == 1 then
+      if down then V.require("HordeGun").fire() end
+      return true
+    elseif button == 2 then
+      V.require("HordeGun").setAds(down)
+      return true
+    end
+    return false
+  end
   do
     local inner = love.mousepressed
     love.mousepressed = function(x, y, button, istouch, presses)
+      if captured and not istouch and hordeMouse(button, true) then return end
       if captured and not istouch and MOUSE_BTN[button] then
         local Input = require("src.core.Input")
         mouseHeld[button] = true
@@ -769,6 +797,9 @@ function FirstPerson.install()
   do
     local inner = love.mousereleased
     love.mousereleased = function(x, y, button, istouch, presses)
+      -- a release always reaches whoever owns the press: the horde's
+      -- aim-hold has to let go even if the mode ended mid-click
+      if not mouseHeld[button] and hordeMouse(button, false) then return end
       if mouseHeld[button] then
         local Input = require("src.core.Input")
         mouseHeld[button] = nil
@@ -808,6 +839,14 @@ function FirstPerson.install()
         local onControl = nil
         pcall(function() onControl = TouchControls:hitTest(x, y) end)
         if not onControl and not lookTouch then
+          -- HORDE MODE: a tap on open screen is a SHOT, fired on the press
+          -- rather than on a release that turned out not to be a drag --
+          -- a shooter that waits to find out whether you meant it is a
+          -- shooter that misses. The same finger still becomes the look
+          -- drag below, so aiming and firing are one gesture.
+          if V.require("Horde").playing() then
+            V.require("HordeGun").fire()
+          end
           lookTouch = { id = id, x = x, y = y }
           return
         end

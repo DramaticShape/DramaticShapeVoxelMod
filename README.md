@@ -103,14 +103,16 @@ alongside.
 | either trigger | START |
 | left stick click | step the VOXEL angle ladder (same as the "3" key) |
 | right stick up / down | *diorama only* — zoom the model |
-| right stick left / right | *1ST only* — snap-turn 45° |
+| right stick left / right | *1ST only* — snap-turn 45°, or turn smoothly with **SMOOTH TURN** on |
 | grip squeeze + raise / lower that hand | *diorama only* — drag the table's height |
 | head | *1ST and battles* — look; FreeMove walks where you look |
 | left hand | *1ST and battles* — the Pokédex: menus, dialogs and the 2D battle screen on its screen |
 
 ## Licenses
 
-This mod redistributes one third-party binary:
+This mod is released under the **MIT License** — see [`LICENSE`](LICENSE).
+
+It redistributes one third-party binary:
 
 - **`assets/vr/openxr_loader.dll`** — the Khronos OpenXR loader
   (version 1.0.10.2, x64, unmodified), © The Khronos Group Inc.,

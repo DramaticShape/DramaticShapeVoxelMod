@@ -95,6 +95,13 @@ local FirstPerson = V.require("FirstPerson")
 local FreeMove = V.require("FreeMove")
 local CamControl = V.require("CamControl")
 local VR = V.require("VR")
+-- HORDE MODE: the konami code's minigame. Horde owns the state machine and
+-- every hook; the other four are the gun, the crowd, the readout and the
+-- chip-synthesized sounds it fires. See lib/Horde.lua for the whole design.
+local Horde = V.require("Horde")
+local HordeGun = V.require("HordeGun")
+local HordeHud = V.require("HordeHud")
+local HordeSfx = V.require("HordeSfx")
 
 -- Forward declaration: the voxel pipeline's update hook (registered below)
 -- calls this, and it is defined further down with the settings it drives.
@@ -193,6 +200,12 @@ mod.content.render_pipelines:register("voxel", {
     -- and the whole battle. Ahead of the active() gate below, because a 3D
     -- battle does not require the free-roam mode to be switched on.
     OverworldBattle.update(dt)
+    -- The horde, on the same always-running tick and for the same reason:
+    -- it owns no pass of the frame, it is a MODE over the overworld, and
+    -- it has to keep thinking while a warp's wipe covers the screen (the
+    -- crowd follows the player through the door) and under the GAME OVER
+    -- card, which is a pushed state that stops everything below it.
+    Horde.update(dt)
     -- VOID FILL picks the block the border ring is made of, and in this
     -- mode that ring is BAKED INTO THE MESH rather than drawn each frame.
     -- So the option has to reach the cache or nothing happens on screen
@@ -258,6 +271,12 @@ mod.content.render_pipelines:register("voxel", {
       -- pixels, so only the scale needs saying.
       ctx.drawFx(function(wx, wy) return Voxel3D.project(wx, 0, wy) end,
                  ctx.scale * AntiAlias.factor())
+      -- the horde's readout rides the same overlay, over the FX: health,
+      -- ammunition, the crosshair and the banners, sized in the same
+      -- supersampled canvas pixels everything else here is drawn in. A
+      -- headset never reaches this line (drawWorld returns the mirror
+      -- above) -- lib/VR draws the same HUD onto each eye instead.
+      HordeHud.drawFlat(rw, rh, ctx.scale * AntiAlias.factor())
       Voxel3D.endOverlay()
     end
     -- and back to the window's own size, which is what the engine composites
@@ -447,14 +466,25 @@ local SETTINGS = {
     -- says why); off Windows -- mobile above all -- there is no VR to have
     -- and the row does not exist
     when = function() return VR.supported() end, full = true },
+  -- Under the VR row and only while it is ON: a comfort setting for a
+  -- device that is not plugged in decides nothing, and this one is read
+  -- exclusively by the headset's right stick.
+  { VR.smoothTurn,
+    "Turn smoothly with the right stick instead of snapping 45 degrees a "
+    .. "flick. OFF by default, and deliberately: a software turn moves the "
+    .. "world past a head that did not move, which is the most reliable way "
+    .. "to make somebody ill in a headset. Turn it on if you have your sea "
+    .. "legs and want the continuity.",
+    when = function() return VR.enabled() end, full = true },
 }
 
 local schema = {}
 for _, entry in ipairs(SETTINGS) do
-  -- the VR row is absent from the mod manager's page too where the
+  -- the VR rows are absent from the mod manager's page too where the
   -- platform cannot do VR at all -- the OPTIONS menu's `when` gates are
   -- situational (a row hidden for now), this one is existential
-  if entry[1] ~= VR.setting or VR.supported() then
+  local vrOnly = entry[1] == VR.setting or entry[1] == VR.smoothTurn
+  if not vrOnly or VR.supported() then
     schema[#schema + 1] = entry[1]:schema(entry[2])
   end
 end
@@ -509,6 +539,11 @@ local HOTKEYS = {
 -- the key has always delegated (see the wrap below for why).
 local function cycleVoxel(game)
   local Pipelines = require("src.render.Pipelines")
+  -- HORDE MODE holds the rung at 1ST for as long as it runs. Refused HERE
+  -- rather than at each caller because this one function IS every way a
+  -- player can step the ladder: the "3" key, the pad's SELECT, and the VR
+  -- left-stick click all come through it.
+  if Horde.viewLocked() then return false end
   local top = game.stack and game.stack:top()
   if not Pipelines.canToggle("voxel", top, game.overworld) then return false end
   Pipelines.setLevel("voxel", Voxel.nextHotkeyLevel(Pipelines.level("voxel")))
@@ -537,6 +572,16 @@ do
   local inner = Game.keypressed
 
   function Game:keypressed(key)
+    -- HORDE MODE owns the keyboard's spare keys while it runs: R reloads,
+    -- and the mode keys are swallowed rather than left to change the rung
+    -- or the post-processing out from under a locked camera.
+    if Horde.active then
+      if key == "r" then
+        HordeGun.reload()
+        return
+      end
+      if HOTKEYS[key] then return end
+    end
     local claim = HOTKEYS[key]
     local top = self.stack and self.stack:top()
     -- Q and E work whichever camera is in front of the player -- the
@@ -968,6 +1013,15 @@ do
     OverworldState.dramaticShapeSelectHook = true
   end
 end
+
+-- ------- the konami code, and everything it turns on
+--
+-- Installed last of the input seams so its handleInput reasoning sits
+-- outside FreeMove's and SELECT's. The detector itself does not live on
+-- handleInput at all -- it reads the fixed step's own press queue, which
+-- is where keyboard, pad, touch and the VR controllers have all already
+-- become the same eight buttons. See lib/Horde.lua.
+Horde.install()
 
 -- ------- edge-anchored menus stay in the GB frame while a headset is live
 --

@@ -4589,6 +4589,346 @@ vrRigSection()
   Pipelines.setLevel("voxel", 0)
 end)()
 
+-- ------- HORDE MODE
+--
+-- The parts that can be judged without a screen: the code detector (which
+-- reads Game Boy buttons, so this is the same test the pad, the touch
+-- overlay and the VR controllers would pass), the registrations, the
+-- gloom's arithmetic, and the flow field the crowd chases along.
+;(function()
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local Horde = lib.require("Horde")
+  local Mobs = lib.require("HordeMobs")
+  local Gun = lib.require("HordeGun")
+
+  -- ------- the code
+
+  local KONAMI = { "up", "up", "down", "down",
+                   "left", "right", "left", "right", "b", "a" }
+
+  local function feedAll(list)
+    local fired = false
+    for _, btn in ipairs(list) do
+      if Horde.feed({ btn }) then fired = true end
+    end
+    return fired
+  end
+
+  T.eq(feedAll(KONAMI), true, "the konami code completes the detector")
+  T.eq(Horde._progress(), 0, "and the detector resets behind itself")
+
+  -- a wrong button in the middle is a wrong code
+  T.eq(feedAll({ "up", "up", "down", "down", "left", "left" }), false,
+    "a wrong button abandons the code")
+  T.eq(Horde._progress(), 0, "and leaves nothing part-entered")
+
+  -- the two Ups are two EDGES, which every device gives (the analog stick's
+  -- hysteresis is what guarantees it there): one held Up is not two
+  T.eq(feedAll({ "up", "up" }), false, "two Ups alone do not fire")
+  T.eq(Horde._progress(), 2, "but they do stand at two")
+  T.eq(feedAll({ "a" }), false, "a stray A after them is not the code")
+  T.eq(Horde._progress(), 0, "and drops the run entirely")
+
+  -- a false start re-enters on the first button rather than dying: pressing
+  -- Up three times still leaves a code in progress
+  feedAll({ "up", "up", "up" })
+  T.eq(Horde._progress(), 2,
+    "a third Up restarts the run rather than voiding it")
+  Horde.feed({})
+  feedAll({ "down", "down", "left", "right", "left", "right", "b" })
+  T.eq(Horde.feed({ "a" }), true, "and the code still completes from there")
+
+  -- every button in one step is still the code: the queue is ordered, and
+  -- a frame that swallowed several presses must not lose any of them
+  T.eq(Horde.feed(KONAMI), true, "the whole code inside one fixed step fires")
+
+  -- ------- it cannot start from nowhere
+  --
+  -- canStart is the gate between the code and the mode. With no overworld
+  -- in this harness it must refuse, which is also the "in a menu, in a
+  -- battle, mid-warp" answer.
+  T.eq(Horde.canStart(keyGame), false,
+    "the code does nothing outside a live overworld")
+  T.eq(Horde.active, false, "and the mode stays off")
+
+  -- ------- what got registered
+
+  T.check(type(Data.screens) == "table" and Data.screens.HordeGameOver ~= nil,
+    "the GAME OVER card is in the screens registry")
+  T.check(type(Data.screens) == "table" and Data.screens.HordeExitPrompt ~= nil,
+    "and so is the exit prompt START opens")
+  local sfx = Data.audio and Data.audio.sfx or {}
+  local HordeSfx = lib.require("HordeSfx")
+  for _, name in ipairs(HordeSfx.SHOTS) do
+    T.check(type(sfx[name]) == "table" and sfx[name].chip ~= nil,
+      "the gunshot " .. name .. " assembled into a chip program")
+  end
+  for _, name in ipairs({ HordeSfx.MAG_OUT, HordeSfx.MAG_IN, HordeSfx.RACK,
+                          HordeSfx.DRY, HordeSfx.HIT, HordeSfx.HURT }) do
+    T.check(type(sfx[name]) == "table" and sfx[name].chip ~= nil,
+      name .. " assembled into a chip program")
+  end
+  T.eq(#HordeSfx.SHOTS, 3,
+    "three shot variants, so a fast trigger overlaps its own echoes")
+  -- none of them may duck the music: a fanfare pauses the song, and
+  -- Lavender Town stopping every time the player fires is not the mode
+  local fanfares = Data.audio and Data.audio.fanfares or {}
+  for name in pairs(sfx) do
+    if name:find("^DS_HORDE") then
+      T.check(not fanfares[name] and not sfx[name].fanfare,
+        name .. " is an overlay sound, not a fanfare that pauses the song")
+    end
+  end
+
+  -- ------- the gloom
+  --
+  -- The mode pins NIGHT and then drags it down. Both wrappers must be
+  -- INERT with the mode off -- this mod is a display mod first, and a
+  -- horde-mode bug that tinted the ordinary game would be the worst kind.
+
+  local DayNight = lib.require("DayNight")
+  local litPal = DayNight.palette(DayNight.T.night)
+  local litTint = DayNight.tint(true, DayNight.T.night)
+  T.check(type(litPal) == "table" and #litPal > 0,
+    "the night palette is readable with the mode off")
+
+  Horde.active = true
+  local darkPal = DayNight.palette(DayNight.T.night)
+  local darkTint = DayNight.tint(true, DayNight.T.night)
+  local darkIn = DayNight.tint(false, DayNight.T.night)
+  Horde.active = false
+
+  local litSum, darkSum = 0, 0
+  for i = 1, #litPal do
+    for c = 1, 3 do
+      litSum = litSum + litPal[i][c]
+      darkSum = darkSum + darkPal[i][c]
+    end
+  end
+  T.check(darkSum < litSum * 0.6,
+    "the horde's sky is markedly darker than the night it is built on")
+  T.check(darkTint[1] < litTint[1] and darkTint[3] < litTint[3],
+    "and the world tint comes down with it")
+  T.check(darkTint[3] > darkTint[2],
+    "toward violet rather than flat grey -- blue survives the desaturation")
+  T.check(darkIn[1] < 1,
+    "indoors is darkened too: a building is not a refuge")
+
+  T.same(DayNight.palette(DayNight.T.night), litPal,
+    "and with the mode off the palette is byte-for-byte what it was")
+  T.same(DayNight.tint(true, DayNight.T.night), litTint,
+    "as is the world tint")
+
+  -- ------- the flow field
+  --
+  -- A room with a wall down the middle and one gap in it. Every mob's next
+  -- step comes off this sweep, so what is being pinned here is that the
+  -- crowd walks THROUGH THE DOORWAY rather than into the wall -- which is
+  -- the whole of "they path to you" and "they follow you inside".
+
+  local Map = require("src.world.Map")
+  local FLOOR, WALL = 1, 2
+  local WIDTH, HEIGHT = 6, 5              -- in blocks; cells are twice that
+  local blocks = {}
+  for i = 1, WIDTH * HEIGHT do blocks[i] = FLOOR end
+  local mapDef = {
+    id = "HORDE_TEST", width = WIDTH, height = HEIGHT,
+    blocks = blocks, borderBlock = WALL, tileset = "FIX_OUT",
+    objects = {}, warps = {}, signs = {},
+  }
+  -- the tileset says which collision tiles may be stood on; FLOOR may,
+  -- WALL may not
+  local tilesetDef = {
+    walkable = { FLOOR },
+    blockdefs = nil,
+  }
+  -- Map:cellTile reads the block layer through the tileset's blockdefs; the
+  -- fixture tileset has none, so stand in a cellTile that answers straight
+  -- off a grid this test owns
+  local walls = {}
+  local map = Map.new(mapDef, tilesetDef)
+  local W, H = map.widthCells, map.heightCells
+  function map:cellTile(cx, cy)
+    if cx < 0 or cy < 0 or cx >= W or cy >= H then return WALL end
+    return walls[cy * W + cx] and WALL or FLOOR
+  end
+  -- a wall along cx = 5, with a single gap at cy = 1
+  for cy = 0, H - 1 do
+    if cy ~= 1 then walls[cy * W + 5] = true end
+  end
+
+  Mobs._rebuild(map, 2, 2)                -- the player, west of the wall
+  T.eq(Mobs._dist(2, 2), 0, "the sweep starts on the player's own cell")
+  T.eq(Mobs._dist(3, 2), 1, "and counts outward a cell at a time")
+  T.eq(Mobs._dist(5, 2), nil, "the wall is not a cell anything stands on")
+
+  -- east of the wall the only way in is the gap, so the distance there has
+  -- to be the way ROUND, not the way through
+  local through = Mobs._dist(6, 2)
+  T.check(through ~= nil, "the far side of the wall is still reachable")
+  local direct = math.abs(6 - 2) + math.abs(2 - 2)
+  T.check(through > direct,
+    "and costs more than the straight line, because the wall is in the way")
+  T.eq(through, Mobs._dist(6, 1) + 1,
+    "the cheapest way there is through the gap")
+
+  -- a mob standing east of the wall must take a step that shortens the
+  -- walk -- which, from there, means heading for the doorway
+  local state = { map = map, entities = {}, player = { cellX = 2, cellY = 2 } }
+  local mob = { cellX = 7, cellY = 3, px = 112, py = 48,
+                facing = "down", moving = false, progress = 0 }
+  state.entities[1] = mob
+  Mobs._stepMob(state, { npc = mob })
+  T.eq(mob.moving, true, "a mob with a path takes a step")
+  local before = Mobs._dist(7, 3)
+  local after = Mobs._dist(mob.targetX, mob.targetY)
+  T.check(after and before and after < before,
+    "and the step it takes is one that shortens the walk to the player")
+
+  -- an occupied cell is stepped AROUND, not into: this is what makes a
+  -- pack spread out around the player instead of queueing single file
+  local blocker = { cellX = mob.targetX, cellY = mob.targetY }
+  local mob2 = { cellX = 7, cellY = 3, px = 112, py = 48,
+                 facing = "down", moving = false, progress = 0 }
+  state.entities = { blocker, mob2 }
+  Mobs._stepMob(state, { npc = mob2 })
+  if mob2.moving then
+    T.check(not (mob2.targetX == blocker.cellX
+                 and mob2.targetY == blocker.cellY),
+      "a mob never steps into a cell another one already holds")
+  else
+    T.check(true, "a boxed-in mob waits rather than walking through a body")
+  end
+
+  -- seal the gap and the east side is cut off entirely. A mob over there
+  -- has nowhere to walk that gets it any closer, and must stand rather
+  -- than guess -- an island across water is not a path.
+  walls[1 * W + 5] = true
+  Mobs._rebuild(map, 2, 2)
+  T.eq(Mobs._dist(6, 2), nil, "walling the gap cuts the far side off")
+  local stranded = { cellX = 7, cellY = 3, px = 112, py = 48,
+                     facing = "down", moving = false, progress = 0 }
+  state.entities = { stranded }
+  Mobs._stepMob(state, { npc = stranded })
+  T.eq(stranded.moving, false, "a mob with nowhere to go does not move")
+  T.eq(stranded.facing, "left",
+    "it turns toward the player instead, so the pack still reads as a threat")
+
+  -- ------- the way out
+  --
+  -- START is asked, not taken: the mode does not pause, but it does have
+  -- to be leavable, and every device's START (the pad's, the keyboard's
+  -- ESCAPE, the touch overlay's) lands on the same GB button.
+  T.eq(Horde.askExit(keyGame), false,
+    "there is nothing to exit with the mode off")
+
+  -- and asking while the mode IS on must not throw. Worth its own check:
+  -- askExit reaches for this module's own overworld helper, and a Lua
+  -- local declared BELOW the function that uses it is a nil global --
+  -- which says nothing at load, nothing in a headless suite that never
+  -- turns the mode on, and blows up the first time somebody presses
+  -- ESCAPE. That is exactly how it shipped the first time.
+  Horde.active, Horde.state = true, "active"
+  local askedOk, askErr = pcall(Horde.askExit, keyGame)
+  Horde.active, Horde.state = false, "idle"
+  T.eq(askedOk, true, "asking the way out never throws: " .. tostring(askErr))
+
+  -- ------- the banner wraps rather than running off the screen
+  --
+  -- The HUD's scale follows the window's zoom, so a player zoomed well in
+  -- gets glyphs twice a large scale -- and the announcement was wider
+  -- than the frame it was announcing over.
+  local Hud = lib.require("HordeHud")
+  local wrap = Hud._layout
+  T.check(type(wrap) == "function", "the banner exposes its layout")
+
+  -- a stand-in font of fixed-width glyphs: the real sheets are not in the
+  -- fixture set, and pinning the line breaks against exact advances is a
+  -- claim about the WRAPPING rather than about whatever art is loaded
+  local stub = {
+    encode = function(s)
+      local out = {}
+      for i = 1, #s do out[i] = s:byte(i) end
+      return out
+    end,
+    advanceOf = function() return 8 end,
+  }
+  local SHOUT = "A DARKNESS APPROACHES"
+
+  local wide = wrap(stub, SHOUT, 2, 4000)
+  T.eq(#wide, 1, "given room, the announcement is one line")
+
+  local narrow, smallBs = wrap(stub, SHOUT, 2, 300)
+  T.check(#narrow > 1, "and wraps onto more lines when the frame is narrow")
+  for _, line in ipairs(narrow) do
+    T.check(line.width <= 300,
+      ("every wrapped line fits the frame (%q is %d wide)")
+        :format(line.text, line.width))
+  end
+
+  -- A scale far past what the frame can carry shrinks the glyphs rather
+  -- than letting a word hang off the edge -- there is no wrap point
+  -- inside a word, so wrapping alone cannot save this case. This is the
+  -- one the player hit: the HUD's scale follows the window's zoom.
+  local tiny, tinyBs = wrap(stub, SHOUT, 40, 200)
+  for _, line in ipairs(tiny) do
+    T.check(line.width <= 200,
+      ("a scale the frame cannot carry shrinks to fit (%q is %d wide)")
+        :format(line.text, line.width))
+  end
+  T.check(tinyBs < smallBs,
+    "and that shrink really is a smaller glyph than the narrow case's")
+
+  -- the degenerate end: one unbreakable word and almost no room. The
+  -- glyph cannot go below one pixel, so this is allowed to overflow --
+  -- what it may NOT do is fail to lay out
+  local one = wrap(stub, "APPROACHES", 8, 4)
+  T.check(one and #one == 1, "a single word always lays out on one line")
+  T.eq(wrap(stub, "   ", 2, 100), nil, "and nothing but spaces lays out to nothing")
+
+  -- ------- SMOOTH TURN belongs to the headset
+  --
+  -- A comfort setting for a device that is not plugged in decides
+  -- nothing, so the row exists only while VR is ON -- and it is OFF by
+  -- default, because a software turn moves the world past a head that
+  -- did not move and that is how you make somebody ill in a headset.
+  local VRMod = lib.require("VR")
+  T.eq(VRMod.smoothTurn:get(), false, "SMOOTH TURN is off out of the box")
+
+  local function optionRows()
+    local out = Runtime.call("ui.options.rows", function(_, r) return r end,
+                             { data = Data }, { { id = "tilt" } })
+    local ids = {}
+    for _, row in ipairs(out) do ids[row.id] = row end
+    return ids
+  end
+
+  Pipelines.setLevel("voxel", 3)          -- off FULL, which owns other rows
+  VRMod.setting:sync(false)
+  T.check(not optionRows()["DRAMATIC_SHAPE:smoothturn"],
+    "with VR off the row is not on the OPTIONS menu")
+
+  VRMod.setting:sync(true)
+  local smoothRow = optionRows()["DRAMATIC_SHAPE:smoothturn"]
+  T.check(smoothRow ~= nil, "and with VR on it is")
+  if smoothRow then
+    T.eq(smoothRow.label, "SMOOTH TURN", "under its own name")
+    T.eq(smoothRow.value(), "OFF", "reading OFF until the player says otherwise")
+  end
+  VRMod.setting:sync(false)
+
+  -- ------- the gun's own bookkeeping
+
+  Gun.reset()
+  local ammo, mag, reloading = Gun.ammo()
+  T.eq(ammo, mag, "the gun starts with a full magazine")
+  T.eq(reloading, false, "and is not reloading")
+  T.eq(Gun.fire(), false, "and cannot be fired with no session running")
+  T.eq(select(1, Gun.ammo()), mag, "a refused shot spends no round")
+  T.eq(Gun.reload(), false, "nor reloaded when it is already full")
+  T.eq(Gun.visible(), false, "and it is not drawn with the mode off")
+end)()
+
 Pipelines.reset()
 run.release()
 
