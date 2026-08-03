@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.6.0
+## 1.5.4
 
 ### Added
 
@@ -37,6 +37,22 @@
   trigger finger overlaps its own echoes instead of cutting them off.
 
 ### Changed
+
+- **SMOOTH TURN**, a new options row under VR (OFF by default), turns the
+  right stick into a continuous turn instead of the 45-degree snap. The
+  snap stays the default deliberately -- a software turn moves the world
+  past a head that did not move, which is the most reliable way to make
+  somebody ill in a headset -- but it costs continuity, so the choice is
+  the player's. The row only exists while VR is ON: a comfort setting for
+  a device that is not plugged in decides nothing.
+
+- **The wall bump is silent in first person**, on the flat screen and in
+  VR alike. On the grid a blocked step is a discrete event -- you pressed
+  a direction, the game refused, and the bump answers you once. The free
+  walk has no such moment: the body slides along whatever it grazes, so
+  walking a fence line or rounding a doorframe is blocked on one axis
+  continuously and the sound came out as a rattle rather than as an
+  answer. The grid walk keeps its own bump untouched.
 
 - **`FirstPerson.fovScale`** is a new seam on the first-person rig: a
   plain multiplier on the field of view, for anything that wants to

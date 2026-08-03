@@ -59,6 +59,25 @@ local VR = {}
 -- spoken for, and a headset is not something to toggle by accident.
 VR.setting = ModSetting.new("vr", "VR", { false, true }, { "OFF", "ON" })
 
+-- How the right stick turns you in first person. OFF is the 45-degree
+-- SNAP this mod shipped with and the reason for it is comfort, not
+-- taste: a software turn moves the world past a head that did not move,
+-- which is vection with no vestibular signal to match it, and it is the
+-- single most reliable way to make somebody ill in a headset. A snap
+-- gives the inner ear nothing to disagree with.
+--
+-- But snap turning is not free either -- it costs continuity, and the
+-- players who have their sea legs generally want the stick. So it is a
+-- row rather than a decision: OFF by default, on for anyone who asks,
+-- and the row only exists while there is a headset to use it in.
+VR.smoothTurn = ModSetting.new("smoothturn", "SMOOTH TURN",
+                               { false, true }, { "OFF", "ON" })
+
+-- radians per second at full deflection, with a squared response so the
+-- first half of the throw aims and the rest turns -- the same curve
+-- FirstPerson gives the flat screen's right stick
+VR.SMOOTH_TURN_RATE = 2.2
+
 -- Where the diorama's UI panel floats vs first person's. These are the
 -- FALLBACK screens: wherever the pokedex is up and lit -- first
 -- person's menus, a battle's 2D scene -- no quad is submitted at all
@@ -181,6 +200,11 @@ local function shutdown(reason)
   BattleCam.still = false
   VoxelScene.spriteLean = nil
   Pokedex.clear()
+  -- the horde's gun too: its VR frame is a matrix built from a hand pose,
+  -- and a stale one left behind would pin the model to wherever the
+  -- controller was when the session died -- on the FLAT screen, where the
+  -- view model should have taken over
+  V.require("HordeGun").clear()
   zoom, heightOff = 1, 0
   fpYawOff, snapArmed = 0, true
   camMode, fadeAlpha = "explore", 0
@@ -311,6 +335,25 @@ local function renderWorld(views, ctl)
       if scr then
         Pokedex.screen(scr[1], scr[2], scr[3], scr[4], scr[5])
       end
+    elseif V.require("Horde").active then
+      -- HORDE MODE's readout, on the device already in the player's left
+      -- hand. It cannot be a flat overlay: the eye buffers have
+      -- ASYMMETRIC frusta, so the same canvas pixel is a different ANGLE
+      -- in each eye and a 2D HUD drawn into both tears down the middle.
+      -- The Pokedex is real geometry both eyes see from their own
+      -- position, so the stereo is correct by construction -- and it is
+      -- already tracked, already lit, and already the thing this mod
+      -- puts information on. (The gun wore it briefly and that was
+      -- worse: a screen on the slide sits exactly where the iron sights
+      -- need to be looked through.)
+      --
+      -- The UV rect goes over the usual way up: v = 0 at the TOP, which
+      -- is how the device's screen quad reads every other texture it
+      -- wears. An inverted rect was tried first, on the theory that a
+      -- self-drawn canvas samples from the bottom -- it does not here,
+      -- and it stood the readout on its head.
+      local tex = V.require("HordeHud").panelTexture()
+      if tex then Pokedex.screen(tex, 0, 0, 1, 1) end
     end
   else
     Pokedex.clear()
@@ -356,25 +399,16 @@ local function renderWorld(views, ctl)
 
   -- the snap's fade, over the finished eyes: plain black at this moment's
   -- strength, drawn before the blit so the headset never sees the swap.
-  -- The horde's HUD goes on in the same pass and for the same reason:
-  -- this is the one place the mod draws 2D over a finished eye. It cannot
-  -- ride the window's overlay -- with a headset live that pass returns
-  -- the mirror and never runs.
-  local hordeUp = V.require("Horde").active
-  if fadeAlpha > 0 or hordeUp then
+  -- A full-frame fill is the ONE 2D thing that is safe to draw into an
+  -- eye buffer -- it covers everything, so it does not matter that the
+  -- two frusta disagree about where any given pixel points.
+  if fadeAlpha > 0 then
     pcall(function()
-      local HordeHud = hordeUp and V.require("HordeHud") or nil
       for i = 1, 2 do
         local c = canvases[i]
         love.graphics.setCanvas(c)
-        if fadeAlpha > 0 then
-          love.graphics.setColor(0, 0, 0, math.min(1, fadeAlpha))
-          love.graphics.rectangle("fill", 0, 0, c:getWidth(), c:getHeight())
-        end
-        if HordeHud then
-          love.graphics.setColor(1, 1, 1, 1)
-          HordeHud.drawEye(c:getWidth(), c:getHeight())
-        end
+        love.graphics.setColor(0, 0, 0, math.min(1, fadeAlpha))
+        love.graphics.rectangle("fill", 0, 0, c:getWidth(), c:getHeight())
       end
       love.graphics.setCanvas()
       love.graphics.setColor(1, 1, 1, 1)
@@ -556,12 +590,32 @@ local function driveControls(ctl, dt, fp)
   inp:gamepadaxis(nil, "leftx", ctl.moveX or 0)
   inp:gamepadaxis(nil, "lefty", -(ctl.moveY or 0))
 
-  if ctl.toggleChanged and ctl.toggle then VR.stepView() end
+  -- the left stick click: the VOXEL ladder ordinarily, and the way out of
+  -- horde mode while it runs (the rung is locked there, so the click has
+  -- nothing else to do, and a headset has no ESCAPE key)
+  if ctl.toggleChanged and ctl.toggle then
+    if Horde.active then Horde.askExit() else VR.stepView() end
+  end
 
-  -- first person's snap turn: a flick of the right stick steps the view
-  -- 45 degrees, once per flick -- it re-arms only when the stick comes
-  -- back toward centre, so holding it turns exactly once
-  if fp and camMode ~= "battle" then
+  -- first person's turn on the right stick. SMOOTH TURN ON makes it a
+  -- rate -- hold and the world rotates under you -- and OFF (the
+  -- default) makes it a 45-degree snap per flick: see the row's own
+  -- reasoning where it is declared. Either way the offset turns the
+  -- MAPPING, so the eyes, the walk direction, the pokedex and the gun
+  -- all agree about which way the world now faces.
+  if fp and camMode ~= "battle" and VR.smoothTurn:get() == true then
+    local sx = ctl.lookX or 0
+    local a = math.abs(sx)
+    if a > 0.2 then
+      a = (a - 0.2) / 0.8
+      -- increasing yaw turns LEFT in this mod's compass, so a stick
+      -- pushed right subtracts -- the same sign the snap below uses
+      fpYawOff = wrapPi(fpYawOff
+                        - (sx > 0 and 1 or -1) * a * a
+                          * VR.SMOOTH_TURN_RATE * (dt or 0))
+    end
+    snapArmed = true       -- so a switch back to snap mid-flick re-arms
+  elseif fp and camMode ~= "battle" then
     local sx = ctl.lookX or 0
     if math.abs(sx) > 0.65 then
       if snapArmed then
@@ -720,6 +774,7 @@ function VR.invalidate()
   dexCanvas = nil
   Pokedex.invalidate()
   V.require("HordeGun").invalidate()
+  V.require("HordeHud").invalidate()
   for k in pairs(fboCache) do fboCache[k] = nil end
 end
 

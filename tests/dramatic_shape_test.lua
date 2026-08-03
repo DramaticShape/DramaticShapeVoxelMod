@@ -4217,6 +4217,8 @@ end)()
 
   T.check(type(Data.screens) == "table" and Data.screens.HordeGameOver ~= nil,
     "the GAME OVER card is in the screens registry")
+  T.check(type(Data.screens) == "table" and Data.screens.HordeExitPrompt ~= nil,
+    "and so is the exit prompt START opens")
   local sfx = Data.audio and Data.audio.sfx or {}
   local HordeSfx = lib.require("HordeSfx")
   for _, name in ipairs(HordeSfx.SHOTS) do
@@ -4373,6 +4375,109 @@ end)()
   T.eq(stranded.moving, false, "a mob with nowhere to go does not move")
   T.eq(stranded.facing, "left",
     "it turns toward the player instead, so the pack still reads as a threat")
+
+  -- ------- the way out
+  --
+  -- START is asked, not taken: the mode does not pause, but it does have
+  -- to be leavable, and every device's START (the pad's, the keyboard's
+  -- ESCAPE, the touch overlay's) lands on the same GB button.
+  T.eq(Horde.askExit(keyGame), false,
+    "there is nothing to exit with the mode off")
+
+  -- and asking while the mode IS on must not throw. Worth its own check:
+  -- askExit reaches for this module's own overworld helper, and a Lua
+  -- local declared BELOW the function that uses it is a nil global --
+  -- which says nothing at load, nothing in a headless suite that never
+  -- turns the mode on, and blows up the first time somebody presses
+  -- ESCAPE. That is exactly how it shipped the first time.
+  Horde.active, Horde.state = true, "active"
+  local askedOk, askErr = pcall(Horde.askExit, keyGame)
+  Horde.active, Horde.state = false, "idle"
+  T.eq(askedOk, true, "asking the way out never throws: " .. tostring(askErr))
+
+  -- ------- the banner wraps rather than running off the screen
+  --
+  -- The HUD's scale follows the window's zoom, so a player zoomed well in
+  -- gets glyphs twice a large scale -- and the announcement was wider
+  -- than the frame it was announcing over.
+  local Hud = lib.require("HordeHud")
+  local wrap = Hud._layout
+  T.check(type(wrap) == "function", "the banner exposes its layout")
+
+  -- a stand-in font of fixed-width glyphs: the real sheets are not in the
+  -- fixture set, and pinning the line breaks against exact advances is a
+  -- claim about the WRAPPING rather than about whatever art is loaded
+  local stub = {
+    encode = function(s)
+      local out = {}
+      for i = 1, #s do out[i] = s:byte(i) end
+      return out
+    end,
+    advanceOf = function() return 8 end,
+  }
+  local SHOUT = "A DARKNESS APPROACHES"
+
+  local wide = wrap(stub, SHOUT, 2, 4000)
+  T.eq(#wide, 1, "given room, the announcement is one line")
+
+  local narrow, smallBs = wrap(stub, SHOUT, 2, 300)
+  T.check(#narrow > 1, "and wraps onto more lines when the frame is narrow")
+  for _, line in ipairs(narrow) do
+    T.check(line.width <= 300,
+      ("every wrapped line fits the frame (%q is %d wide)")
+        :format(line.text, line.width))
+  end
+
+  -- A scale far past what the frame can carry shrinks the glyphs rather
+  -- than letting a word hang off the edge -- there is no wrap point
+  -- inside a word, so wrapping alone cannot save this case. This is the
+  -- one the player hit: the HUD's scale follows the window's zoom.
+  local tiny, tinyBs = wrap(stub, SHOUT, 40, 200)
+  for _, line in ipairs(tiny) do
+    T.check(line.width <= 200,
+      ("a scale the frame cannot carry shrinks to fit (%q is %d wide)")
+        :format(line.text, line.width))
+  end
+  T.check(tinyBs < smallBs,
+    "and that shrink really is a smaller glyph than the narrow case's")
+
+  -- the degenerate end: one unbreakable word and almost no room. The
+  -- glyph cannot go below one pixel, so this is allowed to overflow --
+  -- what it may NOT do is fail to lay out
+  local one = wrap(stub, "APPROACHES", 8, 4)
+  T.check(one and #one == 1, "a single word always lays out on one line")
+  T.eq(wrap(stub, "   ", 2, 100), nil, "and nothing but spaces lays out to nothing")
+
+  -- ------- SMOOTH TURN belongs to the headset
+  --
+  -- A comfort setting for a device that is not plugged in decides
+  -- nothing, so the row exists only while VR is ON -- and it is OFF by
+  -- default, because a software turn moves the world past a head that
+  -- did not move and that is how you make somebody ill in a headset.
+  local VRMod = lib.require("VR")
+  T.eq(VRMod.smoothTurn:get(), false, "SMOOTH TURN is off out of the box")
+
+  local function optionRows()
+    local out = Runtime.call("ui.options.rows", function(_, r) return r end,
+                             { data = Data }, { { id = "tilt" } })
+    local ids = {}
+    for _, row in ipairs(out) do ids[row.id] = row end
+    return ids
+  end
+
+  Pipelines.setLevel("voxel", 3)          -- off FULL, which owns other rows
+  VRMod.setting:sync(false)
+  T.check(not optionRows()["DRAMATIC_SHAPE:smoothturn"],
+    "with VR off the row is not on the OPTIONS menu")
+
+  VRMod.setting:sync(true)
+  local smoothRow = optionRows()["DRAMATIC_SHAPE:smoothturn"]
+  T.check(smoothRow ~= nil, "and with VR on it is")
+  if smoothRow then
+    T.eq(smoothRow.label, "SMOOTH TURN", "under its own name")
+    T.eq(smoothRow.value(), "OFF", "reading OFF until the player says otherwise")
+  end
+  VRMod.setting:sync(false)
 
   -- ------- the gun's own bookkeeping
 

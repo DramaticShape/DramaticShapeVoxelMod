@@ -99,6 +99,22 @@ return function(game)
   end
   U.wait(20)
   shot("01_darkness_approaches")          -- the banner, over the darkening
+
+  -- and the same announcement at the zoom that used to run it off both
+  -- edges of the screen: it has to wrap (or shrink) rather than overflow
+  local Zoom = require("src.render.Zoom")
+  pcall(function()
+    game.save.options.zoom = 3
+    Zoom.applyOptions(game.save.options)
+  end)
+  Horde.banner("A DARKNESS APPROACHES", 2.6)
+  U.wait(30)
+  shot("01b_banner_zoomed")
+  pcall(function()
+    game.save.options.zoom = 0
+    Zoom.applyOptions(game.save.options)
+  end)
+  U.wait(10)
   print(("[horde] rung is now %d (%s)"):format(Pipelines.level("voxel"),
         Pipelines.levelLabel("voxel")))
 
@@ -120,6 +136,24 @@ return function(game)
   shot("02_wave_hip")
   print(("[horde] wave %d, %d mobs standing")
         :format(Horde.session.wave, #Horde.session.mobs))
+
+  -- ------- START asks the way out
+  --
+  -- The same GB button the pad's START, the keyboard's ESCAPE and the
+  -- touch overlay all press, so this one tap covers every device except
+  -- the VR stick click (which calls the same Horde.askExit).
+  U.tap(game, "start")
+  U.wait(10)
+  local prompt = game.stack:top()
+  print(("[horde] START opened a prompt: %s (still active: %s)")
+        :format(tostring(prompt ~= game.overworld), tostring(Horde.active)))
+  shot("02b_exit_prompt")
+  -- NO, and back to the fight
+  U.tap(game, "b")
+  U.wait(10)
+  print(("[horde] answered NO: back on the overworld %s, active %s")
+        :format(tostring(game.stack:top() == game.overworld),
+                tostring(Horde.active)))
 
   -- ------- the sights
   Gun.setAds(true)
@@ -243,6 +277,52 @@ return function(game)
   end
   print(("[horde] horde objects left behind: %d"):format(left))
   shot("08_after")
+
+  -- ------- and out the other door
+  --
+  -- The same restore, reached the other way: enter the code again and
+  -- leave through START -> YES rather than by dying. This is the path a
+  -- player who just wants their game back actually takes.
+  pressCode()
+  U.wait(6)
+  if not Horde.active then
+    print("[horde] second activation refused -- the exit path is untested")
+    print(("[horde] %d shots into %s"):format(shots, ROOT))
+    return love.event.quit()
+  end
+  for _ = 1, 400 do
+    if Horde.state == "active" then break end
+    U.wait(1)
+  end
+  U.tap(game, "start")
+  U.wait(10)
+  U.tap(game, "up")            -- NO -> YES
+  U.wait(6)
+  shot("09_exit_yes")
+  U.tap(game, "a")
+  for _ = 1, 600 do
+    if not Horde.active and not game.stack:top().transitioning then break end
+    U.wait(1)
+  end
+  settle(60)
+  local out = game.stack:top()
+  local op = out.player
+  print(("[horde] exited via START/YES: active %s, %s (%d,%d) facing %s, rung %d")
+        :format(tostring(Horde.active), out.map.id, op.cellX, op.cellY,
+                op.facing, Pipelines.level("voxel")))
+  print(("[horde] matches start: map %s cell %s facing %s rung %s npcs %s")
+        :format(tostring(out.map.id == was.map),
+                tostring(op.cellX == was.cellX and op.cellY == was.cellY),
+                tostring(op.facing == was.facing),
+                tostring(Pipelines.level("voxel") == was.level),
+                tostring(#out.npcs == was.npcs)))
+  local left2 = 0
+  for _, def in pairs(game.data.maps) do
+    for _, obj in ipairs(def.objects or {}) do
+      if obj.hordeMob then left2 = left2 + 1 end
+    end
+  end
+  print(("[horde] horde objects left behind: %d"):format(left2))
 
   print(("[horde] %d shots into %s"):format(shots, ROOT))
   love.event.quit()

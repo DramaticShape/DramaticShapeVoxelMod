@@ -55,9 +55,39 @@ HordeGun.ADS_FOV = math.rad(40)
 HordeGun.HIP = { -0.115, -0.125, 0.30 }
 HordeGun.ADS = { 0, -0.002, 0.34 }
 
--- and where it sits relative to the tracked hand, in metres
-HordeGun.HAND_OFFSET = { 0, 0.02, 0.03 }
-HordeGun.HAND_TILT = -math.pi / 2   -- lay the barrel along the controller
+-- Where it sits relative to the tracked hand, in METRES and in the POSE's
+-- own axes -- so with the barrel pointed away from the player (see below)
+-- -Z is forward, and this nudges the gun a little down and forward of the
+-- pose origin so the hand is behind it rather than inside it.
+HordeGun.HAND_OFFSET = { 0, -0.012, -0.02 }
+
+-- THE BARREL, AND WHICH WAY IS FORWARD.
+--
+-- OpenXR's AIM pose -- the one this rides where the runtime offers it --
+-- is defined with its **-Z axis pointing the way the user is aiming**.
+-- The model below is authored with its barrel along **+Z**, because that
+-- is what the flat screen's view model wants (Ry(yaw)*Rx(pitch) carries
+-- +Z onto the look direction). Half a turn about Y is what reconciles
+-- them, and it is the whole of the attachment.
+--
+-- Getting this wrong does not read as "slightly off": the first cut
+-- copied the Pokedex's quarter-turn about X, which lays a flat slab along
+-- the controller's body and is exactly right for a slab -- on a gun it
+-- pointed the muzzle at the player's own face.
+HordeGun.HAND_YAW = math.pi
+
+-- AND A PITCH, because a hand is not a tripod. A controller held the way
+-- you hold a pistol -- fist closed, wrist cocked -- has its own aim axis
+-- running up and forward out of the top of your fist, well above the line
+-- your hand FEELS like it is pointing along. A model laid flat on that
+-- axis reads as a gun held by somebody with a broken wrist.
+--
+-- So the gun tips its muzzle down 45 degrees off the pose, which puts the
+-- barrel back on the line the grip implies. The shot follows: the ray is
+-- read off the finished matrix's own +Z column (see place), so it comes
+-- out of the barrel as drawn rather than off the pose it was hung on --
+-- point the gun, hit the thing.
+HordeGun.HAND_PITCH = math.rad(45)
 
 -- ------- the model
 --
@@ -383,7 +413,8 @@ function HordeGun.place(pose, pivot, anchor, scale, yaw)
   m = Mat4.mul(m, Mat4.translate(HordeGun.HAND_OFFSET[1],
                                  HordeGun.HAND_OFFSET[2],
                                  HordeGun.HAND_OFFSET[3]))
-  m = Mat4.mul(m, Mat4.rotateX(HordeGun.HAND_TILT))
+  m = Mat4.mul(m, Mat4.rotateY(HordeGun.HAND_YAW))
+  m = Mat4.mul(m, Mat4.rotateX(HordeGun.HAND_PITCH))
   -- the recoil, up and back along the gun's own axes
   local k = gun.kick
   if k > 0 then

@@ -464,14 +464,25 @@ local SETTINGS = {
     -- says why); off Windows -- mobile above all -- there is no VR to have
     -- and the row does not exist
     when = function() return VR.supported() end, full = true },
+  -- Under the VR row and only while it is ON: a comfort setting for a
+  -- device that is not plugged in decides nothing, and this one is read
+  -- exclusively by the headset's right stick.
+  { VR.smoothTurn,
+    "Turn smoothly with the right stick instead of snapping 45 degrees a "
+    .. "flick. OFF by default, and deliberately: a software turn moves the "
+    .. "world past a head that did not move, which is the most reliable way "
+    .. "to make somebody ill in a headset. Turn it on if you have your sea "
+    .. "legs and want the continuity.",
+    when = function() return VR.enabled() end, full = true },
 }
 
 local schema = {}
 for _, entry in ipairs(SETTINGS) do
-  -- the VR row is absent from the mod manager's page too where the
+  -- the VR rows are absent from the mod manager's page too where the
   -- platform cannot do VR at all -- the OPTIONS menu's `when` gates are
   -- situational (a row hidden for now), this one is existential
-  if entry[1] ~= VR.setting or VR.supported() then
+  local vrOnly = entry[1] == VR.setting or entry[1] == VR.smoothTurn
+  if not vrOnly or VR.supported() then
     schema[#schema + 1] = entry[1]:schema(entry[2])
   end
 end
@@ -937,6 +948,10 @@ mod.content.screens:register("HordeGameOver", {
   new = function(game) return V.require("HordeGameOver").new(game) end,
 })
 
+mod.content.screens:register("HordeExitPrompt", {
+  new = function(game) return V.require("HordeExitPrompt").new(game) end,
+})
+
 -- The gamepad's triggers, which nothing else in the engine or this mod
 -- claims: the RIGHT one fires and the LEFT one aims. Read as axes because
 -- that is what SDL calls them; the 0.5 crossing is the press. Installed
@@ -1140,7 +1155,7 @@ mod.hooks:wrap("world.tod", function(next, tod, ctx)
   return DayNight.tod()
 end)
 
-mod.exports.version = "1.6.0"
+mod.exports.version = "1.5.4"
 -- exposed so a companion mod can pin its own tiles' shapes or read the
 -- camera without reaching into this mod's file layout
 mod.exports.lib = V

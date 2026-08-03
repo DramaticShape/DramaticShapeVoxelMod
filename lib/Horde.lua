@@ -90,9 +90,18 @@ Horde.state = "idle"            -- idle | intro | active | dying | gameover
 Horde.session = nil
 
 -- Whether the combat is live: mobs move, the gun fires, damage lands.
--- False during the intro beat, the death fade and the GAME OVER card.
+-- False during the intro beat, the death fade, the GAME OVER card -- and
+-- while ANYTHING is on the stack above the overworld, which is what
+-- stops the trigger from firing into a world the player has stopped
+-- looking at while the exit prompt asks them a question.
 function Horde.playing()
-  return Horde.active and Horde.state == "active"
+  if not (Horde.active and Horde.state == "active") then return false end
+  local ok, live = pcall(function()
+    local G = require("src.core.Game")
+    local ow = G.overworld
+    return G.stack and ow and G.stack:top() == ow and not ow.transitioning
+  end)
+  return ok and live == true
 end
 
 -- Whether the mode owns the camera rung right now, which is the whole of
@@ -104,7 +113,8 @@ function Horde.viewLocked()
 end
 
 -- Whether the free walk should skip its A (talk) and START (menu)
--- branches. No pausing, and nobody stops to read a sign mid-firefight.
+-- branches. Nobody stops to read a sign mid-firefight, and START has a
+-- different job here (see askExit).
 function Horde.suppressWorldInput()
   return Horde.active
 end
@@ -117,6 +127,32 @@ end
 local function overworld(G)
   G = G or game()
   return G and G.overworld or nil
+end
+
+-- The way out, on demand. START -- the pad's, the keyboard's ESCAPE, the
+-- touch overlay's -- and the VR left stick click all ask this, and it
+-- asks the player. Nothing here ends the mode; the prompt does that
+-- through Horde.finish if the answer is yes.
+--
+-- Refused while anything is already on top of the overworld, so the
+-- question cannot stack on itself or arrive over the GAME OVER card.
+--
+-- BELOW the two helpers above, deliberately: a Lua local is only in
+-- scope after its declaration, so a function written above them captures
+-- the GLOBAL of that name instead -- which is nil, and only says so when
+-- somebody presses the button.
+function Horde.askExit(G)
+  G = G or game()
+  if not (Horde.active and Horde.state ~= "gameover") then return false end
+  local ow = overworld(G)
+  if not (G and G.stack and ow and G.stack:top() == ow) then return false end
+  if ow.transitioning then return false end
+  local pushed = false
+  pcall(function()
+    require("src.ui.Screens").push(G, "HordeExitPrompt")
+    pushed = true
+  end)
+  return pushed
 end
 
 -- ------- the code
@@ -642,9 +678,13 @@ function Horde.install()
           local G = game()
           local inp = G and G.input
           if inp and inp.pressed then
+            -- START is the way out, and it is asked rather than taken:
+            -- read here, BEFORE the edge is cleared, so the engine's own
+            -- START menu never sees it
+            if inp.pressed.start then Horde.askExit(G) end
             inp.pressed.a = nil        -- no talking
             inp.pressed.b = nil        -- the trigger, already read
-            inp.pressed.start = nil    -- no pausing
+            inp.pressed.start = nil    -- and no start menu
             inp.pressed.select = nil   -- no changing the view
           end
         end
