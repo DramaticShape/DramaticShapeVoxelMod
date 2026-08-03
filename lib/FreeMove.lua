@@ -209,13 +209,14 @@ local function pushSpecials(state, dir, why)
       return true
     end
   end
-  if why ~= "entity" then
-    if (state.bumpCooldown or 0) <= 0 then
-      local Game = require("src.core.Game")
-      require("src.core.Sound").play(Game.data, "Collision")
-      state.bumpCooldown = 16
-    end
-  end
+  -- and NO bonk. The grid walk's collision sound marks a discrete event:
+  -- you pressed a direction, the step was refused, nothing happened. A
+  -- free walk has no such moment -- the body slides along every wall it
+  -- grazes, continuously, and a corridor taken at a slight angle is a
+  -- steady graze from end to end. Rate-limited or not, that came out as a
+  -- machine-gun of bonks for walking normally down a hallway. The wall
+  -- stopping you is the feedback; the sound only ever said so twice a
+  -- second whether or not anything had changed.
   return false
 end
 
@@ -286,6 +287,10 @@ function FreeMove.tick(state)
   -- either way -- bodyBearing says so.
   p.facing = FirstPerson.pointBody(wx, wz)
 
+  -- the engine's own bonk clock, kept draining while the free walk has the
+  -- wheel: nothing here rings it (see pushSpecials), but stepping back onto
+  -- the grid must not inherit a cooldown frozen at whatever it held when
+  -- the rung was picked
   state.bumpCooldown = math.max(0, (state.bumpCooldown or 0) - 1)
 
   local speed = (Game.save and Game.save.onBike) and FreeMove.BIKE

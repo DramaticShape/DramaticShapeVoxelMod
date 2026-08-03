@@ -177,6 +177,10 @@ function FirstPerson.stickX()
   return stick.x or 0
 end
 
+function FirstPerson.stickY()
+  return stick.y or 0
+end
+
 -- ------- lending the look finger out
 --
 -- A pinch needs both fingers on the screen, and one of them is very likely

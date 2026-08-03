@@ -3885,6 +3885,233 @@ Voxel3D.camera = nil
 VoxelState.reset()
 end
 
+-- ------- the cameras the player steers
+--
+-- Three cameras take the same four inputs -- a wheel, Q/E, a pinch, a
+-- stick -- and the whole of CamControl is the answer to "which one is this
+-- aimed at". So the suite pins that routing table, then each camera's own
+-- stops: the boom's zoom, and the battle's orbit, climb and lens.
+
+do
+local CamControl = run.loader.exports.DRAMATIC_SHAPE.lib.require("CamControl")
+local ThirdPerson =
+  run.loader.exports.DRAMATIC_SHAPE.lib.require("ThirdPerson")
+local BattleCam = run.loader.exports.DRAMATIC_SHAPE.lib.require("BattleCam")
+local VoxelState = run.loader.exports.DRAMATIC_SHAPE.lib.require("VoxelState")
+local Voxel3D = run.loader.exports.DRAMATIC_SHAPE.lib.require("Voxel3D")
+
+-- ------- the boom's own zoom
+ThirdPerson.zoom, ThirdPerson.zoomGoal = 1, 1
+T.eq(ThirdPerson.reachFor(), ThirdPerson.BOOM,
+  "at zoom 1 the boom reaches exactly its own length")
+T.check(ThirdPerson.stepZoom(1), "a notch out moves the goal")
+T.check(ThirdPerson.zoomGoal > 1, "outward, which is what positive means")
+T.check(ThirdPerson.stepZoom(-2), "and back in past where it started")
+T.check(ThirdPerson.zoomGoal < 1, "inward")
+for _ = 1, 40 do ThirdPerson.stepZoom(-1) end
+T.eq(ThirdPerson.zoomGoal, ThirdPerson.ZOOM_MIN, "it stops coming in")
+T.check(not ThirdPerson.stepZoom(-1),
+  "and says so, so the input can fall through instead of being eaten")
+for _ = 1, 60 do ThirdPerson.stepZoom(1) end
+T.eq(ThirdPerson.zoomGoal, ThirdPerson.ZOOM_MAX, "and stops going out")
+
+-- the ease: a step is a request, and the eye takes ZOOM_TIME to answer it
+ThirdPerson.zoom, ThirdPerson.zoomGoal = 1, 1
+ThirdPerson.stepZoom(2)
+ThirdPerson.update(1 / 60, 1)
+T.check(ThirdPerson.zoom > 1 and ThirdPerson.zoom < ThirdPerson.zoomGoal,
+  "one frame later the eye is on its way but not there")
+for _ = 1, 120 do ThirdPerson.update(1 / 60, 1) end
+T.eq(ThirdPerson.zoom, ThirdPerson.zoomGoal, "and it arrives")
+T.check(math.abs(ThirdPerson.reachFor()
+                 - ThirdPerson.BOOM * ThirdPerson.zoom) < 1e-9,
+  "the boom it reaches for is the length at that zoom")
+ThirdPerson.zoom, ThirdPerson.zoomGoal = 1, 1
+
+-- the same control with no notches, for a gesture whose own scale IS the
+-- answer. It scales the BOOM, so the inversion a pinch needs (spread the
+-- fingers, pull the camera in) belongs to the gesture, not to this
+T.check(ThirdPerson.scaleZoom(2), "a continuous factor moves it too")
+T.check(math.abs(ThirdPerson.zoomGoal - 2) < 1e-6,
+  "and scales the boom by exactly that factor")
+ThirdPerson.zoom, ThirdPerson.zoomGoal = 1, 1
+
+-- ------- which camera an input is aimed at
+--
+-- Needs a 3D pass and a free-roam stack, neither of which a headless run
+-- has; both are lent for the length of the check and handed back.
+;(function()
+  local Game = require("src.core.Game")
+  local hadAvail = Voxel3D.available
+  local hadStack, hadOw = Game.stack, Game.overworld
+  local ow = {}
+  Voxel3D.available = function() return true end
+  Game.overworld = ow
+  Game.stack = { top = function() return ow end }
+
+  VoxelState.setLevel(0)
+  T.eq(CamControl.zoomTarget(), nil, "with the mode off, no camera of ours")
+  VoxelState.setLevel(3)
+  T.eq(CamControl.zoomTarget(), "survey",
+    "on an orbit rung a zoom is the engine's own survey zoom")
+  VoxelState.setLevel(VoxelState.FP_LEVEL)
+  T.eq(CamControl.zoomTarget(), nil,
+    "in 1ST nothing zooms -- the eye is in the player's head")
+  VoxelState.setLevel(VoxelState.TP_LEVEL)
+  T.eq(CamControl.zoomTarget(), "boom", "and in 3RD it is the boom")
+
+  ThirdPerson.zoomGoal = 1
+  T.check(CamControl.zoomBy(1) and ThirdPerson.zoomGoal > 1,
+    "so a wheel notch on that rung lets the boom out")
+  ThirdPerson.zoomGoal = 1
+  T.check(CamControl.pinchBy(2) and ThirdPerson.zoomGoal < 1,
+    "and spreading two fingers pulls it IN -- the gesture is the inversion")
+  ThirdPerson.zoomGoal = 1
+  T.check(CamControl.pinchBy(0.5) and ThirdPerson.zoomGoal > 1,
+    "pinching them together pushes it out again")
+  ThirdPerson.zoom, ThirdPerson.zoomGoal = 1, 1
+
+  -- 1ST is the rung that deliberately swallows nothing: a pinch there
+  -- would silently wind the survey zoom for whenever the player stepped
+  -- back out to an orbit rung
+  VoxelState.setLevel(VoxelState.FP_LEVEL)
+  T.check(not CamControl.zoomBy(1), "1ST claims no wheel notch")
+  T.check(not CamControl.pinchBy(2), "and no pinch")
+  VoxelState.setLevel(VoxelState.TP_LEVEL)
+
+  -- a screen over the overworld takes every one of them back
+  Game.stack = { top = function() return {} end }
+  T.eq(CamControl.zoomTarget(), nil,
+    "with anything pushed over the overworld, nothing is ours to zoom")
+
+  Voxel3D.available = hadAvail
+  Game.stack, Game.overworld = hadStack, hadOw
+  VoxelState.reset()
+end)()
+
+-- ------- the battle's orbit
+--
+-- The stop that matters is the far one: swung fully right, the eye must be
+-- SQUARE to the arena's axis -- the side-on shot -- and not a degree past
+-- it. Measured off the rig rather than off the constant, because the
+-- constant is computed from the rig's own stance.
+;(function()
+  local arena = { mid = { 100, 200 }, player = { 100, 216 },
+                  enemy = { 100, 184 } }
+  local function bearing()
+    local rig = BattleCam.rig(arena, 0)
+    return math.atan2(rig.eye[1] - arena.mid[1], rig.eye[3] - arena.mid[2])
+  end
+  BattleCam.recentre()
+  BattleCam.reset()
+  BattleCam.steerable = true
+
+  local home = bearing()
+  T.check(home > 0.4 and home < 0.6,
+    "the solved shot stands about 28 degrees off the arena's axis")
+  BattleCam.orbit = 1
+  T.check(math.abs(bearing() - math.pi / 2) < 1e-9,
+    "swung fully right, the eye is exactly square to the axis: side-on")
+  T.check(math.abs(BattleCam.orbitRange(arena) - (math.pi / 2 - home)) < 1e-9,
+    "which is precisely the room orbitRange said it had")
+
+  -- and the near one: there is nothing to the left of the solved shot
+  BattleCam.recentre()
+  T.check(not BattleCam.dragOrbit(-1), "a drag left of home does nothing")
+  T.eq(BattleCam.orbitGoal, 0, "the shot the composition was solved for IS "
+    .. "the left stop")
+  T.check(BattleCam.dragOrbit(0.2), "a drag right steers")
+  BattleCam.dragOrbit(10)
+  T.eq(BattleCam.orbitGoal, 1, "and stops at side-on however hard it is pushed")
+
+  -- ------- the climb
+  BattleCam.recentre()
+  local function elevation()
+    local rig = BattleCam.rig(arena, 0)
+    local vx = rig.eye[1] - rig.focus[1]
+    local vy = rig.eye[2] - rig.focus[2]
+    local vz = rig.eye[3] - rig.focus[3]
+    return math.atan2(vy, math.sqrt(vx * vx + vz * vz)),
+           math.sqrt(vx * vx + vy * vy + vz * vz)
+  end
+  local low, radius = elevation()
+  BattleCam.pitch = 1
+  local high, radius2 = elevation()
+  T.check(math.abs((high - low) - BattleCam.PITCH_RANGE) < 1e-6,
+    "raised fully, the seat is exactly 45 degrees above the solved one")
+  T.check(math.abs(radius2 - radius) < 1e-6,
+    "at the same distance -- climbing is not zooming")
+  BattleCam.recentre()
+  T.check(not BattleCam.dragPitch(-1), "and it will not tilt below home")
+  T.eq(BattleCam.pitchGoal, 0, "the rig's own low stance is the down stop")
+  BattleCam.dragPitch(10)
+  T.eq(BattleCam.pitchGoal, 1, "45 degrees is the up stop")
+
+  -- ------- the lens opening to keep the pair framed
+  --
+  -- Swinging round or climbing un-foreshortens the arena's axis, so the two
+  -- mons read further apart; left alone that threw them off the edges of
+  -- the frame at the far end of both ranges.
+  BattleCam.recentre()
+  T.check(math.abs(BattleCam.spread(arena) - 1) < 1e-9,
+    "at the solved shot the lens is the rig's own, exactly")
+  BattleCam.orbit = 1
+  T.check(BattleCam.spread(arena) > 1.8,
+    "side-on the pair reads nearly twice as far apart, and the lens opens "
+    .. "by the same amount")
+  BattleCam.orbit = 0
+  BattleCam.pitch = 1
+  T.check(BattleCam.spread(arena) > 1.5,
+    "and climbing spreads them too, on the other axis")
+  BattleCam.recentre()
+
+  local wide = BattleCam.rig(arena, 0).fov
+  T.check(BattleCam.stepZoom(-3), "three notches in")
+  BattleCam.zoom = BattleCam.zoomGoal
+  T.check(BattleCam.rig(arena, 0).fov < wide,
+    "and the lens is longer -- zoom is the FRAME, not the distance")
+  T.check(math.abs(BattleCam.frameH(arena)
+                   - BattleCam.rigFor(arena).frameH * BattleCam.zoom) < 1e-9,
+    "which is what the sun's box is fitted to as well")
+  for _ = 1, 40 do BattleCam.stepZoom(-1) end
+  T.eq(BattleCam.zoomGoal, BattleCam.ZOOM_MIN, "the lens has a near stop")
+  for _ = 1, 60 do BattleCam.stepZoom(1) end
+  T.eq(BattleCam.zoomGoal, BattleCam.ZOOM_MAX, "and a far one")
+
+  -- ------- what BACK SPRITES takes away
+  --
+  -- Not just the input: the RIG stands down too, so an angle stored from
+  -- before the row was switched on cannot leave the pinned composition
+  -- steered anyway.
+  BattleCam.recentre()
+  BattleCam.orbit, BattleCam.orbitGoal = 1, 1
+  BattleCam.pitch, BattleCam.pitchGoal = 1, 1
+  BattleCam.zoom, BattleCam.zoomGoal = 0.5, 0.5
+  BattleCam.steerable = false
+  T.check(math.abs(bearing() - home) < 1e-9,
+    "with the player's mon pinned to the menu, the shot holds its own angle")
+  T.eq(BattleCam.frameH(arena), BattleCam.rigFor(arena).frameH,
+    "and its own lens")
+  T.check(not BattleCam.dragOrbit(0.5), "and refuses to be steered")
+  T.check(not BattleCam.dragPitch(0.5), "on either axis")
+  T.check(not BattleCam.stepZoom(-1), "or zoomed")
+  BattleCam.steerable = true
+
+  -- ------- and what a new battle remembers
+  BattleCam.recentre()
+  BattleCam.dragOrbit(0.5)
+  BattleCam.dragPitch(0.5)
+  BattleCam.stepZoom(-1)
+  BattleCam.reset()
+  T.check(BattleCam.orbitGoal > 0 and BattleCam.pitchGoal > 0
+          and BattleCam.zoomGoal < 1,
+    "a new fight opens where the player left the camera, not where the rig "
+    .. "was solved -- an angle they chose is how they watch battles")
+  T.eq(BattleCam.t, 0, "only the drift's own phase starts over")
+  BattleCam.recentre()
+end)()
+end
+
 -- ------- the VR rig's arithmetic
 --
 -- VRRig is the deliberately pure half of the VR stack: headset poses in,

@@ -64,11 +64,17 @@ CamControl.SURVEY_PINCH = 2.2
 -- battle in front of the player right now" -- with 3D-BTL off, or on a map
 -- with no arena, the engine's own flat battle screen is up and its camera
 -- is not ours to steer.
+-- BACK SPRITES also closes it, through BattleCam.steerable: that setting
+-- nails the player's own mon to the GB's slot on the menu while the foe
+-- stands out on the map, and no camera angle holds a composition that is
+-- half frame and half world (see BattleCam.steerable, which is where the
+-- reasoning lives and which the RIG answers to as well -- so a stored
+-- angle from before the setting was switched on stands down with it).
 local function battleLive()
   local ok, shot = pcall(function()
     return V.require("OverworldBattle").shot()
   end)
-  return (ok and shot) and true or false
+  return (ok and shot and BattleCam.steerable) and true or false
 end
 
 CamControl.battleLive = battleLive
@@ -169,10 +175,16 @@ CamControl.surveyAccum = 0
 -- already recording (it records whatever the rung, so a battle can read
 -- them without a second wrap on the same seam). Ticked from
 -- OverworldBattle.update, which runs whatever is on top of the stack.
+--
+-- X walks the shot round the arena, Y raises the seat. The Y is NEGATED:
+-- a stick pushed forward reads as negative on SDL's axis, and pushing
+-- forward should send the camera UP and over -- the same "push the camera
+-- where you want it" the drag and the mouse below use.
 function CamControl.tick(dt)
   if not battleLive() then return end
-  local x = FirstPerson.stickX()
+  local x, y = FirstPerson.stickX(), FirstPerson.stickY()
   if x ~= 0 then BattleCam.stickOrbit(x, dt) end
+  if y ~= 0 then BattleCam.stickPitch(-y, dt) end
 end
 
 -- ------- the wraps
@@ -202,18 +214,63 @@ function CamControl.install()
     end
   end
 
+  -- ------- the stick clicks
+  --
+  -- Q and E, on the pad: the left stick's click pulls the camera out and the
+  -- right stick's pulls it in. A controller has no wheel and no number row,
+  -- and the two clicks are the only buttons a Gen 1 pad layout leaves free
+  -- (SELECT already walks the angle ladder).
+  --
+  -- Claimed for the two cameras a pad player can actually be looking at
+  -- while pressing them -- the third-person boom and a staged battle's lens
+  -- -- and forwarded untouched everywhere else, so a player who has rebound
+  -- either click keeps it on every other screen, a rebind capture included.
+  -- Not on the orbit rungs: the survey zoom has the OPTIONS row and the
+  -- wheel already, and taking a pad button for it would be taking one from
+  -- a player who never asked.
+  local CLICK_ZOOMS = { boom = true, battle = true }
+  do
+    local inner = Game.gamepadpressed
+    function Game:gamepadpressed(joystick, button)
+      if (button == "leftstick" or button == "rightstick")
+         and CLICK_ZOOMS[CamControl.zoomTarget() or ""] then
+        CamControl.zoomBy(button == "leftstick" and 1 or -1)
+        return
+      end
+      return inner(self, joystick, button)
+    end
+  end
+
   -- ------- the mouse
   --
   -- Battle only. The free-roam look already owns relative motion through
   -- FirstPerson's own wrap (this one is outside it, so what is claimed here
   -- never reaches it) and a fight is exactly when that look is not driving.
+  --
+  -- Bare motion, no button held: moving the mouse moves the shot.
+  --
+  -- Each event's contribution is CLAMPED, though, because not every motion
+  -- event is a hand moving. The pointer entering the window, a warp back to
+  -- centre, an alt-tab -- each arrives as ONE event carrying the whole
+  -- distance from wherever the cursor was last seen, and in testing that
+  -- was a couple of hundred counts: enough to swing the shot a quarter of
+  -- the way to side-on before the player had touched anything. A real hand
+  -- delivers its travel as a stream of small events and is unaffected; a
+  -- teleport delivers it as one and is cut down to the size of a flick.
+  local MOUSE_STEP = 40
+  local function clamp(v)
+    return math.max(-MOUSE_STEP, math.min(MOUSE_STEP, v or 0))
+  end
   do
     local inner = love.mousemoved
     love.mousemoved = function(x, y, dx, dy, istouch)
-      if battleLive() and not istouch and dx and dx ~= 0 then
-        BattleCam.mouseOrbit(dx)
+      if battleLive() and not istouch then
+        -- dy is NEGATED for the same reason the stick's is: moving the
+        -- mouse away from you sends the camera up and over
+        if dx and dx ~= 0 then BattleCam.mouseOrbit(clamp(dx)) end
+        if dy and dy ~= 0 then BattleCam.mousePitch(-clamp(dy)) end
         -- forwarded anyway: the cursor still has UI to point at, and the
-        -- orbit is a read of the motion rather than a claim on it
+        -- steer is a read of the motion rather than a claim on it
       end
       if inner then return inner(x, y, dx, dy, istouch) end
     end
@@ -317,9 +374,14 @@ function CamControl.install()
           return                       -- claimed: never a look drag too
         end
         if battleLive() and not pinch then
-          local w = 1280
-          pcall(function() w = love.graphics.getWidth() end)
+          local w, h = 1280, 720
+          pcall(function()
+            w, h = love.graphics.getWidth(), love.graphics.getHeight()
+          end)
           BattleCam.dragOrbit((x - px) / math.max(320, w))
+          -- dragged UP sends the camera up and over, the same way the
+          -- stick and the mouse do
+          BattleCam.dragPitch(-(y - py) / math.max(240, h))
           return
         end
       end

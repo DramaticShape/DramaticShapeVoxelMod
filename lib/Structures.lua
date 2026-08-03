@@ -3289,6 +3289,56 @@ end
 
 -- ---- tall grass ----
 
+-- ---- closing a standee's sides ----
+--
+-- The grass tufts and the flowers are both built the same way: each row of
+-- the 8x8 drawing becomes a horizontal RUN of lit pixels, stood up as a
+-- front face and a back face one voxel apart, with a lid on top. What that
+-- leaves open is the two ENDS of every run -- so the slab was a pair of
+-- billboards rather than a solid, and from any angle off square you looked
+-- in through the edge and straight out the other side. At the low cameras
+-- this mod has grown (1ST, 3RD, the battle's floor-level seat) that is
+-- most of the time.
+--
+-- A wall goes on an end only where the pixel beyond it is actually clear,
+-- which for a run's end it is by construction -- except where two runs on
+-- the same row meet across a gap of nothing, which cannot happen, and at
+-- the tile's border, where the neighbouring tile's own standee may or may
+-- not continue the shape. The border is closed anyway: tufts sit on their
+-- own half-cells with a gap between them, so an open border edge is a hole
+-- in the open, not a seam with anything.
+--
+-- Each wall samples ONE texel at its centre -- the end pixel it is closing
+-- off -- so it wears that pixel's own colour, which is the nearest coloured
+-- pixel to the surface being filled. Sampling a single texel is also what
+-- carries the animation: when a frame keys that pixel out, the wall's own
+-- fragments discard with the faces either side of it, so a swaying tuft
+-- never leaves a wall standing where its blade no longer is.
+local function sideQuads(quads, ix, ix2, yBot, yTop, zB, zF,
+                         ax0, ay0, atlasW, atlasH, py, lit)
+  local function texel(px)
+    return (ax0 + px + 0.5) / atlasW, (ay0 + py + 0.5) / atlasH
+  end
+  if not lit(ix - 1, py) then
+    local u, v = texel(ix)
+    quads[#quads + 1] = {                 -- the run's left wall, facing -X
+      { ix, yBot, zB }, { ix, yBot, zF },
+      { ix, yTop, zF }, { ix, yTop, zB },
+      uv = { { u, v }, { u, v }, { u, v }, { u, v } },
+      shade = OBJ_SHADE.side,
+    }
+  end
+  if not lit(ix2 + 1, py) then
+    local u, v = texel(ix2)
+    quads[#quads + 1] = {                 -- and its right wall, facing +X
+      { ix2 + 1, yBot, zF }, { ix2 + 1, yBot, zB },
+      { ix2 + 1, yTop, zB }, { ix2 + 1, yTop, zF },
+      uv = { { u, v }, { u, v }, { u, v }, { u, v } },
+      shade = OBJ_SHADE.side,
+    }
+  end
+end
+
 -- A tall-grass CELL is four tufts: 2x2 tiles, and each 8x8 tile is one
 -- whole clump of grass. Each tile stands as its own thin per-pixel slab
 -- at ITS OWN depth -- the cell's north tile row in the north half of the
@@ -3359,6 +3409,20 @@ local function grassTemplate(map, data, tileId)
             shade = 1,
           }
         end
+        -- and underneath, where a blade ends in mid-air over the ground
+        if not opaque(ix, iy + 1) then
+          quads[#quads + 1] = {
+            { ix, yBot, zF }, { ix2 + 1, yBot, zF },
+            { ix2 + 1, yBot, zB }, { ix, yBot, zB },
+            uv = { { u0, v1 }, { u1, v1 }, { u1, v1 }, { u0, v1 } },
+            shade = OBJ_SHADE.bottom,
+          }
+        end
+        -- and the run's two end walls, which is what makes a blade a solid
+        -- thing rather than two billboards you can see between (sideQuads
+        -- above argues it, and why each wall wears its end pixel's colour)
+        sideQuads(quads, ix, ix2, yBot, yTop, zB, zF,
+                  ax0, ay0, atlasW, atlasH, iy, opaque)
         ix = ix2 + 1
       else
         ix = ix + 1
@@ -3537,6 +3601,30 @@ local function flowerTemplate(map, data, tileId)
             shade = OBJ_SHADE.top,
           }
         end
+        -- and the same strip on the bottom, where the row below is clear:
+        -- a petal that ends mid-air is a solid thing seen from underneath,
+        -- and a low camera (1ST, 3RD, the battle's floor-level seat) is
+        -- looking straight up at it
+        if not on(ix, py + 1) then
+          quads[#quads + 1] = {
+            { ix, yBot, zF }, { ix2 + 1, yBot, zF },
+            { ix2 + 1, yBot, zB }, { ix, yBot, zB },
+            uv = { { u0, v1 }, { u1, v1 }, { u1, v1 }, { u0, v1 } },
+            shade = OBJ_SHADE.bottom,
+          }
+        end
+        -- The ENDS of the run, which close the slab off sideways. Without
+        -- them the flower is two faces and a lid: from anywhere but square
+        -- on you look straight through its open edge and out the far side,
+        -- which is what stopped it reading as a solid thing.
+        --
+        -- Each wall samples ONE texel -- the run's own end pixel, at its
+        -- centre -- so the side wears the colour of the pixel it is closing
+        -- off (the nearest coloured pixel there is) rather than a keyed
+        -- hole, and discards with that pixel when the animation frame it
+        -- belongs to is not the one on screen.
+        sideQuads(quads, ix, ix2, yBot, yTop, zB, zF,
+                  ax0, ay0, atlasW, atlasH, py, on)
         ix = ix2 + 1
       else
         ix = ix + 1

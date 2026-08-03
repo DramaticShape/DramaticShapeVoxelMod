@@ -151,6 +151,24 @@ BattleCam.ORBIT_STICK = 0.9       -- fraction of the range per second, full tilt
 BattleCam.ORBIT_MOUSE = 0.0011    -- fraction of the range per mouse count
 BattleCam.STICK_DEAD = 0.2
 
+-- ------- and the height it is watched from
+--
+-- The same steering on the other axis, with the same shape of stop at each
+-- end: 0 is the rig's own stance -- the low, near-floor seat the whole
+-- composition is solved around, and the DOWN stop, because below it the
+-- camera starts looking up the arena's nose -- and 1 is 45 degrees above
+-- it, which is high enough to read the ground the fight is standing on
+-- without becoming the diorama's own top-down.
+--
+-- Raised about the FOCUS rather than about the eye, so the aim stays on
+-- the two mons and only the seat climbs; and at a constant radius, so
+-- climbing never changes how big anything is -- that is the zoom's job.
+BattleCam.PITCH_RANGE = math.rad(45)
+BattleCam.PITCH_TIME = 0.22
+BattleCam.PITCH_DRAG = 1.6        -- fraction of the range per screen HEIGHT
+BattleCam.PITCH_STICK = 0.9
+BattleCam.PITCH_MOUSE = 0.0016
+
 -- ------- and the player's own zoom
 --
 -- How much world the frame holds, as a multiple of the rig's own frameH:
@@ -165,8 +183,23 @@ BattleCam.ZOOM_TIME = 0.18
 
 BattleCam.orbit = 0
 BattleCam.orbitGoal = 0
+BattleCam.pitch = 0
+BattleCam.pitchGoal = 0
 BattleCam.zoom = 1
 BattleCam.zoomGoal = 1
+
+-- Whether the player may steer at all. BACK SPRITES clears it: that
+-- setting pins the player's own mon to the GB's own slot on the menu
+-- (OverworldBattle.backPinned) instead of standing it out on the map, so
+-- half the picture is nailed to the frame and half of it is geometry. Swing
+-- the camera under that and the two halves come apart -- the foe walks
+-- around an arena its opponent is not standing in, and the move animations
+-- that reach between them stretch across the gap. There is no angle that
+-- composition survives, so the answer is not to allow one.
+--
+-- Only the STEER is withheld: the slow drift stays, because it was always
+-- there under BACK SPRITES and two degrees is not a composition problem.
+BattleCam.steerable = true
 
 -- Hold the rig perfectly still (VR sets this while a session runs). The
 -- drift exists to give a FLAT screen the depth cue the picture cannot
@@ -178,13 +211,21 @@ BattleCam.still = false
 
 BattleCam.t = 0
 
--- Every fight opens on the shot the rig was solved for: the orbit and the
--- zoom are a way of LOOKING at this battle, not a preference carried into
--- the next one, and a player who left the camera side-on an hour ago should
--- not have the next encounter open there.
+-- Only the DRIFT's phase, so every fight opens on the same breath. Where
+-- the player last put the camera is deliberately NOT reset: an angle and a
+-- lens they chose are how they want to watch battles, not a thing about
+-- this battle, and having to re-find them every encounter would make them
+-- not worth setting. They are session state -- a fresh run opens on the
+-- rig's own shot, which is the one the composition is solved for.
 function BattleCam.reset()
   BattleCam.t = 0
+end
+
+-- Back to the solved shot, for anything that wants the composition as
+-- authored rather than as steered.
+function BattleCam.recentre()
   BattleCam.orbit, BattleCam.orbitGoal = 0, 0
+  BattleCam.pitch, BattleCam.pitchGoal = 0, 0
   BattleCam.zoom, BattleCam.zoomGoal = 1, 1
 end
 
@@ -203,36 +244,64 @@ end
 -- the side-on stop. Returning whether the goal actually moved lets a
 -- caller tell "steered" from "already against the stop".
 
-local function setOrbit(goal)
-  local was = BattleCam.orbitGoal
-  BattleCam.orbitGoal = math.max(0, math.min(1, goal))
-  return BattleCam.orbitGoal ~= was
+-- Both axes go through here, so the "nothing while BACK SPRITES holds the
+-- composition" rule and the two stops live in one place each.
+local function setAxis(key, goal)
+  if not BattleCam.steerable then return false end
+  local was = BattleCam[key]
+  BattleCam[key] = math.max(0, math.min(1, goal))
+  return BattleCam[key] ~= was
 end
 
--- A drag, in fractions of the screen's width.
+-- A drag, in fractions of the screen's width (orbit) or height (pitch).
 function BattleCam.dragOrbit(fraction)
-  return setOrbit(BattleCam.orbitGoal + (fraction or 0) * BattleCam.ORBIT_DRAG)
+  return setAxis("orbitGoal",
+                 BattleCam.orbitGoal + (fraction or 0) * BattleCam.ORBIT_DRAG)
+end
+
+function BattleCam.dragPitch(fraction)
+  return setAxis("pitchGoal",
+                 BattleCam.pitchGoal + (fraction or 0) * BattleCam.PITCH_DRAG)
 end
 
 -- Relative mouse motion, in counts.
 function BattleCam.mouseOrbit(dx)
-  return setOrbit(BattleCam.orbitGoal + (dx or 0) * BattleCam.ORBIT_MOUSE)
+  return setAxis("orbitGoal",
+                 BattleCam.orbitGoal + (dx or 0) * BattleCam.ORBIT_MOUSE)
+end
+
+function BattleCam.mousePitch(dy)
+  return setAxis("pitchGoal",
+                 BattleCam.pitchGoal + (dy or 0) * BattleCam.PITCH_MOUSE)
 end
 
 -- A stick held for `dt` seconds, as a rate with a squared response -- the
 -- first half of the throw aims and the rest travels, the same curve the
 -- free-roam look uses.
-function BattleCam.stickOrbit(x, dt)
-  local a = math.abs(x or 0)
-  if a < BattleCam.STICK_DEAD then return false end
+local function curve(v)
+  local a = math.abs(v or 0)
+  if a < BattleCam.STICK_DEAD then return 0 end
   a = (a - BattleCam.STICK_DEAD) / (1 - BattleCam.STICK_DEAD)
-  local v = ((x < 0) and -1 or 1) * a * a
-  return setOrbit(BattleCam.orbitGoal
-                  + v * BattleCam.ORBIT_STICK * (dt or 0))
+  return ((v < 0) and -1 or 1) * a * a
+end
+
+function BattleCam.stickOrbit(x, dt)
+  local v = curve(x)
+  if v == 0 then return false end
+  return setAxis("orbitGoal",
+                 BattleCam.orbitGoal + v * BattleCam.ORBIT_STICK * (dt or 0))
+end
+
+function BattleCam.stickPitch(y, dt)
+  local v = curve(y)
+  if v == 0 then return false end
+  return setAxis("pitchGoal",
+                 BattleCam.pitchGoal + v * BattleCam.PITCH_STICK * (dt or 0))
 end
 
 -- The zoom, in notches (positive pulls OUT, like every other zoom here).
 function BattleCam.stepZoom(notches)
+  if not BattleCam.steerable then return false end
   local was = BattleCam.zoomGoal
   BattleCam.zoomGoal = math.max(BattleCam.ZOOM_MIN,
                         math.min(BattleCam.ZOOM_MAX,
@@ -240,11 +309,64 @@ function BattleCam.stepZoom(notches)
   return BattleCam.zoomGoal ~= was
 end
 
+-- How far apart the two mons READ from the current orbit, as a multiple of
+-- how far apart they read from the solved shot.
+--
+-- The arena's axis runs from one mon to the other, and the solved shot
+-- looks along it at a shallow 28 degrees, which foreshortens that gap to
+-- less than half its length. Swing round to square-on and the
+-- foreshortening is gone: the same two cells now read at their full
+-- separation, better than twice as wide. Left alone, that threw the pair
+-- out to the edges of the frame -- half of each mon off-screen at the
+-- side-on stop, which made the whole far end of the range unusable.
+--
+-- Climbing does the same thing on the other axis -- a raised camera looks
+-- less along the ground and more across it, which un-foreshortens the gap
+-- again -- so the correction has to answer to both.
+--
+-- What it measures is how much of the arena's axis survives projection:
+-- the axis runs due north-south, the view line points back at the arena at
+-- plan bearing `beta` and elevation `elev`, and the part of a unit axis
+-- that lands across the frame rather than along the view is the sine of
+-- the angle between them. The ratio of that to the solved shot's own is
+-- the factor the lens opens by -- 1 at the solved shot by construction,
+-- about 1.9 at side-on, about 1.7 fully raised.
+--
+-- Analytic rather than measured off the built rig, so nothing has to
+-- reason about a camera to ask the question, and so the sun's box (which
+-- asks through frameH) gets the identical number the lens does.
+--
+-- Measured off the STEER alone, deliberately: the drift's own two degrees
+-- moved this before and must keep moving it by exactly as much, or every
+-- battle shot that has ever been taken shifts.
+local function axisSpan(beta, elev)
+  local c = math.cos(elev)
+  local s = math.sin(beta) * c
+  local v = math.sin(elev)
+  return math.sqrt(s * s + v * v)
+end
+
+function BattleCam.spread(arena)
+  local R = BattleCam.rigFor(arena)
+  local beta = math.atan2(R.side, R.back)
+  local elev = math.atan2(R.height - R.lookY,
+                          math.sqrt((R.side - R.lookX) ^ 2 + R.back ^ 2))
+  local home = axisSpan(beta, elev)
+  if home < 1e-6 then return 1 end
+  return axisSpan(beta + BattleCam.orbit * BattleCam.orbitRange(arena),
+                  elev + BattleCam.pitch * BattleCam.PITCH_RANGE) / home
+end
+
 -- How much world the frame holds right now: the rig's own reach at the
--- player's zoom. The sun's box is fitted to this too, so a zoomed shot
--- lights exactly the ground it shows.
+-- player's zoom and at whatever the orbit has done to the pair's spacing,
+-- or the rig's own alone whenever both are being withheld (VR's fixed
+-- seat, BACK SPRITES' pinned composition). The sun's box is fitted to this
+-- too, so a zoomed shot lights exactly the ground it shows -- which is why
+-- BattleScene asks this rather than multiplying for itself.
 function BattleCam.frameH(arena)
-  return BattleCam.rigFor(arena).frameH * BattleCam.zoom
+  local base = BattleCam.rigFor(arena).frameH
+  if BattleCam.still or not BattleCam.steerable then return base end
+  return base * BattleCam.zoom * BattleCam.spread(arena)
 end
 
 local function chase(now, goal, dt, time)
@@ -261,10 +383,12 @@ function BattleCam.update(dt)
   -- float precision in the sines below
   local wrap = BattleCam.PAN_PERIOD * BattleCam.DOLLY_PERIOD
   if BattleCam.t > wrap then BattleCam.t = BattleCam.t - wrap end
-  -- and the steered pair easing after whatever the player last asked for,
+  -- and the steered three easing after whatever the player last asked for,
   -- which is what keeps a flick of the stick from being a cut
   BattleCam.orbit = chase(BattleCam.orbit, BattleCam.orbitGoal, dt,
                           BattleCam.ORBIT_TIME)
+  BattleCam.pitch = chase(BattleCam.pitch, BattleCam.pitchGoal, dt,
+                          BattleCam.PITCH_TIME)
   BattleCam.zoom = chase(BattleCam.zoom, BattleCam.zoomGoal, dt,
                          BattleCam.ZOOM_TIME)
 end
@@ -297,13 +421,16 @@ function BattleCam.rig(arena, groundY, canonical)
   local mx, mz = arena.mid[1], arena.mid[2]
   -- VR asks for the same stillness for its own reason (see BattleCam.still)
   local fixed = BattleCam.still or canonical
+  -- and the steer is withheld a second way, on its own: BACK SPRITES holds
+  -- the composition and the DRIFT still runs under it (see steerable)
+  local steered = (not fixed) and BattleCam.steerable
 
   -- The drift, plus wherever the player has steered to. The steer is
   -- NEGATIVE because the rotation below runs the other way from the bearing
   -- it turns: rotating (side, back) by +yaw carries the eye back toward the
   -- arena's own axis, and the room the player has is all on the far side of
   -- that -- out toward square-on. (orbitRange measures exactly that room.)
-  local steer = fixed and 0 or -BattleCam.orbit * BattleCam.orbitRange(arena)
+  local steer = steered and -BattleCam.orbit * BattleCam.orbitRange(arena) or 0
   local yaw = steer + (fixed and 0
               or BattleCam.PAN_YAW * phase(BattleCam.t, BattleCam.PAN_PERIOD))
   local c, s = math.cos(yaw), math.sin(yaw)
@@ -317,6 +444,28 @@ function BattleCam.rig(arena, groundY, canonical)
 
   local eye = { mx + dx, groundY + R.height * k, mz + dz }
   local focus = { mx + R.lookX, groundY + R.lookY, mz }
+
+  -- and the climb: the eye swung UP about the focus, at a constant radius.
+  -- About the focus so the aim stays nailed to the two mons and only the
+  -- seat moves, and at a constant radius so climbing never changes how big
+  -- anything is -- that is the lens's job below, and a rig that did both at
+  -- once would have no way to do either on purpose.
+  local lift = steered and BattleCam.pitch * BattleCam.PITCH_RANGE or 0
+  if lift > 0 then
+    local vx, vy, vz = eye[1] - focus[1], eye[2] - focus[2], eye[3] - focus[3]
+    local flat = math.sqrt(vx * vx + vz * vz)
+    local r = math.sqrt(flat * flat + vy * vy)
+    if flat > 1e-6 and r > 1e-6 then
+      local a = math.atan2(vy, flat) + lift
+      -- short of straight down, always: the placed camera's up vector is
+      -- world up, which degenerates against a view looking exactly along it
+      a = math.min(a, math.rad(85))
+      local nf = r * math.cos(a)
+      eye[1] = focus[1] + vx / flat * nf
+      eye[3] = focus[3] + vz / flat * nf
+      eye[2] = focus[2] + r * math.sin(a)
+    end
+  end
 
   local ex = eye[1] - focus[1]
   local ey = eye[2] - focus[2]

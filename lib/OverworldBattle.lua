@@ -503,6 +503,14 @@ function OverworldBattle.update(dt)
     return
   end
 
+  -- Whether the shot is the player's to steer at all. BACK SPRITES pins
+  -- their own mon to the GB's slot on the menu while the foe stands out on
+  -- the map, and there is no angle that half-framed, half-solid
+  -- composition survives -- so under it the camera holds the shot the rig
+  -- was solved for (the slow drift aside, which was always there). Polled
+  -- per frame rather than latched at battle start: the row is reachable
+  -- from the mod manager's page mid-session.
+  BattleCam.steerable = not OverworldBattle.backPinned()
   -- the right stick, read as a rate before the rig is built from it: the
   -- wheel, the keys, the mouse and a drag all arrive as events and have
   -- already landed, but a stick is a HELD position and only a tick can
