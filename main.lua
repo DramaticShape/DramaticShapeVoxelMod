@@ -91,6 +91,7 @@ local DayTint = V.require("DayTint")
 local Water = V.require("Water")
 local AntiAlias = V.require("AntiAlias")
 local FirstPerson = V.require("FirstPerson")
+local LiveTune = V.require("LiveTune")
 local FreeMove = V.require("FreeMove")
 local VR = V.require("VR")
 -- HORDE MODE: the konami code's minigame. Horde owns the state machine and
@@ -404,6 +405,12 @@ local function stagedBattles()
 end
 
 local SETTINGS = {
+  -- `full` because FULL is a preset for the LOOK and takes the look's knobs
+  -- off the menu while selected. The handle's own off switch is not one of
+  -- them -- losing it there leaves no visible way to bring the panel back.
+  { LiveTune.setting,
+    "The floating handle that opens the live-tuning panel over the world.",
+    full = true },
   { VoxelGrid.setting, "One-pixel wireframe along every voxel edge." },
   { WorldCurve.setting,
     "Bend the world down over the horizon, Animal Crossing style." },
@@ -928,7 +935,51 @@ OverworldBattle.install()
 -- per-cell consequence still runs through the engine's own machinery
 -- (onStepComplete, checkEdgeExit, checkLedgeHop, checkBoulderPush). The
 -- file argues the whole arrangement.
+-- ------- live tuning
+--
+-- The panel shows the same rows OPTIONS does and steps them the same way, so
+-- there is one source of truth for what a setting is and one code path for
+-- changing it. `when` is honoured here too, so a row OPTIONS would hide is
+-- hidden here as well.
+LiveTune.provider = function()
+  local out = {}
+  local Pipelines = require("src.render.Pipelines")
+  local function game()
+    local ok, g = pcall(require, "src.core.Game")
+    return ok and g or nil
+  end
+  -- the camera rung first: it is the one people step most
+  out[#out + 1] = {
+    label = "3D WORLD",
+    value = function() return Pipelines.levelLabel("voxel") end,
+    step = function(dir)
+      Pipelines.cycle("voxel", dir)
+      local g = game()
+      local opts = g and g.save and g.save.options
+      if opts then Pipelines.syncOptions(opts) end
+    end,
+  }
+  for _, entry in ipairs(SETTINGS) do
+    local setting = entry[1]
+    if setting ~= LiveTune.setting and (not entry.when or entry.when()) then
+      out[#out + 1] = {
+        label = setting.label,
+        value = function() return setting.labels[setting:read()] end,
+        -- handed the live Game because that is what persists it:
+        -- ModSetting:setIndex writes through game.save.options and silently
+        -- does not when it has none
+        step = function(dir) setting:cycle(game(), dir) end,
+      }
+    end
+  end
+  return out
+end
+
 FirstPerson.install()
+-- AFTER FirstPerson: each install wraps the previous handler, so the last one
+-- installed is asked first -- and first person claims any touch on open
+-- screen as a look drag, which would swallow every tap on the handle.
+LiveTune.install(require("src.core.Game"))
 FreeMove.install()
 
 -- ------- horde mode
