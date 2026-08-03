@@ -45,6 +45,89 @@
   well-known way to make people ill. The rung still changes the walk and
   the sprites the same way.
 
+- **Every camera zooms, on whatever the machine has.** The mouse wheel,
+  `Q`/`E`, a two-finger pinch and the pad's two stick clicks all reach
+  whichever camera is actually in front of you -- the third-person boom,
+  the staged battle's lens, or the engine's own survey zoom on an orbit
+  rung. One module (`lib/CamControl.lua`) answers "which camera is this
+  aimed at" so the four cameras never race each other for an event, and
+  forwards everything it does not claim. 1ST claims nothing: the eye is in
+  the player's head, and a pinch there would only wind the survey zoom for
+  whenever they stepped back out.
+
+- **The battle camera is yours to steer.** The right stick, a drag across
+  the screen or the mouse walks the staged shot around the arena and raises
+  the seat; the wheel, `Q`/`E`, a pinch or a stick click work the lens.
+
+  Both axes stop where the composition does. LEFT stops at the shot the rig
+  was solved for, because there is nothing to the left of it. RIGHT ends
+  SIDE-ON -- the eye square to the arena's axis, both Pokemon at the same
+  distance instead of one behind the other -- computed from each rig's own
+  stance rather than written down. DOWN stops at the rig's low stance and
+  UP is 45 degrees above it, raised about the focus at a constant radius so
+  climbing never doubles as zooming. Input accumulates into a goal the eye
+  eases after, so a flick reads as the camera being pushed rather than
+  dragged.
+
+  The lens **opens by exactly the amount the pair spreads**: the solved
+  shot looks along the arena's axis at a shallow angle, which foreshortens
+  the gap between the two mons to less than half its length, and swinging
+  round or climbing un-foreshortens it. Left alone that threw both Pokemon
+  off the edges of the frame at the far end of either range, which made the
+  whole far end unusable.
+
+  Where you leave the camera is where the next battle opens. An angle and a
+  lens you chose are how you want to watch battles, not a fact about one
+  encounter.
+
+- **Move animations track the camera.** They already slid to follow the
+  pair's midpoint; now they follow its SEPARATION too. Both mons are
+  geometry standing on the map, so the camera sizes them -- and an effects
+  layer that kept the authored 106-pixel spacing through a zoom and a
+  60-degree swing fired its beams into the air beside the Pokemon they were
+  aimed at.
+
+- **BACK SPRITES locks the battle camera.** That setting pins your own mon
+  to the GB's slot on the menu while the foe stands out on the map, and no
+  angle holds a composition that is half frame and half world. The steer,
+  the climb and the lens all stand down -- in the rig as well as at the
+  inputs, so an angle stored from before the row was switched on cannot
+  leave it steered anyway. The slow drift stays: it was always there under
+  BACK SPRITES and two degrees is not a composition problem.
+
+- **BATTLE BG is pinned to WHITE and its row comes off the menu.** The row
+  picks what fills the screen AROUND the battle, and this mode fills the
+  window with the map the fight is standing on -- there are no voids left
+  for it to be about. WORLD was actively wrong under it: it makes the
+  battle non-opaque so the engine draws a second, dimmed copy of the
+  overworld beneath the arena pass's own. Pinned rather than merely hidden,
+  so a save written before the mod was installed cannot carry a value the
+  menu can no longer reach. Uninstall and the row is back.
+
+### Fixed
+
+- **Grass and flowers are closed off at the sides.** Both stand as
+  per-pixel slabs built from runs of lit pixels, and only the front, the
+  back and a lid were ever emitted -- so from any angle off square you
+  looked straight in through the open end of every run and out the far
+  side. At the low cameras this release adds, that is most of the time.
+  Each run now wears end walls in the colour of the pixel they close off.
+
+  Flowers needed more than that, because a flower SWAYS: the mesh spans the
+  union of every animation frame and each frame is cut back out in texture
+  space, so a pixel that drops out of a frame takes the union's wall with
+  it and leaves an interior boundary that never had one. The first cut of
+  this looked solid on the base frame and still had gaps on every other.
+  Every pixel of a flower now carries a cap on all four of its remaining
+  faces: enclosed and invisible while its neighbour is there, and already
+  in place the moment the animation takes that neighbour away.
+
+- **No more machine-gun bonking in 1ST and 3RD.** The grid walk's collision
+  sound marks a discrete event -- a direction pressed, a step refused. A
+  free walk has no such moment: the body slides along every wall it grazes,
+  continuously, so a corridor taken at a slight angle rang the bonk twice a
+  second from end to end. The wall stopping you is the feedback.
+
 ## 1.5.2
 
 ### Added

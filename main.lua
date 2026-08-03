@@ -646,6 +646,25 @@ end
 --
 -- Everything they did is still reachable: uninstall the mod and both rows are
 -- back, at whatever they were last set to.
+-- BATTLE BG rides the same reasoning, and comes off for a reason of its own.
+-- The row picks what fills the screen AROUND the battle's 160x144 field --
+-- WHITE paper, BLACK bars, or the frozen overworld dimmed behind it -- and
+-- all three were answers to the same question: what to do with the voids,
+-- given the battle is a small picture in the middle of a big window.
+--
+-- This mod answers that question differently and permanently. A staged fight
+-- fills the whole window with the map the fight is standing on, and the
+-- flat battle screen it composites over it is drawn on the mode's own
+-- surface; there are no voids left for the row to fill. WORLD is the worst
+-- of the three under it -- it makes the battle non-opaque so the engine
+-- draws the overworld underneath, which is a SECOND copy of the world drawn
+-- under the one the arena pass already put there, dimmed and at a different
+-- camera. BLACK bars over a diorama read as a letterboxed screenshot.
+--
+-- So the value is pinned at WHITE, which is the one the mode was composed
+-- against, and the row comes off the menu on the same reasoning as TILT and
+-- GBC FX: a row that no longer decides anything is worse than no row.
+-- Uninstall the mod and it is back, at whatever it was last set to.
 local function pinEngineFx(game)
   game = game or require("src.core.Game")
   local opts = game and game.save and game.save.options
@@ -654,7 +673,9 @@ local function pinEngineFx(game)
   local changed = false
   if opts then
     changed = (opts.tilt or 0) ~= 0 or (opts.gbcfx or 0) ~= 0
+                or (opts.battleBg or "white") ~= "white"
     opts.tilt, opts.gbcfx = 0, 0
+    opts.battleBg = "white"
   end
   pcall(Tilt.setLevel, 0)
   pcall(GBCFX.setLevel, 0)
@@ -672,6 +693,10 @@ mod.hooks:wrap("ui.options.rows", function(next, game, rows)
   pinEngineFx(game)
   dropRow(out, "tilt")
   dropRow(out, "gbcfx")
+  -- and BATTLE BG with them: this mode fills the window with the map, so
+  -- the row's whole question -- what to put in the voids around the battle
+  -- -- no longer has voids to be about (see pinEngineFx)
+  dropRow(out, "battleBg")
   -- BATTLE LAYOUT is the ENGINE's row, and this is the one place the mod takes
   -- one away. While a fight can be staged on the map, OG is the only layout it
   -- can be composed in (OverworldBattle.forceOG), so the value is pinned there

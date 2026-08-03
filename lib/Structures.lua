@@ -3314,29 +3314,56 @@ end
 -- carries the animation: when a frame keys that pixel out, the wall's own
 -- fragments discard with the faces either side of it, so a swaying tuft
 -- never leaves a wall standing where its blade no longer is.
+-- `everyPixel` is for a standee whose silhouette ANIMATES. The mesh is
+-- built once, over the UNION of every frame's mask, and each frame is cut
+-- out again in texture space -- so a run that is six pixels wide in the
+-- union may be two pixels wide in the frame on screen, and the four pixels
+-- that dropped out took the union's end walls with them. What is left
+-- exposed is an interior boundary, which had no wall because in the union
+-- it was not a boundary at all. That is the gap that survived closing the
+-- run ends: the first frame looked solid and every other frame did not.
+--
+-- So an animated standee gets a wall on BOTH sides of EVERY pixel. A wall
+-- between two lit pixels is enclosed by the front and back faces and never
+-- seen; the moment its neighbour is keyed out it becomes the edge, already
+-- in place and already wearing the right colour. Each is inset a hair into
+-- its own pixel so the two that meet at a boundary are not coplanar -- the
+-- voxel pass draws with culling off, and two quads in the same plane would
+-- z-fight rather than politely take turns.
+local SIDE_INSET = 0.03
+
 local function sideQuads(quads, ix, ix2, yBot, yTop, zB, zF,
-                         ax0, ay0, atlasW, atlasH, py, lit)
+                         ax0, ay0, atlasW, atlasH, py, lit, everyPixel)
   local function texel(px)
     return (ax0 + px + 0.5) / atlasW, (ay0 + py + 0.5) / atlasH
   end
-  if not lit(ix - 1, py) then
-    local u, v = texel(ix)
-    quads[#quads + 1] = {                 -- the run's left wall, facing -X
-      { ix, yBot, zB }, { ix, yBot, zF },
-      { ix, yTop, zF }, { ix, yTop, zB },
+  local function left(px, at)
+    local u, v = texel(px)
+    quads[#quads + 1] = {                 -- facing -X
+      { at, yBot, zB }, { at, yBot, zF },
+      { at, yTop, zF }, { at, yTop, zB },
       uv = { { u, v }, { u, v }, { u, v }, { u, v } },
       shade = OBJ_SHADE.side,
     }
   end
-  if not lit(ix2 + 1, py) then
-    local u, v = texel(ix2)
-    quads[#quads + 1] = {                 -- and its right wall, facing +X
-      { ix2 + 1, yBot, zF }, { ix2 + 1, yBot, zB },
-      { ix2 + 1, yTop, zB }, { ix2 + 1, yTop, zF },
+  local function right(px, at)
+    local u, v = texel(px)
+    quads[#quads + 1] = {                 -- facing +X
+      { at, yBot, zF }, { at, yBot, zB },
+      { at, yTop, zB }, { at, yTop, zF },
       uv = { { u, v }, { u, v }, { u, v }, { u, v } },
       shade = OBJ_SHADE.side,
     }
   end
+  if everyPixel then
+    for px = ix, ix2 do
+      left(px, px + SIDE_INSET)
+      right(px, px + 1 - SIDE_INSET)
+    end
+    return
+  end
+  if not lit(ix - 1, py) then left(ix, ix) end
+  if not lit(ix2 + 1, py) then right(ix2, ix2 + 1) end
 end
 
 -- A tall-grass CELL is four tufts: 2x2 tiles, and each 8x8 tile is one
@@ -3590,41 +3617,51 @@ local function flowerTemplate(map, data, tileId)
           uv = { { u1, v1 }, { u0, v1 }, { u0, v0 }, { u1, v0 } },
           shade = OBJ_SHADE.back,
         }
-        -- petal tips: a top strip where the row above is clear. The
-        -- strip samples its own row's texel, so a tip that is not in
-        -- the current frame discards with the face beneath it
-        if not on(ix, py - 1) then
-          quads[#quads + 1] = {
-            { ix, yTop, zB }, { ix2 + 1, yTop, zB },
-            { ix2 + 1, yTop, zF }, { ix, yTop, zF },
-            uv = { { u0, v0 }, { u1, v0 }, { u1, v0 }, { u0, v0 } },
+        -- ------- the shell, closed on all four remaining faces
+        --
+        -- A flower SWAYS: the geometry spans the union of every animation
+        -- frame's mask and each frame is cut back out of it in texture
+        -- space (see the header). So "is there a pixel next door" has two
+        -- different answers -- one in the union this mesh was built from,
+        -- and one in the frame actually on screen -- and only the second
+        -- decides what is exposed.
+        --
+        -- Closing the union's own edges is therefore not enough, and was
+        -- the bug the first cut of this shipped: the base frame looked
+        -- solid and every other frame still had gaps, because a pixel that
+        -- drops out of a frame takes the union's wall with it and leaves an
+        -- interior boundary that never had one.
+        --
+        -- So every pixel gets a cap on all four of its remaining faces,
+        -- whatever its neighbours do. A cap between two lit pixels sits
+        -- inside the slab, enclosed by the front and back faces, and is
+        -- never seen; the moment its neighbour is keyed out it IS the edge,
+        -- already there and already wearing the right colour. Each samples
+        -- its own pixel's texel, so it appears and vanishes with the pixel
+        -- it belongs to rather than with the one it is closing off.
+        --
+        -- Inset a hair into its own pixel, because the voxel pass draws
+        -- with culling off: the two caps that meet at a boundary would be
+        -- coplanar and z-fight rather than politely take turns.
+        for px = ix, ix2 do
+          local tu = (ax0 + px + 0.5) / atlasW
+          local tv = (ay0 + py + 0.5) / atlasH
+          local xa, xb = px, px + 1
+          local yT = yTop - SIDE_INSET
+          local yB = yBot + SIDE_INSET
+          quads[#quads + 1] = {           -- the pixel's own lid
+            { xa, yT, zB }, { xb, yT, zB }, { xb, yT, zF }, { xa, yT, zF },
+            uv = { { tu, tv }, { tu, tv }, { tu, tv }, { tu, tv } },
             shade = OBJ_SHADE.top,
           }
-        end
-        -- and the same strip on the bottom, where the row below is clear:
-        -- a petal that ends mid-air is a solid thing seen from underneath,
-        -- and a low camera (1ST, 3RD, the battle's floor-level seat) is
-        -- looking straight up at it
-        if not on(ix, py + 1) then
-          quads[#quads + 1] = {
-            { ix, yBot, zF }, { ix2 + 1, yBot, zF },
-            { ix2 + 1, yBot, zB }, { ix, yBot, zB },
-            uv = { { u0, v1 }, { u1, v1 }, { u1, v1 }, { u0, v1 } },
+          quads[#quads + 1] = {           -- and its floor
+            { xa, yB, zF }, { xb, yB, zF }, { xb, yB, zB }, { xa, yB, zB },
+            uv = { { tu, tv }, { tu, tv }, { tu, tv }, { tu, tv } },
             shade = OBJ_SHADE.bottom,
           }
         end
-        -- The ENDS of the run, which close the slab off sideways. Without
-        -- them the flower is two faces and a lid: from anywhere but square
-        -- on you look straight through its open edge and out the far side,
-        -- which is what stopped it reading as a solid thing.
-        --
-        -- Each wall samples ONE texel -- the run's own end pixel, at its
-        -- centre -- so the side wears the colour of the pixel it is closing
-        -- off (the nearest coloured pixel there is) rather than a keyed
-        -- hole, and discards with that pixel when the animation frame it
-        -- belongs to is not the one on screen.
         sideQuads(quads, ix, ix2, yBot, yTop, zB, zF,
-                  ax0, ay0, atlasW, atlasH, py, on)
+                  ax0, ay0, atlasW, atlasH, py, on, true)
         ix = ix2 + 1
       else
         ix = ix + 1

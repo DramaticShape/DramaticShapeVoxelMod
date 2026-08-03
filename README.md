@@ -40,6 +40,11 @@ through the engine's own machinery.
 | right stick | look |
 | a touch drag off the overlay's controls | look |
 | left stick / touch d-pad / arrow keys | walk, relative to where the camera looks |
+| wheel, `Q` / `E`, pinch, or a stick click | **3RD only** — let the boom out and pull it in (`Q` and left stick click out, `E` and right stick click in) |
+
+On an **orbit rung** the same wheel, `Q`/`E` and pinch drive the engine's own
+survey zoom. On **1ST** they do nothing at all: the eye is in your head, and
+there is no distance to change.
 
 On **3RD** the boom shortens against whatever is behind you, so backing into
 a wall walks the camera in to your shoulders rather than through it — squeeze
