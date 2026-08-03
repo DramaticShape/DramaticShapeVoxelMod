@@ -186,7 +186,7 @@ end
 local function getCanvas(res)
   if canvas == false then return nil end
   if canvas and canvasRes == res then return canvas end
-  local ok, c = pcall(love.graphics.newCanvas, res, res)
+  local ok, c = V.require("PixelCanvas").new(res, res)
   if not (ok and c) then
     canvas = false
     return nil
@@ -221,6 +221,9 @@ end
 -- where the canvas cannot be made -- VoxelScene then keeps the flat decal
 -- shadows, which need nothing but a quad.
 function ShadowMap.available()
+  if love.system and love.system.getOS and love.system.getOS() == "iOS" then
+    return false
+  end
   if not (love.graphics and love.graphics.newCanvas
           and love.graphics.setDepthMode) then
     return false
