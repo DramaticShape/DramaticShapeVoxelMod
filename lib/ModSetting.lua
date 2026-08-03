@@ -33,9 +33,10 @@ end
 -- `values` are the stored values in ladder order and `labels` what the row
 -- shows for each; values[1] is the default, and the one an unreadable or
 -- unrecognised stored value falls back to.
-function ModSetting.new(key, label, values, labels)
+function ModSetting.new(key, label, values, labels, default)
   return setmetatable({
     key = key, label = label, values = values, labels = labels,
+    default = default,
     index = nil,          -- nil = not yet read back from the persisted options
   }, ModSetting)
 end
@@ -44,7 +45,12 @@ local function indexOf(self, value)
   for i, v in ipairs(self.values) do
     if v == value then return i end
   end
-  return 1
+  -- Nothing persisted yet. Rung 1 is the right default for a ladder that
+  -- starts at OFF, and the wrong one for a ladder whose neutral sits in the
+  -- middle -- LOOK SPEED reads SLOW/NORMAL/FAST in that order because that
+  -- is the order a player expects to step through, not because slow is the
+  -- default. `default` lets those two facts differ.
+  return self.default or 1
 end
 
 -- What the player left it at last session. Read lazily rather than at load
