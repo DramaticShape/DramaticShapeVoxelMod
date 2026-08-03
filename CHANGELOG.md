@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+
+- **A third-person camera: the 3RD rung.** The VOXEL ladder's eighth rung
+  (`3` / SELECT walk onto it after 1ST, and it is on the OPTIONS row)
+  stands the camera on a boom behind the player's shoulder. It is the
+  first-person rig with one number added, so everything 1ST already did
+  it does: the look steers on a mouse, the right stick or a touch drag,
+  and the grid walk is replaced by continuous camera-relative movement --
+  push in any direction and you go there, at any angle, with collision,
+  warps, ledges, encounters and scripts still running through the
+  engine's own machinery.
+
+  The boom **collides**: it marches back through the terrain height field
+  and the map's own walkability, so backing into a wall walks the camera
+  in to your shoulders instead of through it, and rounding a corner eases
+  it back out rather than snapping. Squeezed all the way into the head it
+  simply draws as 1ST until you step clear. It also carries a small
+  over-the-shoulder rail offset, which fades out as the boom shortens.
+
+  Every sprite in the world **turns to face it** -- yours, the NPCs', the
+  figures drawn into the furniture -- and shows the frame it would look
+  like from where the camera actually stands, so walking behind someone
+  shows you their back. Your own character is drawn (with the
+  through-the-wall silhouette 1ST had no use for) and **turns to face
+  where they are walking** rather than where the camera looks, so a strafe
+  reads as one; standing still they come back round to the camera's
+  bearing, which is the one A talks along.
+
+  Your card's frame is chosen from your body's **continuous** bearing
+  rather than from the compass direction the grid game stores. An NPC's
+  facing really is one of four directions, but yours is the angle the
+  camera itself is hung off, and quantising it before measuring it against
+  the eye leaves no margin for the shoulder rail's few degrees of offset:
+  in a band just short of each 45-degree boundary the pair read as 135
+  degrees apart and picked the mirrored PROFILE frame. Standing still.
+  Spinning the camera swept four of those bands a revolution, which showed
+  up as the character flicking sideways for a split second.
+
+  In VR the boom is declined outright and 3RD presents as 1ST does: a
+  headset that seats its wearer three cells behind their own body is a
+  well-known way to make people ill. The rung still changes the walk and
+  the sprites the same way.
+
 ## 1.5.2
 
 ### Added

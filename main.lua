@@ -24,10 +24,11 @@
 -- below.  This file declares; lib/ draws.
 --
 -- Voxel mode is presentational: it changes what the world LOOKS like and
--- nothing about what it IS.  ONE rung is the deliberate exception. 1ST --
--- the first-person camera -- replaces the grid WALK with a free,
--- camera-relative one while it is selected (lib/FreeMove.lua), because a
--- head you can steer with a mouse demands feet that go where it looks.
+-- nothing about what it IS.  TWO rungs are the deliberate exception. 1ST
+-- (the camera in the player's own eyes) and 3RD (the same rig, boomed back
+-- behind their shoulder) replace the grid WALK with a free,
+-- camera-relative one while either is selected (lib/FreeMove.lua), because
+-- a camera you can steer with a mouse demands feet that go where it looks.
 -- Even there the game is untouched: the walk asks the engine's own
 -- collision the same questions a grid step asks, keeps the player's
 -- logical cell synced, and fires the engine's own landing pipeline per
@@ -860,9 +861,11 @@ end
 -- so this file keeps naming every engine seam the mod touches.
 OverworldBattle.install()
 
--- ------- the first-person rung's inputs and its walk
+-- ------- the free-roam rungs' inputs and their walk
 --
--- 1ST needs two things no other rung does, and each is a named seam:
+-- 1ST and 3RD need two things no other rung does, and each is a named seam.
+-- Both rungs are one rig -- the boom behind the shoulder is a number inside
+-- it (lib/ThirdPerson.lua) -- so both are installed by the same two calls:
 --
 -- FirstPerson.install claims the LOOK inputs the engine ignores: the right
 -- stick's axes (Game:gamepadaxis passes them to Input, which returns early
@@ -874,11 +877,11 @@ OverworldBattle.install()
 -- open screen is the look; the d-pad and buttons still go to
 -- TouchControls, whose own d-pad finger is also read back analog as the
 -- move vector). Every wrap forwards whatever it does not claim, and claims
--- only while 1ST is actually driving.
+-- only while one of the two rungs is actually driving.
 --
 -- FreeMove.install wraps OverworldState:handleInput -- the one choke point
 -- where the grid walk reads the pad, and the same seam the engine's own
--- Cycling Road pull lives behind. While 1ST drives, the walk is continuous
+-- Cycling Road pull lives behind. While either drives, the walk is continuous
 -- and camera-relative; the player's logical cell stays synced and every
 -- per-cell consequence still runs through the engine's own machinery
 -- (onStepComplete, checkEdgeExit, checkLedgeHop, checkBoulderPush). The
