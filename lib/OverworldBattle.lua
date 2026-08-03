@@ -58,7 +58,7 @@ local DEBUG = select(2, pcall(function() return os.getenv("DS_BATTLE_DEBUG") end
 if DEBUG == nil or DEBUG == false then DEBUG = nil end
 
 OverworldBattle.KEY = "battles"
-OverworldBattle.LABEL = "3D-BTL"
+OverworldBattle.LABEL = "3D BATTLES"
 
 -- On by default: a mod whose headline is "the world in 3D" should not need
 -- the player to go and find the switch before the world shows up in a

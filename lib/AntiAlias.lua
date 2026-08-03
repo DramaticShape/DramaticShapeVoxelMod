@@ -51,7 +51,7 @@ local AntiAlias = {}
 -- the key under options.modOptions.DRAMATIC_SHAPE, shared by the row in
 -- OPTIONS and the mod manager's own settings page for this mod
 AntiAlias.KEY = "aa"
-AntiAlias.LABEL = "AA"
+AntiAlias.LABEL = "SMOOTHING"
 
 -- The ladder is SAMPLES PER DISPLAY PIXEL, which is how an AA setting reads
 -- everywhere else, and the canvas scale each rung costs is its square root:

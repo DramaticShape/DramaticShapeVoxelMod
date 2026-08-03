@@ -29,7 +29,7 @@ local V = ...
 local TiltShift = {}
 
 TiltShift.level = 0
-TiltShift.LABELS = { "OFF", "1", "2", "3" }
+TiltShift.LABELS = { "OFF", "LIGHT", "MEDIUM", "STRONG" }
 
 -- The strength ladder. `spacing` is the gap between the gaussian's taps
 -- at full blur, as a fraction of the canvas height (so the miniature
