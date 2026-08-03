@@ -54,7 +54,7 @@ T.eq(defs.voxel.levels[1], "OFF", "rung 0 is OFF")
 T.eq(defs.voxel.levels[2], "FULL",
   "FULL is the first rung after OFF -- the order those two get used in")
 T.eq(defs.voxel.levels[6], "75", "rung 5 is the 75-degree camera")
-T.eq(defs.voxel.levels[7], "1ST (EXPERIMENTAL)",
+T.eq(defs.voxel.levels[7], "1ST",
   "the top rung is the first-person camera, labelled as the experiment it is")
 T.eq(Pipelines.maxLevel("voxel"), 6, "the engine reads the ladder height")
 T.eq(Pipelines.levelLabel("voxel", 3), "35", "the engine reads the rung labels")
@@ -1088,7 +1088,7 @@ for _ = 1, 7 do
   Game.keypressed(keyGame, "3")
   walk[#walk + 1] = Pipelines.levelLabel("voxel")
 end
-T.eq(table.concat(walk, ","), "15,35,50,75,1ST (EXPERIMENTAL),OFF,15",
+T.eq(table.concat(walk, ","), "15,35,50,75,1ST,OFF,15",
   "3 walks OFF -> 15 -> 35 -> 50 -> 75 -> 1ST and wraps, never touching FULL")
 
 -- FULL is 35 degrees, so a press from it goes ON to 50 rather than back to
@@ -3515,7 +3515,7 @@ local Voxel3D = run.loader.exports.DRAMATIC_SHAPE.lib.require("Voxel3D")
 T.eq(VoxelState.FP_LEVEL, 6, "1ST is the seventh rung")
 T.check(VoxelState.isFirstPerson(6), "and isFirstPerson answers for it")
 T.check(not VoxelState.isFirstPerson(5), "but not for the 75 orbit")
-T.eq(VoxelState.ANGLE_LABELS[VoxelState.FP_LEVEL + 1], "1ST (EXPERIMENTAL)",
+T.eq(VoxelState.ANGLE_LABELS[VoxelState.FP_LEVEL + 1], "1ST",
   "the rung wears the experimental label")
 T.eq(VoxelState.ANGLES_DEG[VoxelState.FP_LEVEL + 1], 75,
   "and hands the blend the 75-degree orbit as its far end")
