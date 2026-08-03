@@ -1,5 +1,74 @@
 # Changelog
 
+## 1.5.4
+
+### Added
+
+- **HORDE MODE.** Enter the konami code -- Up Up Down Down Left Right
+  Left Right B A -- standing in the overworld, and Kanto turns on you.
+  The sky drops to a starless violet night, the Lavender Town theme
+  comes up, the camera locks into the player's own head, a voxel
+  handgun with working iron sights appears in their right hand, and
+  waves of people walk out of the dark to kill them. The map's own NPCs
+  join in. Every mob that falls screams as a random Pokemon. Score goes
+  up per kill and per wave cleared; there is no pausing. When the health
+  runs out, a GAME OVER card offers the score and PRESS A -- and pressing
+  it puts the map, the cell, the facing, the camera rung, the hour, the
+  music and every NPC back exactly as they were.
+
+  The code is read off GAME BOY BUTTONS rather than off keys, so it
+  works on a keyboard, a pad, a phone's touch overlay and a pair of VR
+  controllers without knowing which one is in use. Fire on left click,
+  the pad's right trigger or B, a tap on a touch screen, or the right
+  trigger in VR; reload on R, the pad's X, or B on the right hand; aim
+  down the sights on right click or the left trigger (in VR you aim by
+  pointing, and the sights are real geometry to line up).
+
+  The crowd walks the same grid the game walks, chases along a flow
+  field swept out from the player -- so they come through doorways and
+  around buildings rather than into walls -- and they follow the player
+  through a door into the building on the far side of it.
+
+- **The horde's gun, on the Game Boy's own sound hardware.** The
+  gunshot, the dry fire, the magazine dropping out and seating, and the
+  slide coming home are all authored as channel programs and
+  synthesized by the game's emulated APU (`lib/HordeSfx.lua`). No audio
+  files ship with the mod. Three shot variants round-robin so a fast
+  trigger finger overlaps its own echoes instead of cutting them off.
+
+### Changed
+
+- **SMOOTH TURN**, a new options row under VR (OFF by default), turns the
+  right stick into a continuous turn instead of the 45-degree snap. The
+  snap stays the default deliberately -- a software turn moves the world
+  past a head that did not move, which is the most reliable way to make
+  somebody ill in a headset -- but it costs continuity, so the choice is
+  the player's. The row only exists while VR is ON: a comfort setting for
+  a device that is not plugged in decides nothing.
+
+- **The wall bump is silent in first person**, on the flat screen and in
+  VR alike. On the grid a blocked step is a discrete event -- you pressed
+  a direction, the game refused, and the bump answers you once. The free
+  walk has no such moment: the body slides along whatever it grazes, so
+  walking a fence line or rounding a doorframe is blocked on one axis
+  continuously and the sound came out as a rattle rather than as an
+  answer. The grid walk keeps its own bump untouched.
+
+- **`FirstPerson.fovScale`** is a new seam on the first-person rig: a
+  plain multiplier on the field of view, for anything that wants to
+  narrow the lens without owning the camera. Horde mode's iron sights
+  ease it from 65 degrees to 40. It is folded into the orbit blend and
+  into the shadow signature, so a lens that narrows while the player
+  stands still still re-fits the sun's box.
+
+- **VR gains an aim pose and a fire action** (`lib/VRXR.lua`). The fire
+  action is suggested ALONGSIDE START on the right trigger rather than
+  instead of it -- bindings are suggested once, before the session
+  attaches its action sets, so they cannot be swapped when a mode
+  starts, and OpenXR is happy for two actions to share an input.
+  Outside horde mode nothing reads it and the trigger is START exactly
+  as it was.
+
 ## 1.5.2
 
 ### Added

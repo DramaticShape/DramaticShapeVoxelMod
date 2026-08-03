@@ -177,12 +177,21 @@ end
 -- ------- the blocked push
 --
 -- The grid game's blocked step is where half its verbs live: the map-edge
--- crossing, the ledge hop, the boulder shove, the route-gate warp fired
--- by collision, and the honest bonk. Hand the engine the quantised
--- direction and let its own handlers decide -- each one validates itself
--- (checkLedgeHop matches the tile pair, checkEdgeExit checks the bounds),
--- so calling them on every firm push is safe. Returns true when one of
--- them took the frame over.
+-- crossing, the ledge hop, the boulder shove, and the route-gate warp
+-- fired by collision. Hand the engine the quantised direction and let its
+-- own handlers decide -- each one validates itself (checkLedgeHop matches
+-- the tile pair, checkEdgeExit checks the bounds), so calling them on
+-- every firm push is safe. Returns true when one of them took the frame
+-- over.
+--
+-- The one verb NOT restated here is the bonk. On the grid a blocked step
+-- is a discrete event -- you pressed a direction, the game refused, and
+-- the bump answers you once. A free walk has no such moment: the body
+-- SLIDES along whatever it grazes, so a player walking a fence line or
+-- rounding a doorframe is blocked on one axis continuously, and the same
+-- sound comes out as a rattle for as long as they keep walking. It is
+-- feedback for a refusal that is not happening. The grid walk keeps its
+-- own bump (the engine's, in OverworldController) untouched.
 local function pushSpecials(state, dir, why)
   local p = state.player
   p.facing = dir      -- the handlers read the push off the facing
@@ -197,13 +206,6 @@ local function pushSpecials(state, dir, why)
     if w then
       state:takeWarp(w.def)
       return true
-    end
-  end
-  if why ~= "entity" then
-    if (state.bumpCooldown or 0) <= 0 then
-      local Game = require("src.core.Game")
-      require("src.core.Sound").play(Game.data, "Collision")
-      state.bumpCooldown = 16
     end
   end
   return false
@@ -234,11 +236,19 @@ function FreeMove.tick(state)
   -- which way a bonk points
   p.facing = FirstPerson.compassFacing()
 
-  if input:wasPressed("a") then
+  -- HORDE MODE takes both of these away for as long as it runs: there is
+  -- no pausing (START), and nobody stops to read a sign with the horde
+  -- coming (A, which is also the button the mode's own GAME OVER card
+  -- wants left unspent). Everything below -- the walk, the wall slide and
+  -- the blocked-push verbs, warps included -- keeps working, because the
+  -- crowd has to be able to follow the player through a door.
+  local suppressed = V.require("Horde").suppressWorldInput()
+
+  if not suppressed and input:wasPressed("a") then
     state:interact()
     return
   end
-  if input:wasPressed("start") then
+  if not suppressed and input:wasPressed("start") then
     require("src.core.Sound").play(Game.data, "Start_Menu")
     require("src.ui.Screens").push(Game, "StartMenu")
     return
@@ -265,8 +275,6 @@ function FreeMove.tick(state)
   end
 
   if not moving then return end
-
-  state.bumpCooldown = math.max(0, (state.bumpCooldown or 0) - 1)
 
   local speed = (Game.save and Game.save.onBike) and FreeMove.BIKE
                 or FreeMove.WALK

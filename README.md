@@ -28,6 +28,13 @@ menu.
 The **VR** options row (OFF / ON, off by default) drives a PCVR headset
 through OpenXR on Windows — SteamVR, Oculus or WMR.
 
+The **SMOOTH TURN** row appears under it while VR is ON (OFF by
+default): ON turns the right stick into a continuous turn instead of the
+45° snap. The snap is the default deliberately — a software turn moves
+the world past a head that did not move, which is the most reliable way
+to make somebody ill in a headset — but it costs continuity, so the
+choice is yours.
+
 ### VR controls
 
 Suggested onto Touch, Index and WMR controllers (rebindable in the
@@ -41,14 +48,16 @@ alongside.
 | either trigger | START |
 | left stick click | step the VOXEL angle ladder (same as the "3" key) |
 | right stick up / down | *diorama only* — zoom the model |
-| right stick left / right | *1ST only* — snap-turn 45° |
+| right stick left / right | *1ST only* — snap-turn 45°, or turn smoothly with **SMOOTH TURN** on |
 | grip squeeze + raise / lower that hand | *diorama only* — drag the table's height |
 | head | *1ST and battles* — look; FreeMove walks where you look |
 | left hand | *1ST and battles* — the Pokédex: menus, dialogs and the 2D battle screen on its screen |
 
 ## Licenses
 
-This mod redistributes one third-party binary:
+This mod is released under the **MIT License** — see [`LICENSE`](LICENSE).
+
+It redistributes one third-party binary:
 
 - **`assets/vr/openxr_loader.dll`** — the Khronos OpenXR loader
   (version 1.0.10.2, x64, unmodified), © The Khronos Group Inc.,
