@@ -76,20 +76,31 @@ local COLS = 20
 -- `limit` of them -- the plate has room for two and a message nobody can read
 -- the end of is not improved by adding a third.
 local function wrapped(str, limit)
+  limit = limit or 2
   local lines, line = {}, nil
+  local function push(text)
+    if #lines < limit then lines[#lines + 1] = text end
+  end
   for word in tostring(str):gmatch("%S+") do
     local try = line and (line .. " " .. word) or word
     if #try <= COLS then
       line = try
     else
-      if line then lines[#lines + 1] = line end
-      -- a single word too long to fit is cut rather than dropped: it is
-      -- usually a filename, and its first twenty characters still identify it
-      line = (#word <= COLS) and word or word:sub(1, COLS)
+      if line then push(line) end
+      -- A word longer than the line is BROKEN ACROSS lines rather than cut.
+      -- It is always a path, and a path is the one thing here that has to be
+      -- readable in full -- an absolute Android save directory runs to about
+      -- seventy characters and has no spaces in it at all, so truncating at
+      -- twenty told the player almost nothing.
+      while #word > COLS do
+        push(word:sub(1, COLS))
+        word = word:sub(COLS + 1)
+      end
+      line = word
     end
-    if #lines >= (limit or 2) then break end
+    if #lines >= limit then break end
   end
-  if line and #lines < (limit or 2) then lines[#lines + 1] = line end
+  if line then push(line) end
   return lines
 end
 
@@ -128,12 +139,27 @@ function StadiumScreen.new(game, adopt)
                         adopted = adopt and true or false }, StadiumScreen)
 end
 
+-- ------- the same plate, saying something instead of doing something
+--
+-- A NOTE: title, a wrapped body, and a key to dismiss it. It exists because
+-- the one piece of information a player on a platform with no file dialog
+-- actually needs -- the absolute path of the folder to put the cartridge in
+-- -- is long, machine-specific, and was only ever written to the console,
+-- which nobody on a phone can read.
+--
+-- Same state shape and the same plate as the build screen, so there is one
+-- look and one set of stack manners rather than two.
+function StadiumScreen.newNote(game, title, body)
+  return setmetatable({ game = game, note = { title = title, body = body } },
+                      StadiumScreen)
+end
+
 -- Opaque: the loading screen owns the frame, so the map underneath is not
 -- drawn and not paying for a render it cannot be seen through.
 StadiumScreen.isOpaque = true
 
 function StadiumScreen:enter()
-  if self.adopted then return end
+  if self.note or self.adopted then return end
   local ok, err = StadiumInstall.begin()
   self.started = ok and true or false
   if not ok then
@@ -143,6 +169,7 @@ function StadiumScreen:enter()
 end
 
 function StadiumScreen:update()
+  if self.note then return end        -- a note waits for a key, not a clock
   local status = StadiumInstall.status
   if status.state == "building" then
     if not StadiumInstall.step() then
@@ -172,7 +199,16 @@ end
 -- rather not wait for. Cancelling leaves the packs unbuilt, so the STADIUM
 -- rungs stay off the row until the next boot offers again -- which is
 -- honest, and better than a half-built set.
+local function pop(self)
+  if self.game and self.game.stack and self.game.stack:top() == self then
+    self.game.stack:pop()
+  end
+end
+
 function StadiumScreen:onKeyPressed(key)
+  -- a note is dismissed by ANY key: it is telling the player something, and
+  -- making them guess which button acknowledges it would be its own joke
+  if self.note then pop(self) return true end
   if key == "escape" or key == "x" or key == "backspace" then
     StadiumInstall.cancel()
     if self.game and self.game.stack and self.game.stack:top() == self then
@@ -187,6 +223,17 @@ function StadiumScreen:draw()
   local status = StadiumInstall.status
   love.graphics.setColor(0.93, 0.94, 0.90, 1)
   love.graphics.rectangle("fill", 0, 0, W, H)
+
+  if self.note then
+    centred(self.note.title, 20)
+    -- six lines is the plate's room; an absolute path on Android runs to
+    -- about seventy characters, which is four of them
+    local lines = wrapped(self.note.body, 6)
+    for i, line in ipairs(lines) do centred(line, 44 + (i - 1) * 10) end
+    centred("PRESS ANY KEY", 124)
+    love.graphics.setColor(1, 1, 1, 1)
+    return
+  end
 
   -- One line, and it is the whole heading: eighteen glyphs at the font's
   -- fixed eight pixels is 144 of the frame's 160.
