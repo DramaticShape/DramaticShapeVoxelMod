@@ -81,6 +81,10 @@ local UNTEXTURED = 0xFFFF + 1
 -- than reported (see the texture check).
 local untextured = {}
 
+-- species the rig refuses to anchor because their own standby loop says the
+-- body estimate cannot be trusted (StadiumRig.ANCHOR_STEADY)
+local unanchored = {}
+
 -- How far the mode lets an animation carry the Pokemon off its tile, in body
 -- heights. Read from StadiumMon rather than repeated, so the sweep cannot go
 -- on passing against a number the mode has since changed.
@@ -226,24 +230,40 @@ end
 
 -- ------- one animation, frame by frame
 
--- Where the BODY of a posed rig is: the median bone origin on each axis.
+-- Where the BODY of a posed rig is: the bone origins averaged, weighted by
+-- how many vertices each bone moves.
 --
--- The median rather than the mean or the root, for the reason StadiumRig's
--- own anchor uses it -- Farfetch'd's five-bone trail streaks three thousand
--- units out while the bird stays where it is, and a mean would follow the
--- trail. This is deliberately a second, independent implementation of the
--- same idea: a check that shared the code it is checking would agree with it
--- by construction.
+-- The same QUANTITY StadiumRig.anchor corrects, written out a second time
+-- rather than called: a check that shared the code it is checking would agree
+-- with it by construction. It must be the same quantity, though -- an earlier
+-- version of this measured the MEDIAN instead, and reported 27,965 findings
+-- purely because it was asking a different question than the anchor answers.
 local function bodyCentreOf(rig)
-  local n = rig.model.boneCount
-  local xs, ys, zs, d = {}, {}, {}, rig.drawM
-  for b = 1, n do
-    local o = (b - 1) * 12
-    xs[b], ys[b], zs[b] = d[o + 4], d[o + 8], d[o + 12]
+  local m = rig.model
+  local w, total = m.qaWeights, m.qaWeightTotal
+  if not w then
+    w, total = {}, 0
+    for b = 1, m.boneCount do w[b] = 0 end
+    for _, prim in ipairs(m.prims) do
+      for k = 1, prim.vertCount do
+        local b = prim.bone[k]
+        if w[b] then w[b] = w[b] + 1; total = total + 1 end
+      end
+    end
+    m.qaWeights, m.qaWeightTotal = w, total
   end
-  table.sort(xs) table.sort(ys) table.sort(zs)
-  local h = math.floor(n / 2) + 1
-  return xs[h], ys[h], zs[h]
+  if not (total > 0) then return 0, 0, 0 end
+  local x, y, z, d = 0, 0, 0, rig.drawM
+  for b = 1, m.boneCount do
+    local q = w[b]
+    if q > 0 then
+      local o = (b - 1) * 12
+      x = x + d[o + 4] * q
+      y = y + d[o + 8] * q
+      z = z + d[o + 12] * q
+    end
+  end
+  return x / total, y / total, z / total
 end
 
 local function bboxOf(rig)
@@ -300,6 +320,7 @@ local function sweepSpecies(dex)
   -- and where the bind pose puts the BODY, for the travel check below. The
   -- tracks are in raw units, before the model_root scale model.height is
   -- measured after.
+  if model.anchorOk == false then unanchored[dex] = true end
   local bcx, bcy, bcz = bodyCentreOf(rig)
   local rawHeight = (model.height or 0)
                     / ((model.rootScale or 0) > 0 and model.rootScale or 1)
@@ -360,7 +381,10 @@ local function sweepSpecies(dex)
         local cx, cy, cz = bodyCentreOf(rig)
         local drift = (((cx - bcx) ^ 2 + (cy - bcy) ^ 2 + (cz - bcz) ^ 2) ^ 0.5)
                       / rawHeight
-        if drift > TRAVEL * 1.05 then
+        -- a species the rig has judged unmeasurable is deliberately NOT
+        -- anchored (StadiumRig.measureBind), so of course it still travels --
+        -- reporting that would be reporting a decision as a defect
+        if model.anchorOk ~= false and drift > TRAVEL * 1.05 then
           report("animation walks the Pokemon off its tile", dex, name, f,
                  ("body centre %.1f body-heights from where it started")
                  :format(drift))
@@ -547,6 +571,13 @@ for _ in pairs(untextured) do nUntextured = nUntextured + 1 end
 if nUntextured > 0 then
   print(("species with flat-shaded (untextured) primitives: %d -- expected, "
          .. "the source has no texture for those"):format(nUntextured))
+end
+local anchorList = {}
+for dex in pairs(unanchored) do anchorList[#anchorList + 1] = dex end
+table.sort(anchorList)
+if #anchorList > 0 then
+  print(("not anchored (standby loop too unsteady to measure, so they travel "
+         .. "as authored): %s"):format(table.concat(anchorList, " ")))
 end
 if #staticPose > 0 then
   print(("staticPose (declined by the packer, never drawn, not swept): %s")

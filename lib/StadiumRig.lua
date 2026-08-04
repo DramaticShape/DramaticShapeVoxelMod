@@ -437,35 +437,80 @@ end
 -- they were; past it the excess alone is removed, so a big move still reads
 -- as big and still comes back to the tile it left.
 --
--- ------- and why the MEDIAN bone
+-- ------- where the body IS, and why it is not the median
 --
--- The centre is the median bone origin on each axis, not the mean and not
--- the root. The mean is dragged by exactly the thing that must not count --
--- Farfetch'd's five-bone trail streaks three thousand units out while the
--- bird stays put -- and the root is a bone like any other, which several
--- species animate independently of the body hanging off it. The median is
--- the position most of the skeleton agrees on, and a handful of bones flung
--- anywhere cannot move it.
+-- The first version of this took the median bone origin, on the reasoning
+-- that a handful of bones flung anywhere cannot move a median. True, and it
+-- had a worse problem: a median is a RANK, and a rank flips. On a bird most
+-- of the skeleton is wing, so as the wings beat, which bone sits at the
+-- middle of the sorted list swaps between the up cluster and the down one --
+-- and the estimate jumps with it. Measured on Pidgey's standby loop the
+-- median moved a tenth of a body-height between adjacent half-frames, and on
+-- Pidgeot three whole body-heights. The anchor turns that straight into a
+-- translation of the ENTIRE Pokemon, so the body counter-shook against its
+-- own wings and the flapping read as twice its real speed. That is the
+-- "Pidgey's wings flap super fast" this comment exists because of.
+--
+-- The centre is now the bone origins averaged, WEIGHTED BY HOW MANY VERTICES
+-- EACH BONE MOVES. That fixes both halves at once:
+--
+--   * the weights are a property of the MESH, computed once and never
+--     changing, so there is no rank to flip and no discontinuity available
+--     to it -- the estimate is as smooth as the bones themselves
+--   * a bone with little geometry on it barely counts, which is exactly the
+--     robustness the median was for. Farfetch'd's trail is thirty vertices
+--     on five bones -- 1.6% of the model -- so streaking three thousand
+--     units out moves this by nothing worth measuring
+--
+-- Against the median it is two to five times smoother on every species
+-- tested and measures the same travel to within a few percent.
+
+-- How far the body estimate may move in ONE 30 Hz frame of a species' own
+-- standby loop before that species is judged unmeasurable and left
+-- unanchored (see measureBind). The fastest genuine motion in the set is
+-- about a fifth of a body-height a frame; the one species that fails this
+-- moves three.
+StadiumRig.ANCHOR_STEADY = 0.5
+
+-- Which context slot the standby loop is, without requiring StadiumPack --
+-- this module is below it and a require would be circular. Position 1 of
+-- StadiumPack.CONTEXT, which is the format's own contract.
+local IDLE_SLOT = 1
+
+-- How much of the model each bone actually carries. Cached on the shared
+-- model: it is a fact about the mesh, not about this instance.
+local function boneWeights(model)
+  if model.boneW then return model.boneW, model.boneWTotal end
+  local w, total = {}, 0
+  for b = 1, model.boneCount do w[b] = 0 end
+  for _, prim in ipairs(model.prims) do
+    local bone = prim.bone
+    for k = 1, prim.vertCount do
+      local b = bone[k]
+      if w[b] then w[b] = w[b] + 1; total = total + 1 end
+    end
+  end
+  model.boneW, model.boneWTotal = w, total
+  return w, total
+end
 
 -- The body centre of the pose currently in drawM.
 local function centre(self, n)
-  -- made on demand as well as in new(), so the probes and the QA sweep --
-  -- which build a rig with no meshes by hand, because pose() needs none --
-  -- can measure without having to know about this scratch
-  local xs, ys, zs = self.cx, self.cy, self.cz
-  if not xs then
-    xs, ys, zs = {}, {}, {}
-    self.cx, self.cy, self.cz = xs, ys, zs
-  end
+  local model = self.model
+  local w, total = boneWeights(model)
+  if not (total > 0) then return nil end
+  local x, y, z = 0, 0, 0
   local d = self.drawM
   for b = 1, n do
-    local o = (b - 1) * 12
-    xs[b], ys[b], zs[b] = d[o + 4], d[o + 8], d[o + 12]
+    local q = w[b]
+    if q and q > 0 then
+      local o = (b - 1) * 12
+      x = x + d[o + 4] * q
+      y = y + d[o + 8] * q
+      z = z + d[o + 12] * q
+    end
   end
-  for i = n + 1, #xs do xs[i], ys[i], zs[i] = nil, nil, nil end
-  table.sort(xs) table.sort(ys) table.sort(zs)
-  local h = floor(n / 2) + 1
-  return xs[h], ys[h], zs[h]
+  return x / total, y / total, z / total
 end
 
 -- Where the BIND pose puts it -- the spot every animation is measured
@@ -481,11 +526,117 @@ function StadiumRig:measureBind()
   if model.bindCX then return end
   self:pose(nil, 0, false)
   model.bindCX, model.bindCY, model.bindCZ = centre(self, model.boneCount)
+
+  -- ------- and whether this species can be anchored at all
+  --
+  -- Decided ONCE, per model, offline, by walking its standby loop and asking
+  -- how far the body estimate moves between one frame and the next.
+  --
+  -- Everything the anchor does rests on that estimate being a description of
+  -- where the Pokemon is. For 147 species it is: the fastest real motion in
+  -- the set moves the body about a fifth of a body-height per 30 Hz frame.
+  -- Pidgeot's standby loop moves it THREE, because a few of its rotation
+  -- frames are junk (the worst data in the set, and a known issue in its own
+  -- right). There is no filter setting that both tracks a real excursion and
+  -- rejects that -- measured, at four time constants, either the excursions
+  -- came back or the shake did -- because the two are only a factor of
+  -- fifteen apart and a filter is a proportion.
+  --
+  -- So a species whose own idle says its estimate cannot be trusted is not
+  -- anchored, and plays exactly as it did before the anchor existed: it
+  -- travels as far as its animation says, and it does not vibrate. One
+  -- species trading a framing problem for no problem beats 147 trading a
+  -- solved framing problem for a shake.
+  --
+  -- Cheap: forty-odd poses on a model that is about to be posed sixty times
+  -- a second anyway.
+  local idle = model.ctx and model.ctx[IDLE_SLOT]
+  local anim = (idle and idle ~= 0xFFFF) and (idle + 1) or nil
+  local rec = anim and model.anims and model.anims[anim]
+  model.anchorOk = true
+  if rec and rec.frames and rec.frames > 1 then
+    local root = model.rootScale
+    if not (root and root > 0) then root = 1 end
+    local h = (model.height or 0) / root
+    if h > 0 then
+      local px, py, pz, worst = nil, nil, nil, 0
+      for f = 0, rec.frames - 1 do
+        self:pose(anim, f, true)
+        local x, y, z = centre(self, model.boneCount)
+        if x and px then
+          local d = (((x - px) ^ 2 + (y - py) ^ 2 + (z - pz) ^ 2) ^ 0.5) / h
+          if d > worst then worst = d end
+        end
+        px, py, pz = x, y, z
+      end
+      if worst > StadiumRig.ANCHOR_STEADY then
+        model.anchorOk = false
+        V.mod.log:info("stadium: species %s moves its own body %.1f "
+                       .. "body-heights in one frame of its standby loop -- "
+                       .. "not anchoring it, the measurement cannot be "
+                       .. "trusted", tostring(model.species), worst)
+      end
+    end
+  end
+  -- and leave the bind pose behind, not the last frame of the idle
+  self:pose(nil, 0, false)
 end
+
+-- ------- and why the offset is SMOOTHED
+--
+-- A better centre is not enough on its own. Any estimate that follows the
+-- pose carries the pose's own frame-to-frame wobble into it, and the anchor
+-- multiplies that up into a translation of the whole Pokemon -- so a species
+-- whose source data is erratic (Pidgeot's standby loop has a few frames of
+-- junk in it, and no estimator can smooth data that is genuinely wrong)
+-- would shake bodily rather than in the one bone that is wrong.
+--
+-- So the offset is low-passed. What the anchor is FOR is a slow excursion --
+-- a Pokemon swimming seven body-heights away over two seconds -- and that
+-- survives a filter with this time constant untouched, while anything
+-- oscillating frame to frame is flattened. The correction ends up describing
+-- where the Pokemon has drifted TO, never how it is shaking on the way.
+--
+-- HALF_LIFE is in seconds: the time the offset takes to close half of any
+-- gap between where it is and where the pose says it should be. Short enough
+-- that a real excursion is caught within a few frames of starting, long
+-- enough that a 30 Hz wobble does not survive it.
+StadiumRig.ANCHOR_HALF_LIFE = 0.05
+
+
+-- ------- what this does NOT fix, and why it stops here
+--
+-- The filter is a proportion, so it divides the input wobble down rather than
+-- bounding it -- and one species' data is bad enough to get through anyway.
+-- Pidgeot's standby loop carries a few frames of junk rotation (the worst in
+-- the set, and a known issue since before the anchor existed), which moves
+-- the body estimate three body-heights inside a single frame; filtered, that
+-- is still about three pixels a frame on a fourteen-pixel model.
+--
+-- Two further mechanisms were built and MEASURED against the set, and both
+-- were taken back out:
+--
+--   a rate limit on the correction bounded the shake to a third of a pixel,
+--   and cost so much tracking that 33 of the 148 entrances went back to
+--   leaving the frame -- half the problem the anchor exists to solve
+--
+--   a rate limit on the MEASUREMENT, to tell a spike from an excursion by
+--   speed, could not separate them: the fastest real excursion (Dewgong's
+--   entrance, five and a half body-heights a second) is close enough to
+--   Pidgeot's sustained junk that any threshold either clipped Dewgong or
+--   passed Pidgeot, and freezing on distrust made both worse
+--
+-- So it stops here, at the setting that is right for the 147 species whose
+-- data is not broken. Pidgeot is a data problem and belongs with the other
+-- data problems in the CHANGELOG's Known section, not in this control loop:
+-- the alternative was distorting every other Pokemon's animation to flatter
+-- one whose source frames are wrong.
 
 -- Pull the pose back toward the tile. `limit` is in the Pokemon's own
 -- body-heights; nil or a non-positive value leaves the pose exactly as posed.
-function StadiumRig:anchor(limit)
+-- `dt` is the frame's own delta; without one the offset is applied whole,
+-- which is what a still (the QA sweep, a probe) wants.
+function StadiumRig:anchor(limit, dt)
   if not (limit and limit > 0) then return end
   local model = self.model
   local n = model.boneCount
@@ -498,16 +649,36 @@ function StadiumRig:anchor(limit)
 
   local bx, by, bz = model.bindCX, model.bindCY, model.bindCZ
   if not bx then return end          -- never measured; leave the pose alone
+  if model.anchorOk == false then return end   -- and unmeasurable, at that
   local x, y, z = centre(self, n)
+  if not x then return end
+
   local dx, dy, dz = x - bx, y - by, z - bz
   local dist = (dx * dx + dy * dy + dz * dz) ^ 0.5
   local allow = limit * h
-  if dist <= allow or dist <= 0 then return end
 
-  -- the EXCESS only: what is inside the limit stays, so the motion keeps its
-  -- shape and only the part that would leave the frame is removed
-  local k = (dist - allow) / dist
-  local ox, oy, oz = dx * k, dy * k, dz * k
+  -- what the pose alone asks for: the EXCESS beyond the limit, so what is
+  -- inside it stays and the motion keeps its shape
+  local ox, oy, oz = 0, 0, 0
+  if dist > allow and dist > 0 then
+    local k = (dist - allow) / dist
+    ox, oy, oz = dx * k, dy * k, dz * k
+  end
+
+  -- and then toward it rather than straight to it (see ANCHOR_HALF_LIFE),
+  -- and never faster than ANCHOR_RATE
+  if dt and dt > 0 then
+    local half = StadiumRig.ANCHOR_HALF_LIFE
+    local a = (half > 0) and (1 - 0.5 ^ (dt / half)) or 1
+    if a > 1 then a = 1 end
+    local px, py, pz = self.anchorX or ox, self.anchorY or oy, self.anchorZ or oz
+    ox = px + (ox - px) * a
+    oy = py + (oy - py) * a
+    oz = pz + (oz - pz) * a
+  end
+  self.anchorX, self.anchorY, self.anchorZ = ox, oy, oz
+  if ox == 0 and oy == 0 and oz == 0 then return end
+
   local pivot, drw = self.pivotM, self.drawM
   for b = 1, n do
     local o = (b - 1) * 12

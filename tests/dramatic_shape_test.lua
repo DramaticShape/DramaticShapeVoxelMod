@@ -1419,15 +1419,29 @@ end)()
                              accX = {}, accY = {}, accZ = {}, parts = {} }, Rig)
   rig:measureBind()
 
-  local function centre()
-    local n, xs, ys, zs = model.boneCount, {}, {}, {}
-    for b = 1, n do
-      local o = (b - 1) * 12
-      xs[b], ys[b], zs[b] = rig.drawM[o + 4], rig.drawM[o + 8], rig.drawM[o + 12]
+  -- the same quantity StadiumRig.anchor corrects -- bone origins averaged and
+  -- weighted by the vertices each bone moves -- written out here rather than
+  -- called, so this checks the behaviour and not its own arithmetic
+  local weight, total = {}, 0
+  for b = 1, model.boneCount do weight[b] = 0 end
+  for _, prim in ipairs(model.prims) do
+    for k = 1, prim.vertCount do
+      local b = prim.bone[k]
+      if weight[b] then weight[b] = weight[b] + 1; total = total + 1 end
     end
-    table.sort(xs) table.sort(ys) table.sort(zs)
-    local h = math.floor(n / 2) + 1
-    return xs[h], ys[h], zs[h]
+  end
+  local function centre()
+    local x, y, z = 0, 0, 0
+    for b = 1, model.boneCount do
+      local q = weight[b]
+      if q > 0 then
+        local o = (b - 1) * 12
+        x = x + rig.drawM[o + 4] * q
+        y = y + rig.drawM[o + 8] * q
+        z = z + rig.drawM[o + 12] * q
+      end
+    end
+    return x / total, y / total, z / total
   end
   local raw = model.height / (model.rootScale > 0 and model.rootScale or 1)
   local slot = model.ctx[Pack.SLOT.entrance]

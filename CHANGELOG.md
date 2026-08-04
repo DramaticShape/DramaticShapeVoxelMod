@@ -286,6 +286,53 @@
   the shot driver's `DS_FAINT` case prints the frame the bar empties against
   the frame the animation starts, and they are the same frame.
 
+- **The first Pokemon of a battle arrived, left, and arrived again.** Every
+  guard deciding whether the player's Pokemon is on the field is a field the
+  engine sets once the battle is RUNNING, and during the opening none of them
+  is set yet: `showPlayerBack` is still nil (BattleState assigns it further
+  in), `playerBackPic` is nil with it, and `sendingOut` does not go true until
+  the ball is thrown. So the whole intro read as "this Pokemon is standing on
+  the field" -- two and a half seconds of it, on its tile, playing its standby
+  loop, before the trainer sprite it is meant to be hiding behind had even
+  appeared. It then vanished when that sprite arrived and came back with its
+  entrance when the ball opened. A switch has no intro, which is why a switch
+  always looked right and was the thing worth comparing against. The player's
+  side is now simply not on the field during the intro phase.
+
+- **The anchor made birds shake, and the shake read as fast flapping.** The
+  body estimate it corrects toward was the MEDIAN bone origin -- robust to a
+  few bones flung out, which is what it was chosen for, and wrong in a way
+  that only shows on a flapping model: a median is a RANK, and on a bird most
+  of the skeleton is wing, so which bone sits at the middle of the sorted list
+  swaps between the up cluster and the down one every beat. Measured, the
+  estimate moved a tenth of a body-height between adjacent half-frames on
+  Pidgey and three whole body-heights on Pidgeot, and the anchor turned that
+  into a translation of the entire Pokemon -- the body counter-shaking against
+  its own wings, which reads as flapping at twice the real speed.
+
+  The centre is now the bone origins averaged and **weighted by how many
+  vertices each bone moves**. The weights are a property of the mesh, computed
+  once, so there is no rank to flip -- and a bone with little geometry barely
+  counts, which is the robustness the median was for in the first place
+  (Farfetch'd's trail is 30 vertices on five bones). On top of that the
+  correction is low-passed, so what survives is where the Pokemon has drifted
+  to and never how it is shaking on the way. Pidgey's shake goes from 0.24 to
+  **0.10 pixels a frame** on a fourteen-pixel model, and travel correction
+  improved with it.
+
+  Two species -- Pidgeot and Dodrio -- have standby loops with genuinely junk
+  rotation frames, which move the estimate three and two body-heights in a
+  single frame against a fifth of a body-height for the fastest real motion in
+  the set. No filter separates those: rate-limiting the correction bounded the
+  shake but put 33 of the 148 entrances back outside the frame, and
+  rate-limiting the measurement could not tell a spike from an excursion
+  because they are only a factor of fifteen apart. So each species' own
+  standby loop is walked once, at rig construction, and one whose estimate is
+  that unsteady is **not anchored at all**: it travels as far as its animation
+  says and does not vibrate, which is exactly how it behaved before the anchor
+  existed. One species trading a framing problem for no problem beats 147
+  trading a solved framing problem for a shake.
+
 - **A Pokemon calling out a fifth species killed every model in the fight.**
   Reported as `Cannot use object after it has been released` out of
   `Voxel3D.draw`, after which nothing 3D drew for the rest of the battle.
@@ -411,7 +458,9 @@
 - Pidgeot, Dodrio and Grimer have a handful of erratic rotation frames in
   their standby loops -- a few frames of junk at the top of the loop rather
   than a corrupt stream. The blend guard holds those frames rather than
-  smoothing through them, so they step where the source steps. Not chased
+  smoothing through them, so they step where the source steps, and Pidgeot
+  and Dodrio are additionally left unanchored because those frames move the
+  body estimate too far to measure against (see above). Not chased
   further: the extraction is byte-identical to a reference pipeline whose
   sampling was validated against the decompilation's own arithmetic, and
   guessing at the format to fix three species risks the other 145.

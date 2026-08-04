@@ -287,6 +287,10 @@ end
 -- ------- per frame
 
 function StadiumMon:update(dt)
+  -- kept for build(), which runs later in the same frame and needs it to
+  -- advance the anchor's filter (StadiumRig.anchor). Stashed before the
+  -- early-outs below, so a species with nothing to play still has one.
+  self.dt = dt or 0
   local model = self.model
   if not (model and self.anim) then return end
   local anim = model.anims[self.anim]
@@ -393,7 +397,7 @@ function StadiumMon:build()
   -- and then back onto the tile, because these animations were authored for
   -- a camera that followed the Pokemon and this one does not move (see
   -- StadiumRig.anchor)
-  self.rig:anchor(StadiumMon.TRAVEL)
+  self.rig:anchor(StadiumMon.TRAVEL, self.dt)
   self.rig:skin(self.yaw or 0)
   -- no clock of its own: the texture animation rides the frame pose() just
   -- resolved, which is what keeps a blink inside its standby loop and a

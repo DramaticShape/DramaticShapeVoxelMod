@@ -206,6 +206,29 @@ local function onField(battle, side, mon)
     if battle.enemyHidden or battle.enemySendingOut then return false end
   else
     if battle.safari or battle.demo or battle.sendingOut then return false end
+    -- ------- and not before the battle has even opened
+    --
+    -- The player's Pokemon is not out during the INTRO. Every other guard
+    -- here is a field the engine sets once the battle is running, and during
+    -- the opening none of them is set yet: `showPlayerBack` is still nil
+    -- (BattleState assigns it further in, when the back pic is built),
+    -- `playerBackPic` is nil with it, and `sendingOut` does not go true until
+    -- the ball is actually thrown. So the whole opening read as "this
+    -- Pokemon is standing on the field" and the model was drawn through it --
+    -- two and a half seconds of it, on its tile, playing its standby loop,
+    -- before the trainer sprite it is supposed to be hiding behind had even
+    -- appeared. It then vanished when that sprite arrived and came back with
+    -- its entrance when the ball opened, so the first Pokemon of a battle
+    -- appeared, left and arrived again.
+    --
+    -- A SWITCH has no intro, which is why a switch always looked right and
+    -- was the thing worth comparing against.
+    --
+    -- Gated on the PHASE rather than on a flag latched at the send-out: a
+    -- latch that never fires (a link battle, a script pushing a battle
+    -- straight to the menu) would hide the Pokemon for good, and being wrong
+    -- in that direction is far worse than the two seconds this fixes.
+    if battle.phase == "intro" then return false end
   end
   local ok, hidden = pcall(battle.fxHidden, battle, battler)
   if ok and hidden then return false end
