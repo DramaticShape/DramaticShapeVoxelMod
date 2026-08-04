@@ -4,17 +4,33 @@
 
 ### Added
 
-- **STADIUM battles: two new rungs on the 3D-BTL row.** The row that used
-  to read ON / OFF now reads **2D-3D / STADIUM A / STADIUM B / OFF**. 2D-3D
-  is what ON always was -- the fight staged on the map with the Game Boy's
-  own pics stood up on their tiles as quads. Both STADIUM rungs keep the
-  whole staging and replace those quads with the **Pokemon Stadium battle
-  models**: all 151 species, skinned, lit and animated, playing the
+- **STADIUM battles, and a disc stage: three new rungs on the 3D-BTL row.**
+  The row that used to read ON / OFF now reads **2D-3D A / 2D-3D B /
+  STADIUM A / STADIUM B / OFF**, which is two independent choices laid out
+  as one ladder -- WHAT is standing there, and WHERE:
+
+  |            | on the MAP  | on two DISCS |
+  | ---------- | ----------- | ------------ |
+  | **pics**   | 2D-3D A     | 2D-3D B      |
+  | **models** | STADIUM A   | STADIUM B    |
+
+  2D-3D A is what ON always was -- the fight staged on the map with the Game
+  Boy's own pics stood up on their tiles as quads. The STADIUM rungs keep
+  the whole staging and replace those quads with the **Pokemon Stadium
+  battle models**: all 151 species, skinned, lit and animated, playing the
   animation the move being used actually calls for.
 
-  **STADIUM A** stands them on the map, in the world's own light and
-  weather. **STADIUM B** stands them on two discs against the sky and draws
-  no map at all -- the Game Boy's own framing, staged rather than found.
+  **A** stands the fight on the map, in the world's own light and weather.
+  **B** stands it on two discs against the sky and draws no map at all --
+  the Game Boy's own framing, staged rather than found.
+
+  All four combinations are reachable rather than only the diagonal. The
+  discs do not know what is on them -- they are two platforms at two cells,
+  drawn off the arena alone -- so **2D-3D B** costs one value on the ladder
+  and gives the disc framing to a player who has no Pokemon Stadium ROM and
+  would rather not go and find one. It needs nothing the base game did not
+  ship: the stage is generated in Lua and the Pokemon on it are the game's
+  own art.
 
   B exists because the map does not always cooperate. Half of Kanto's
   interiors are furniture, a cave floor can be nothing but two-cell
@@ -72,18 +88,23 @@
   all fall back to the flat card, on that side alone, with the other side
   keeping its model.
 
-  Stored as new values on the same key, with 2D-3D still first -- so a save
-  written before this update reads back as exactly the mode it was written
-  for.
+  Stored as new values on the same key, with 2D-3D A still first -- so a
+  save written before this update reads back as exactly the mode it was
+  written for.
 
 - **The models are built on your machine, from your own cartridge.** The
   mod ships no Pokemon Stadium data and cannot: it is that game's. What it
   ships is the READER.
 
   Drop a Pokemon Stadium (US) ROM -- `.z64`, `.n64` or `.v64`, the byte
-  order is detected -- into a `baseroms/` folder beside the game, and the
-  first time it runs the 151 battle models are built out of it on a loading
-  screen, in about ten seconds, one species a frame. After that they sit in
+  order is detected -- into a `baseroms/` folder beside the game, straight in
+  it rather than in a revision subfolder under it, and the first time it runs
+  the 151 battle models are built out of it on a loading screen, in about ten
+  seconds, one species a frame. The screen says what it is doing in those
+  words -- **ONE-TIME EXTRACTION OF STADIUM ASSETS** -- carries a progress bar
+  filled by species written rather than by elapsed time, and names the
+  Pokemon it is on, which is the difference between a bar that is trusted and
+  one that is suspected of having hung. After that they sit in
   the save directory and are read like any other asset. Until then the two
   STADIUM rungs simply are not on the row: they are skipped rather than
   shown and refused, because a setting that can be selected and then does
@@ -129,6 +150,57 @@
 
 ### Fixed
 
+- **Idle animations snapped, and then ran at half the frame rate.** Two
+  bugs with the same cause, fixed in opposite directions.
+
+  The animation streams are not keyframes: they carry one value per frame at
+  30 Hz and the game steps them. Blended naively against a 60 Hz camera
+  that produced the reported glitch -- Rattata's idle snapping almost upside
+  down for a frame, Charmander's arms turning inside out for a few --
+  because rotations here are **Euler triples**, and two triples can describe
+  nearly the same orientation while being nowhere near each other component
+  by component. `(0, 20976, 32736)` and `(0, -19936, -5904)` are a real
+  consecutive pair out of the set. Walking from one to the other passes
+  through orientations that are nothing like either end.
+
+  Dropping the blend fixed that and cost the smoothness: every pose then
+  held for two frames, and a set of models moving at half the rate of
+  everything around them reads as a stutter. So the blend is back, and the
+  snaps are **detected** rather than smoothed. A bone whose rotation moves
+  more than a quarter turn inside one 30 Hz frame is not being animated, it
+  is being re-expressed, and it holds its frame instead of blending -- all
+  three components together, because they are one rotation. The same guard
+  covers a translation that teleports more than half the Pokemon's own
+  height in a frame. Angles blend the short way round the +-pi seam, and
+  texture animations still step whole frames, because an eye is open or shut
+  and there is no halfway swap to draw.
+
+  Measured, not eyeballed: walking every species' standby loop in quarter
+  frames and differencing each bone's world origin against itself, the
+  number of species that jump more than a quarter of their own height in a
+  quarter frame goes **42 -> 11 -> 3**: naive blend, stepped, guarded blend.
+  The three that remain (Pidgeot, Dodrio, Grimer) have erratic rotation data
+  at source and are held rather than smoothed, which is exactly the guard
+  doing its job.
+
+- **Exeggutor, Tangela and Magmar are drawn as battle sprites instead of
+  models.** Those three come out of the ROM with standby loops that throw
+  bones hundreds of units off the body -- the game's own index arithmetic
+  evidently reads their channel streams differently from the way this does.
+  They used to stand still in their **bind pose** instead, on the reasoning
+  that a Pokemon looking like itself beats one coming apart.
+
+  It does, but only just: a bind pose is a rigging pose, not a portrait, and
+  three species holding a T-pose among a hundred and forty-eight that
+  breathe read as broken rather than as still. So they now decline the model
+  outright and the Game Boy's own battle pic stands on the tile instead --
+  the same per-Pokemon fallback a species with no pack at all already took,
+  in the same arena, under the same light.
+
+  Keyed on the packer's own measurement rather than on a list of dex
+  numbers, so a re-extraction that fixes those streams -- or breaks a fourth
+  species -- moves this with it.
+
 - **The eyes blinked several times a second.** A texture animation was
   running on a clock of its own and wrapping on its own stream's length.
   Rattata's standby loop is forty frames and its blink is five -- `6 8 7 8
@@ -162,6 +234,29 @@
   the shot driver's `DS_FAINT` case prints the frame the bar empties against
   the frame the animation starts, and they are the same frame.
 
+- **And the faint animation now gets to finish.** A fainted Pokemon left the
+  field when its PIC did, and the engine's pic slide is fourteen frames of a
+  60 Hz clock -- `SlideDownFaintedMonPic`, seven rows two frames apart, under
+  a quarter of a second. The Stadium faint animations are nothing like that
+  short: the briefest in the set is 49 frames of a 30 Hz clock, the median is
+  110 and the longest 230. Every model was therefore cut off inside the first
+  fifth of its own collapse -- the Pokemon began to fall and then vanished
+  mid-fall, which is worse than not animating at all.
+
+  A model that is collapsing now stays until it has finished collapsing, and
+  the two timings are simply not tied to each other any more: how long a flat
+  pic takes to slide off the bottom of a 160x144 frame has nothing to say
+  about how long it takes a Gyarados to fall over. Bounded at both ends --
+  it ends when the animation does, so nothing is left lying on the field for
+  the rest of the fight, and the side is reset outright the moment a
+  different battler stands in that slot, which is what stops the next
+  Pokemon out of the ball arriving face down (that one bites when a trainer
+  leads with two of the same species, where the dex number never changes and
+  nothing downstream would otherwise notice the swap).
+
+  `DS_FAINT` now prints the span as well as the moment: 127 frames against
+  the pic's 14.
+
 - Two ordering bugs in the extraction pipeline that made its output
   **non-reproducible**. The generated flame nodes were deduplicated through
   a Python `set` of tuples containing strings, so their order moved with
@@ -186,10 +281,16 @@
 ### Known
 
 - Three species -- Exeggutor, Tangela and Magmar -- have standby loops that
-  are corrupt in the source extraction, throwing bones hundreds of units
-  off the body. The packer measures each species' loop against its own bind
-  pose and marks those three to hold the bind pose instead, so they stand
-  still and look like themselves rather than coming apart.
+  are corrupt in the source extraction, and fall back to their battle
+  sprites on the STADIUM rungs (see above). 148 of the 151 have models.
+
+- Pidgeot, Dodrio and Grimer have a handful of erratic rotation frames in
+  their standby loops -- a few frames of junk at the top of the loop rather
+  than a corrupt stream. The blend guard holds those frames rather than
+  smoothing through them, so they step where the source steps. Not chased
+  further: the extraction is byte-identical to a reference pipeline whose
+  sampling was validated against the decompilation's own arithmetic, and
+  guessing at the format to fix three species risks the other 145.
 
 ## 1.5.5
 

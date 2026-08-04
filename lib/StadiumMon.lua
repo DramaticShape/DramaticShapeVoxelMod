@@ -145,11 +145,38 @@ end
 
 -- ------- which species this side is showing
 --
--- Returns true when the model is ready to draw. A species with no pack, or
--- one whose meshes would not build, answers false -- and Stadium then
--- leaves that side to the flat card, which is a per-POKEMON decline rather
--- than a per-battle one: a fight can perfectly well have a model on one
--- side and a pic on the other.
+-- Returns true when the model is ready to draw. A species with no pack, one
+-- whose meshes would not build, or one whose animation data is corrupt at
+-- source answers false -- and Stadium then leaves that side to the flat
+-- card, which is a per-POKEMON decline rather than a per-battle one: a fight
+-- can perfectly well have a model on one side and a pic on the other.
+--
+-- ------- the three the extraction cannot read
+--
+-- Exeggutor, Tangela and Magmar come out of the ROM with standby loops that
+-- throw bones hundreds of units off the body -- the game's own index
+-- arithmetic evidently reads those channel streams differently from the way
+-- this does. StadiumBuild.idleIsBroken measures it and the pack carries the
+-- verdict as `staticPose`.
+--
+-- That flag used to mean "stand this one still in its bind pose", on the
+-- reasoning that a Pokemon standing there looking like itself beats one
+-- coming apart. It does -- but only just. A bind pose is a RIGGING pose, not
+-- a portrait: arms out, neck straight, nothing where the artwork put it. Set
+-- among a hundred and forty-eight species that breathe, the three that hold
+-- a T-pose for the whole fight do not read as "these ones do not animate",
+-- they read as broken -- which they are.
+--
+-- So they decline instead, and the Game Boy's own battle sprite stands on
+-- the tile in front of the same arena, lit the same way, drawn by the same
+-- 2D-3D path every species uses when its model is unavailable. The mode
+-- already had that fallback for a species with no pack at all; this is three
+-- more species taking it.
+--
+-- Keyed on the DATA rather than on a list of dex numbers on purpose: the
+-- test that produced the flag is in the packer, so a re-extraction that
+-- fixes those streams -- or breaks a fourth species -- moves this with it
+-- and nothing here has to be edited.
 function StadiumMon:setSpecies(dex)
   if dex == self.species then return self.rig ~= nil end
   if self.rig then self.rig:release() end
@@ -157,6 +184,7 @@ function StadiumMon:setSpecies(dex)
   if not dex then return false end
   local model = StadiumPack.load(dex)
   if not model then return false end
+  if model.staticPose then return false end
   local rig = StadiumRig.new(model)
   if not rig then return false end
   self.model, self.rig = model, rig
@@ -196,12 +224,9 @@ function StadiumMon:play(state, animIndex, auxIndex)
   if not anim then return false end
 
   self.state, self.anim, self.time = state, index, 0
-  -- A species whose animations are corrupt at source stands in its BIND
-  -- pose and does not move. The state machine still runs -- the fight is
-  -- still asking for a hit or a faint, and something may want to know --
-  -- but nothing is ever sampled, so the Pokemon simply stands there
-  -- looking like itself, which is the one thing the broken data cannot do.
-  if model.staticPose then self.anim = nil end
+  self.done = false
+  -- (a species whose animations are corrupt at source never gets this far:
+  -- setSpecies declines it outright and its flat pic stands instead)
   self.loop = def.loop and true or false
   self.hold = def.hold and true or false
   -- The eyes that go with it. Every skeletal animation carries the texture
@@ -260,11 +285,25 @@ function StadiumMon:update(dt)
       -- a faint stays down: hold the last frame rather than snapping back
       -- to a standing pose the moment the animation runs out
       self.time = math.max(0, anim.seconds - 1 / StadiumMon.FPS)
+      -- and SAY so, once. The clamp above means the clock can no longer be
+      -- asked whether the animation is over -- it stops a frame short of the
+      -- end and stays there forever -- and something has to know, because a
+      -- collapse that has finished is the moment the Pokemon may leave the
+      -- field (see Stadium's onField).
+      self.done = true
     else
       local nextState = (STATES[self.state] or {}).next or "idle"
       self:play(nextState)
     end
   end
+end
+
+-- Whether a HELD animation -- which in practice means a faint -- has played
+-- all the way through and is now sitting on its last frame. Always false for
+-- a looping one, which never finishes, and for one that hands on to another
+-- state, which has already stopped being itself by the time anyone can ask.
+function StadiumMon:finished()
+  return self.done and true or false
 end
 
 -- How tall this species stands on the map, in world pixels.
@@ -336,8 +375,8 @@ end
 -- doing on the CPU.
 function StadiumMon:build()
   if not (self.rig and self.model) then return false end
-  -- self.anim is nil for a static species, and pose() reads that as "the
-  -- bind pose", which is exactly what is wanted
+  -- self.anim is nil while a species has nothing to play, and pose() reads
+  -- that as "the bind pose", which is exactly what is wanted
   self.rig:pose(self.anim, self.time * StadiumMon.FPS, self.loop)
   self.rig:skin(self.yaw or 0)
   -- no clock of its own: the texture animation rides the frame pose() just

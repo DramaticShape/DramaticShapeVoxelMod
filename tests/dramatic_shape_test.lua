@@ -419,7 +419,7 @@ T.eq(grid.value(), "OFF", "the grid starts off")
 T.eq(curve.label, "V-CURVE", "the curve row carries its label")
 T.eq(curve.value(), "OFF", "the curve starts off")
 T.eq(battles.label, "3D-BTL", "the overworld-battle row carries its label")
-T.eq(battles.value(), "2D-3D",
+T.eq(battles.value(), "2D-3D A",
   "overworld battles are on by default, on the rung that stands the game's "
   .. "own pics on the map -- the mode's headline is the world in 3D, and a "
   .. "battle is where the player spends half the game")
@@ -1136,18 +1136,25 @@ Game.keypressed(keyGame, "7")
 T.neq(Curve.setting:get(), curveBefore, "7 cycles V-CURVE")
 
 local Battles = run.loader.exports.DRAMATIC_SHAPE.lib.require("OverworldBattle")
-T.eq(Battles.setting:get(), true, "3D-BTL starts on 2D-3D")
+T.eq(Battles.setting:get(), true, "3D-BTL starts on 2D-3D A")
+T.eq(Battles.discs(), false, "which stages the fight on the map")
+Game.keypressed(keyGame, "8")
+T.eq(Battles.setting:get(), "flatB",
+  "8 steps to 2D-3D B -- the same pics, on the discs")
+T.eq(Battles.discs(), true,
+  "and that IS a disc rung, with no Stadium model anywhere in it")
 Game.keypressed(keyGame, "8")
 T.eq(Battles.setting:get(), "stadium",
-  "8 steps to STADIUM A -- one press off the default is the more elaborate "
-  .. "staged fight, not the absent one")
+  "again and it is STADIUM A, the models on the map")
+T.eq(Battles.discs(), false, "back on the map")
 Game.keypressed(keyGame, "8")
 T.eq(Battles.setting:get(), "stadiumB",
-  "again and it is STADIUM B, the discs")
+  "again and it is STADIUM B, the models on the discs")
+T.eq(Battles.discs(), true, "on the discs again")
 Game.keypressed(keyGame, "8")
 T.eq(Battles.setting:get(), false, "again and overworld battles are off")
 Game.keypressed(keyGame, "8")
-T.eq(Battles.setting:get(), true, "and the ladder wraps back to 2D-3D")
+T.eq(Battles.setting:get(), true, "and the ladder wraps back to 2D-3D A")
 
 -- ------- the eyes blink once a loop, not six times a second
 --
@@ -1201,6 +1208,101 @@ T.eq(Battles.setting:get(), true, "and the ladder wraps back to 2D-3D")
   Pack.image = realImage
 end)()
 
+-- ------- the skeleton runs at 60, the textures step at 30
+--
+-- The animation streams carry one value per frame at 30 Hz, so replayed
+-- honestly against a 60 Hz camera every pose holds for two frames and the
+-- models visibly stutter against everything around them. StadiumRig blends
+-- between consecutive frames instead -- but NOT across a snap, because these
+-- are Euler triples and two triples that describe nearly the same rotation
+-- can be nowhere near each other component by component. Walking from one to
+-- the other is a bone flipping over inside a frame, which is exactly the
+-- glitch a naive version of this shipped with.
+--
+-- Driven on a REAL species, through a rig with no meshes (there is no
+-- graphics context here, and pose() only touches the matrix arrays).
+;(function()
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local Pack, Rig = lib.require("StadiumPack"), lib.require("StadiumRig")
+  local model = Pack.load(25)                     -- Pikachu
+  local rig = setmetatable({ model = model, pivotM = {}, drawM = {},
+                             accX = {}, accY = {}, accZ = {}, parts = {} }, Rig)
+  local slot = model.ctx[Pack.SLOT.idle]
+  local anim = (slot ~= Pack.NONE) and (slot + 1) or nil
+  local frames = anim and model.anims[anim].frames or 0
+
+  -- every bone's world origin under the pose as it stands
+  local function origins()
+    local out = {}
+    for b = 1, model.boneCount do
+      local o = (b - 1) * 12
+      out[b] = { rig.drawM[o + 4], rig.drawM[o + 8], rig.drawM[o + 12] }
+    end
+    return out
+  end
+
+  T.check(frames > 8, "Pikachu's standby loop is long enough to sample")
+
+  rig:pose(anim, 3, true)
+  local a = origins()
+  rig:pose(anim, 4, true)
+  local c = origins()
+  rig:pose(anim, 3.5, true)
+  local b = origins()
+
+  T.eq(rig.frameAt, 3,
+    "half a frame in, the TEXTURE frame is still the whole one -- an eye is "
+    .. "open or it is shut and there is no halfway swap to draw")
+
+  -- the bone that travels furthest between those two frames is the one with
+  -- something to say about the blend
+  local best, moved = nil, 0
+  for i = 1, #a do
+    local d = ((c[i][1] - a[i][1]) ^ 2 + (c[i][2] - a[i][2]) ^ 2
+               + (c[i][3] - a[i][3]) ^ 2) ^ 0.5
+    if d > moved then best, moved = i, d end
+  end
+  T.check(moved > 0, "and some bone actually moves between frames 3 and 4")
+
+  -- halfway is HALFWAY: within a twentieth of the step of the midpoint of the
+  -- two frames it sits between, on every axis. A blend that overshoots, or
+  -- that walks the long way round a wrapped angle, fails this by miles.
+  local slack = moved / 20
+  for axis = 1, 3 do
+    local mid = (a[best][axis] + c[best][axis]) / 2
+    T.check(math.abs(b[best][axis] - mid) <= slack,
+      ("the half-frame pose sits between its two frames on axis %d"):format(axis))
+  end
+
+  -- and a whole frame is the frame itself, untouched: the blend has to be
+  -- exactly nothing at k = 0, or every stepped caller (the blink probe, the
+  -- oracle diff) is reading a pose the pack does not contain
+  rig:pose(anim, 4, true)
+  local again = origins()
+  T.eq(again[best][1], c[best][1],
+    "and a whole frame is that frame exactly, with nothing blended into it")
+end)()
+
+-- ------- the three species the extraction cannot read stand as PICS
+--
+-- Exeggutor, Tangela and Magmar come out of the ROM with standby loops that
+-- throw bones off the body; the packer measures that and flags them. They
+-- used to hold their bind pose for the whole fight, which among a hundred and
+-- forty-eight species that breathe reads as broken rather than as still. So
+-- they decline the model outright and the Game Boy's own battle pic stands
+-- instead -- the same fallback a species with no pack at all takes.
+;(function()
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local Mon = lib.require("StadiumMon")
+  for _, dex in ipairs({ 103, 114, 126 }) do
+    local mon = Mon.new("enemy")
+    T.eq(mon:setSpecies(dex), false,
+      ("dex %d has corrupt animation data, so no model stands for it")
+      :format(dex))
+    T.eq(mon.rig, nil, "and there is no rig left behind to draw")
+  end
+end)()
+
 -- ------- the collapse waits for the HP bar
 --
 -- onFaint fires the moment HP reaches zero, but the engine queues the visible
@@ -1230,32 +1332,81 @@ end)()
   T.eq(due({ mon = { hp = 0 } }), false, "and an unqueued battler owes nothing")
 end)()
 
+-- ------- and it gets to FINISH
+--
+-- The engine takes a fainted pic off the field when its slide ends, which is
+-- fourteen frames of a 60 Hz clock -- under a quarter of a second. The
+-- shortest faint animation in the Stadium set is 49 frames of a 30 Hz one,
+-- the median 110 and the longest 230, so held to the pic's window every model
+-- was cut off inside the first fifth of its own collapse. It now stays until
+-- the animation is done, and not one frame past that.
+;(function()
+  local Stad = run.loader.exports.DRAMATIC_SHAPE.lib.require("Stadium")
+  local onField = Stad._onField
+
+  -- the engine's own guards, mirrored in the shape onField reads them
+  local battle = { fxHidden = function() return false end,
+                   fxFaintActive = function(_, b) return b.sliding end }
+  local function mon(state, done)
+    return { state = state, finished = function() return done end }
+  end
+
+  battle.enemy = { sprite = true }
+  T.eq(onField(battle, "enemy", mon("idle", false)), true,
+    "a Pokemon that is standing there is on the field")
+
+  battle.enemy = { sprite = true, fainted = true, sliding = true }
+  T.eq(onField(battle, "enemy", mon("faint", false)), true,
+    "and one whose pic is still sliding is too, as it always was")
+
+  battle.enemy = { sprite = true, fainted = true, sliding = false }
+  T.eq(onField(battle, "enemy", mon("faint", false)), true,
+    "the pic has gone but the model has not finished falling -- it STAYS, "
+    .. "which is the whole of the fix: a quarter-second window was cutting "
+    .. "off animations that run for one to eight seconds")
+  T.eq(onField(battle, "enemy", mon("faint", true)), false,
+    "and the frame its collapse finishes, it goes -- nothing is left lying "
+    .. "on the field for the rest of the fight")
+  T.eq(onField(battle, "enemy", mon("idle", false)), false,
+    "a fainted battler whose model never got as far as the faint goes with "
+    .. "the pic, exactly as before")
+  T.eq(onField(battle, "enemy", nil), false,
+    "and a side with no model at all is not held open by this")
+end)()
+
 -- ------- and the two STADIUM rungs are SKIPPED when the models are not there
 --
 -- The mod ships no Pokemon Stadium data, so on a machine whose owner has not
--- supplied that ROM the row has two stops rather than four. Checked by gating
--- them off by hand rather than by hiding the packs, because what is being
--- tested is the ladder's behaviour and not the installer's.
+-- supplied that ROM the row has three stops rather than five. Checked by
+-- gating them off by hand rather than by hiding the packs, because what is
+-- being tested is the ladder's behaviour and not the installer's.
+--
+-- 2D-3D B survives that, which is the point of it being its own rung: the
+-- discs are generated in Lua and the Pokemon on them are the game's own art,
+-- so the disc framing is available to a player who has no Stadium ROM at all.
 ;(function()
   local gate = Battles.setting.gate
   Battles.setting:setGate(function(value)
     return value ~= "stadium" and value ~= "stadiumB"
   end)
-  T.eq(Battles.setting:rungs(), 2,
-    "with no models built the 3D-BTL row offers two rungs, not four")
+  T.eq(Battles.setting:rungs(), 3,
+    "with no models built the 3D-BTL row offers three rungs, not five")
   Battles.setting:setValue(true, Game)
   Game.keypressed(keyGame, "8")
-  T.eq(Battles.setting:get(), false,
-    "and 8 steps straight past both STADIUM rungs to OFF")
+  T.eq(Battles.setting:get(), "flatB",
+    "8 still reaches 2D-3D B, which needs no ROM")
   Game.keypressed(keyGame, "8")
-  T.eq(Battles.setting:get(), true, "and back to 2D-3D")
+  T.eq(Battles.setting:get(), false,
+    "and the next press steps straight past both STADIUM rungs to OFF")
+  Game.keypressed(keyGame, "8")
+  T.eq(Battles.setting:get(), true, "and back to 2D-3D A")
 
   -- a save that CHOSE stadium before the ROM went missing reads as the
   -- default, rather than as a mode with nothing behind it -- and the stored
   -- value is left alone, so putting the ROM back restores the choice
-  Battles.setting.index = 2
+  Battles.setting.index = 3
   T.eq(Battles.setting:get(), true,
-    "a stored STADIUM with no models behind it reads as 2D-3D")
+    "a stored STADIUM with no models behind it reads as 2D-3D A")
   Battles.setting:setGate(gate)
   T.eq(Battles.setting:get(), "stadium",
     "and comes back the moment the models do")

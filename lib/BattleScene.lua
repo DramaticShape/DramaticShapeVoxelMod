@@ -321,7 +321,7 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
   if not ShadowMap.stale(sig) then return end
   if not ShadowMap.begin(cx, cy, vw, vh) then return end
 
-  -- STADIUM B: the two discs are the only ground there is, so they are the
+  -- A DISC RUNG: the two discs are the only ground there is, so they are the
   -- only thing the sun has to see besides the Pokemon themselves. Everything
   -- below this is a map that is not in the shot.
   if arena.discs then
@@ -382,7 +382,7 @@ end
 -- the one nearer the camera and therefore the one a mismatch would show up
 -- against.
 function BattleScene.groundY(map, arena)
-  -- STADIUM B's discs are carried, not found: their tops ARE the ground
+  -- A disc rung's discs are carried, not found: their tops ARE the ground
   -- plane, so there is no terrain height to read and reading one would put
   -- the stage at whatever elevation the map happens to have at a spot the
   -- fight is not actually happening on
@@ -476,7 +476,7 @@ function BattleScene.render(state, arena, textures, token)
   -- moving, and a shimmer on background windows would fight the mons
   Voxel3D.glassGlint = 0
 
-  -- STADIUM B stands the fight on two carried discs against the sky, with no
+  -- A B RUNG stands the fight on two carried discs against the sky, with no
   -- map in the shot at all (see StadiumStage). Everything below still runs --
   -- the letterbox, the camera solve, the sun, the pins, the tint, the depth
   -- of field -- because none of it is about the terrain; what changes is
@@ -535,7 +535,7 @@ function BattleScene.render(state, arena, textures, token)
   -- geometry stops.
   local sky = VoxelScene.skyColor(host, 1)
              or VoxelScene.skyShade(INDOOR_SHADE, 1)
-  -- On STADIUM B the void is not a backdrop behind the scenery -- it IS the
+  -- On a disc rung the void is not a backdrop behind the scenery -- it IS the
   -- scenery, because the map is not drawn. So outdoors it gets the full
   -- treatment the free-roam camera gets: the banded gradient and the hour's
   -- own sun or moon hanging in it (Voxel3D.beginScene paints those when the
@@ -580,7 +580,7 @@ function BattleScene.render(state, arena, textures, token)
       return
     end
     if discs then
-      -- STADIUM B: the two platforms, and nothing else. No terrain, no
+      -- discs: the two platforms, and nothing else. No terrain, no
       -- neighbouring maps, no water, no grass and no flowers -- see the
       -- matching skips further down. What is behind them is the sky the
       -- clear painted.

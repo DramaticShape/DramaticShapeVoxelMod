@@ -1,10 +1,11 @@
 -- STADIUM battles: the two Pokemon as real 3D models.
 --
--- The 3D-BTL row's third rung. OFF is the engine's own white battle field;
--- 2D-3D stands the GB's own pics up on the map as quads (BattleBillboard);
--- STADIUM replaces those quads with the Pokemon Stadium battle models --
--- skinned, animated, and playing the animation the move being used
--- actually calls for.
+-- The 3D-BTL row's two STADIUM rungs. OFF is the engine's own white battle
+-- field; the 2D-3D rungs stand the GB's own pics up as quads
+-- (BattleBillboard); STADIUM replaces those quads with the Pokemon Stadium
+-- battle models -- skinned, animated, and playing the animation the move
+-- being used actually calls for. A or B decides whether that happens on the
+-- map or on two discs, and is the same choice on either pair of rungs.
 --
 -- The models come out of the Stadium ROM through model_extract, and are
 -- packed into assets/stadium/NNN.dsm by tools/stadium_pack.py. Nothing here
@@ -93,11 +94,15 @@ function Stadium.mode()
   return nil
 end
 
--- Whether the fight is staged on the DISCS rather than on the map. Asked by
--- BattleScene (what to draw the pair against), BattleArena (whether the map
--- has to have room) and BattleCam (which framing to solve).
+-- Whether the fight is staged on the DISCS rather than on the map.
+--
+-- Not this file's question any more: the flat 2D-3D B rung stands the game's
+-- own pics on the same two discs with no model anywhere in the frame, so the
+-- stage and the actors are chosen separately (see OverworldBattle's ladder).
+-- Kept as a forwarder because "are we on discs" is a fair thing to ask the
+-- module named after the mode, and because the shot drivers ask it here.
 function Stadium.discs()
-  return Stadium.mode() == "B"
+  return V.require("OverworldBattle").discs()
 end
 
 function Stadium.enabled()
@@ -120,6 +125,9 @@ function Stadium.begin(arena)
     -- sides that are going to collapse, but whose HP bar has not finished
     -- emptying yet (see faintReady)
     faintPending = {},
+    -- who was standing in each slot last frame, so a replacement is noticed
+    -- even when it is the same species (see update)
+    at = {},
   }
   return true
 end
@@ -162,7 +170,32 @@ end
 -- mirrors them for the flat cards: there is no seam that reports "the foe is
 -- off screen right now", and a model left standing through a send-out or a
 -- damage blink would be the one thing in the frame that ignored the battle.
-local function onField(battle, side)
+-- ------- and the collapse gets to finish
+--
+-- A fainted Pokemon leaves the field when its pic does, which is the end of
+-- the engine's slide -- SlideDownFaintedMonPic, seven rows two frames apart,
+-- FOURTEEN frames of a 60 Hz clock. Under a quarter of a second.
+--
+-- The Stadium faint animations are nothing like that short. The briefest in
+-- the set is 49 frames of a 30 Hz clock -- a second and two thirds -- the
+-- median is 110 and the longest 230, which is nearly eight seconds. Held to
+-- the pic's window every one of them was cut off inside its first fifth: the
+-- Pokemon began to fall and vanished mid-fall, which is worse than not
+-- animating at all, because the eye has been told something is happening and
+-- then had it taken away.
+--
+-- So a model that is COLLAPSING stays until it has finished collapsing, and
+-- the two timings stop being tied to each other. That is the whole of the
+-- divergence: the slide is how long a flat pic takes to slide off the bottom
+-- of a 160x144 frame, and it has nothing to say about how long it takes a
+-- Gyarados to fall over.
+--
+-- Bounded at both ends rather than open-ended. It ends when the animation
+-- does (StadiumMon.finished), not when the battle moves on -- so nothing is
+-- left lying on the field for the rest of the fight -- and the side is reset
+-- outright the moment a different battler stands in that slot (see update),
+-- which is what stops the next Pokemon out of the ball arriving face down.
+local function onField(battle, side, mon)
   local battler = side == "player" and battle.player or battle.enemy
   if not (battler and battler.sprite) then return false end
   if side == "enemy" then
@@ -172,14 +205,17 @@ local function onField(battle, side)
   end
   local ok, hidden = pcall(battle.fxHidden, battle, battler)
   if ok and hidden then return false end
-  -- a fainted Pokemon is gone once its slide has finished, exactly as its
-  -- pic is
   if battler.fainted then
     local okF, sliding = pcall(battle.fxFaintActive, battle, battler)
-    if not (okF and sliding) then return false end
+    if okF and sliding then return true end
+    -- the pic has finished sliding away; the model has not finished falling
+    return (mon and mon.state == "faint" and not mon:finished()) and true
+           or false
   end
   return true
 end
+
+Stadium._onField = onField
 
 -- Whether the 3D model is standing in for this side's pic this frame. The
 -- one question OverworldBattle asks, and the answer that decides whether a
@@ -227,8 +263,9 @@ local function faintStillDue(battler)
           and battler.mon and (battler.mon.hp or 0) <= 0) and true or false
 end
 
--- named for the suite: the timing rule is the whole of this change, and it
--- is testable without a graphics context where the mode itself is not
+-- named for the suite: these timing rules are the whole of what decides when
+-- a Pokemon falls and when it goes, and they are testable without a graphics
+-- context where the mode itself is not
 Stadium._faintReady = faintReady
 Stadium._faintStillDue = faintStillDue
 
@@ -249,6 +286,22 @@ function Stadium.update(dt, battle, groundY)
     if battler and not showingTrainer(battle, side) then
       dex = session.transform[side] or dexOf(battler.mon and battler.mon.species)
     end
+
+    -- A DIFFERENT POKEMON IS IN THIS SLOT. Normally that shows up as a
+    -- change of species and setSpecies rebuilds everything -- but a trainer
+    -- who leads with two Rattata sends the second one out onto the first
+    -- one's dex number, so nothing downstream would notice. What it would
+    -- inherit is the state, and the state after a faint is `faint`, which
+    -- refuses every request there is (see StadiumMon.request -- a faint is
+    -- meant to be final). The new Pokemon would arrive lying on the ground.
+    --
+    -- The battler TABLE is the identity here rather than the species or the
+    -- mon: it is the slot's occupant, and the engine replaces it on a switch,
+    -- a send-out and a new battle alike.
+    if session.at[side] ~= battler then
+      session.at[side] = battler
+      if mon and mon.rig and mon.state == "faint" then mon:play("idle") end
+    end
     -- the collapse this side is owed, once its bar has finished emptying
     if session.faintPending and session.faintPending[side] then
       if not faintStillDue(battler) then
@@ -260,7 +313,7 @@ function Stadium.update(dt, battle, groundY)
     end
 
     mon:setSpecies(dex)
-    mon.visible = (mon.rig ~= nil) and onField(battle, side)
+    mon.visible = (mon.rig ~= nil) and onField(battle, side, mon)
                   and not (battler and battler.substituteHP)
     -- cleared up front, so a side that has just lost its rig cannot leave
     -- last frame's matrix behind it
@@ -329,6 +382,15 @@ function Stadium.animOf(side)
   if not session then return nil end
   local mon = session[side]
   return mon and mon.state or nil
+end
+
+-- Whether this side's model is actually being drawn this frame. Named for
+-- the shot drivers alongside animOf: "how long does it stay" is a span, and
+-- a screenshot taken at one moment has no span in it.
+function Stadium.showing(side)
+  if not session then return false end
+  local mon = session[side]
+  return (mon and mon.visible) and true or false
 end
 
 -- How wide the Pokemon on `side` stands, in world pixels, or nil when there

@@ -44,7 +44,10 @@ return function(game)
     { "ONIX", "DIGLETT" },        -- the tallest against nearly the shortest
     { "ZUBAT", "TENTACRUEL" },    -- hovers above its origin / hangs below it
     { "GASTLY", "CATERPIE" },     -- a floater and the smallest in the set
-    { "EXEGGUTOR", "MAGMAR" },    -- both idle animations are wrong at source
+    -- the two species whose animation data is corrupt at source: BOTH of
+    -- these must come out as flat battle pics standing on their tiles, not
+    -- as models (see StadiumMon.setSpecies). Tangela is the third.
+    { "EXEGGUTOR", "MAGMAR" },
     { "GYARADOS", "SNORLAX" },    -- the two biggest bodies in the set
   }
 
@@ -93,7 +96,8 @@ return function(game)
   -- the rung under test, and the back pic OFF: BACK SPRITES would keep the
   -- player's own side on the menu, which is exactly the half of the shot
   -- this driver exists to look at
-  local RUNGS = { cards = true, a = "stadium", b = "stadiumB" }
+  local RUNGS = { cards = true, cardsb = "flatB", a = "stadium",
+                  b = "stadiumB" }
   local rung = RUNGS[os.getenv("DS_RUNG") or "a"] or "stadium"
   Battles.setting:setValue(rung, game)
   Battles.backSetting:setValue(false, game)
@@ -205,8 +209,8 @@ return function(game)
     U.wait(12)
     U.tap(game, "a")
 
-    local barZeroAt, animAt, shot = nil, nil, false
-    for f = 1, 400 do
+    local barZeroAt, animAt, shot, stood = nil, nil, false, 0
+    for f = 1, 700 do
       -- keep advancing the text, as a player would. Without this the queue
       -- blocks on the damage message and the HP bar never drains at all --
       -- which is a perfectly good demonstration that the collapse now waits,
@@ -230,8 +234,18 @@ return function(game)
         U.shot(game, ("%s/faint_1_draining.png"):format(DIR))
         shot = true
       end
-      if animAt and f > animAt + 20 then
-        U.shot(game, ("%s/faint_2_collapsed.png"):format(DIR))
+      -- and how long the model then STAYS. The engine takes the flat pic off
+      -- after a fourteen-frame slide; the animation runs for one to eight
+      -- seconds, and being cut off mid-fall is worse than not falling at all.
+      if animAt and Stadium2.showing("enemy") then stood = f - animAt end
+      if animAt and f == animAt + 20 then
+        U.shot(game, ("%s/faint_2_collapsing.png"):format(DIR))
+      end
+      if animAt and f == animAt + 90 then
+        U.shot(game, ("%s/faint_3_still_falling.png"):format(DIR))
+      end
+      if animAt and f > animAt + 20 and not Stadium2.showing("enemy") then
+        U.shot(game, ("%s/faint_4_gone.png"):format(DIR))
         break
       end
     end
@@ -242,6 +256,9 @@ return function(game)
             and "  OK -- the collapse waits for the bar"
             or "  WRONG -- the collapse ran while the bar was still draining")
     end
+    U.log(("  the model stayed on the field for %d frames (%.2fs) after the "
+           .. "collapse began; the engine's own pic slide is 14 (%.2fs)")
+          :format(stood, stood / 60, 14 / 60))
     while game.stack:top() and game.stack:top() ~= game.overworld do
       game.stack:pop()
     end

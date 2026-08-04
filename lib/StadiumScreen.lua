@@ -15,9 +15,20 @@
 --
 -- ------- what it says
 --
--- Which Pokemon it is on, by name. That is not decoration: it is the
--- difference between a progress bar the player trusts and one they suspect
--- has hung, and it costs one lookup a frame.
+-- Three things, and each of them is answering a question the player would
+-- otherwise have to guess at while the game sits there:
+--
+--   WHAT is happening -- "ONE-TIME EXTRACTION OF STADIUM ASSETS", in those
+--   words, because the two facts that matter to somebody who has just
+--   installed a mod and been handed a loading screen are that this is the
+--   mod's own asset build and that it is not going to happen again.
+--
+--   HOW FAR through it is -- a bar, filled by species written rather than by
+--   elapsed time, so it cannot lie about the remaining work.
+--
+--   THAT IT IS ALIVE -- which Pokemon it is on, by name. Not decoration: it
+--   is the difference between a progress bar the player trusts and one they
+--   suspect has hung, and it costs one lookup a frame.
 
 -- the mod namespace (see main.lua): V.require loads a sibling module
 local V = ...
@@ -138,14 +149,18 @@ function StadiumScreen:draw()
   love.graphics.setColor(0.93, 0.94, 0.90, 1)
   love.graphics.rectangle("fill", 0, 0, W, H)
 
-  centred("POKEMON STADIUM", 24)
-  centred("BATTLE MODELS", 34)
+  centred("POKEMON STADIUM", 16)
+  -- the headline, in two lines because the frame is 160 pixels wide and the
+  -- font is a fixed eight: the longer of these is nineteen glyphs
+  centred("ONE-TIME EXTRACTION", 36)
+  centred("OF STADIUM ASSETS", 46)
 
   if status.state == "failed" then
-    centred("COULD NOT BUILD", 62)
+    centred("COULD NOT BUILD", 70)
     local why = tostring(status.error or "unknown"):sub(1, 24)
-    centred(why, 76)
-    centred("STADIUM IS OFF", 96)
+    centred(why, 84)
+    centred("STADIUM IS OFF", 104)
+    love.graphics.setColor(1, 1, 1, 1)
     return
   end
 
@@ -153,23 +168,34 @@ function StadiumScreen:draw()
   local total = status.total or StadiumInstall.COUNT
   local frac = (total > 0) and (done / total) or 1
   if status.state == "done" then frac = 1 end
+  if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
 
-  -- the bar: a dark frame with a dark fill, so it reads on the light plate
-  local bx, by, bw, bh = 24, 66, W - 48, 9
+  -- The bar: a dark frame, an EMPTY interior the same colour as the plate,
+  -- and a dark fill growing left to right.
+  --
+  -- The track has to be the plate's own white rather than a light grey. This
+  -- draws inside the Game Boy frame, so the colorization pass quantises
+  -- everything here into the four GB shades and paints them -- and a grey
+  -- track lands one shade down, which comes out as a bar that is GREEN where
+  -- the work is still to do and dark where it is done. The eye reads colour
+  -- as the filled part and gets the progress exactly backwards.
+  local bx, by, bw, bh = 24, 68, W - 48, 9
   love.graphics.setColor(0.06, 0.05, 0.09, 1)
   love.graphics.rectangle("fill", bx - 1, by - 1, bw + 2, bh + 2)
-  love.graphics.setColor(0.80, 0.80, 0.78, 1)
+  love.graphics.setColor(0.93, 0.94, 0.90, 1)
   love.graphics.rectangle("fill", bx, by, bw, bh)
   love.graphics.setColor(0.06, 0.05, 0.09, 1)
   love.graphics.rectangle("fill", bx, by, math.floor(bw * frac + 0.5), bh)
 
   if status.state == "done" then
-    centred("READY", 84)
+    centred("READY", 86)
   else
     local name = speciesName(status.species)
-    centred(("%d/%d"):format(done, total), 84)
-    if name then centred(name, 96) end
-    centred("BUILDING FROM ROM", 112)
+    centred(("%d/%d"):format(done, total), 86)
+    if name then centred(name, 98) end
+    -- last, and lowest: the reassurance is worth saying and is the least
+    -- urgent thing on the plate
+    centred("THIS RUNS ONCE", 122)
   end
   love.graphics.setColor(1, 1, 1, 1)
 end

@@ -152,30 +152,69 @@ end
 -- animation's looping.
 
 -- One component at one frame.
---
--- ------- why there is no interpolation here
---
--- There used to be, and it was the cause of a real glitch: bones snapping to
--- an upside-down pose for a frame, arms turning inside out for a few.
---
--- These streams are not keyframes. They carry ONE VALUE PER FRAME at 30 Hz
--- -- the sampler they come out of indexes them by frame number and clamps
--- (`min(frame, count - 1)`), with no times and nothing to interpolate
--- between. The game plays them a frame at a time, and at 60 Hz each pose
--- simply holds for two.
---
--- Blending between consecutive entries therefore invented motion that was
--- never authored, and for ROTATION it invented the wrong motion. These are
--- Euler triples, and a Euler triple is not a direction you can walk along:
--- interpolating (0, 20976, 32736) toward (0, -19936, -5904) component by
--- component passes through orientations that are nothing like either end --
--- which is precisely a bone flipping over and back inside one frame.
--- Slerping proper quaternions would fix the direction, but there is still
--- nothing to slerp TOWARD: the next entry is the next frame, not a keyframe
--- some distance away, and holding it is what the source does.
 local function sampleAt(c, i)
   if type(c) == "number" then return c end
   return c[i]
+end
+
+-- ------- interpolation, and the one place it must not happen
+--
+-- These streams are not keyframes: they carry ONE VALUE PER FRAME at 30 Hz,
+-- and the game steps them a frame at a time. So at 60 Hz the honest replay
+-- is each pose held for two frames -- which is exactly what it looks like,
+-- a set of models moving at half the frame rate of everything around them.
+-- Blending between consecutive entries is therefore not reconstructing
+-- something the source had; it is INVENTING the halfway pose. It is worth
+-- inventing, because a 30 Hz step against a 60 Hz camera reads as a stutter
+-- and the halfway pose is right far more often than it is wrong.
+--
+-- Where it IS wrong is the reason a naive version of this shipped once and
+-- had to be taken out: bones snapping to an upside-down pose for a frame,
+-- arms turning inside out for a few. Rotations here are EULER TRIPLES, and
+-- a Euler triple is not a direction you can walk along. Two triples can
+-- describe nearly the same orientation and be nowhere near each other
+-- component by component -- (0, 20976, 32736) and (0, -19936, -5904) are a
+-- real pair out of the set -- so walking from one to the other passes
+-- through orientations that are nothing like either end. That is precisely
+-- a bone flipping over and back inside one frame.
+--
+-- Shortest-arc wrapping (below) fixes the easy half of that, where a
+-- component crosses the +-pi seam. It cannot fix the hard half, where the
+-- source simply RE-EXPRESSES a rotation. So the hard half is not fixed, it
+-- is DETECTED: a bone whose rotation moves more than BREAK_ANGLE in a
+-- single frame is not being animated, it is being re-expressed or snapped,
+-- and that bone holds its frame instead of blending. Per bone and all three
+-- components together, because the three are one rotation and blending two
+-- of them while holding the third is its own wrong answer.
+--
+-- The same guard, in the same spirit, for TRANSLATION: BREAK_MOVE of the
+-- model's own height inside one frame is a teleport rather than a stride.
+-- Scale needs none -- a linear blend of two scales lies between them, and
+-- there is no way for that to be a pose neither end had.
+
+-- 32768 binary-angle units is pi, so this is a quarter turn in one 30 Hz
+-- frame -- 2700 degrees a second. Nothing in the set genuinely moves that
+-- fast; everything that reads as moving that fast is a re-expression.
+local BREAK_ANGLE = 16384
+
+-- and half the Pokemon's own height in one frame, which is fifteen body
+-- heights a second
+local BREAK_MOVE = 0.5
+
+-- The signed distance from `c[i0]` to `c[i1]` the SHORT way round, for a
+-- binary angle. Interpolating 32700 toward -32700 the long way spins the
+-- bone most of a full turn inside one frame; the short way is 136 units,
+-- which is what actually happened.
+local function angleDelta(c, i0, i1)
+  if type(c) == "number" then return 0 end
+  local d = c[i1] - c[i0]
+  if d > 32768 then d = d - 65536 elseif d < -32768 then d = d + 65536 end
+  return d
+end
+
+local function linearDelta(c, i0, i1)
+  if type(c) == "number" then return 0 end
+  return c[i1] - c[i0]
 end
 
 -- ------- the pose
@@ -190,34 +229,48 @@ function StadiumRig:pose(anim, frame, wrap)
   local tracks = anim and StadiumPack.tracks(model, anim) or nil
   local frames = anim and model.anims[anim] and model.anims[anim].frames or 1
 
-  -- which frame of the animation this instant shows. One frame, not two:
-  -- the streams are per-frame and are stepped, not blended (see sampleAt).
-  local i0 = 1
+  -- The two frames this instant falls between, and how far. `k` is 0 on
+  -- every whole frame, so a caller that steps in whole frames -- the test
+  -- suite, the blink probe -- sees exactly the frame it asked for.
+  local i0, i1, k = 1, 1, 0
   if tracks and frames > 1 then
     local f = frame
     if f < 0 then f = 0 end
     local base = floor(f)
+    k = f - base
+    local loop = model.anims[anim].loopStart or 0
+    if not (loop > 0 and loop < frames) then loop = 0 end
     if base >= frames then
       if wrap then
         -- the far end joins back to loopStart, which is where the game's own
         -- player sends the counter (func_80016FBC)
-        local loop = model.anims[anim].loopStart or 0
-        if loop > 0 and loop < frames then
-          base = loop + (base - loop) % (frames - loop)
-        else
-          base = base % frames
-        end
+        base = loop + (base - loop) % (frames - loop)
       else
         base = frames - 1                   -- a faint holds where it fell
+        k = 0
       end
     end
     i0 = base + 1
     if i0 > frames then i0 = frames end
     if i0 < 1 then i0 = 1 end
+    -- and the frame after it, which past the end of a loop is loopStart --
+    -- the same seam the counter itself crosses. An animation that HOLDS
+    -- (a faint) has nothing after its last frame, so it blends with itself.
+    if i0 < frames then
+      i1 = i0 + 1
+    elseif wrap then
+      i1 = loop + 1
+    else
+      i1, k = i0, 0
+    end
   end
 
   -- The frame this animation is actually SHOWING, after the wrap or the
-  -- hold, 0-based. Stashed rather than recomputed because the texture
+  -- hold, 0-based -- the WHOLE frame, never the blend. A texture swap has no
+  -- halfway: an eye is open or it is shut, and a pupil interpolated toward a
+  -- swirl is not a thing the hardware could draw. So the skeleton runs at 60
+  -- and the textures step at 30, which is what the game does with both.
+  -- Stashed rather than recomputed because the texture
   -- animation is sampled at the very same frame (see textures) -- in the
   -- game one counter drives both, and 73% of the paired animations in the
   -- set are the same length as each other, which is what that looks like
@@ -229,6 +282,17 @@ function StadiumRig:pose(anim, frame, wrap)
   local restT, restR, restS = model.restT, model.restR, model.restS
   local pivot, drw = self.pivotM, self.drawM
   local accX, accY, accZ = self.accX, self.accY, self.accZ
+
+  -- how far a bone may travel in one frame before it is read as a teleport
+  -- rather than a stride. In the vertices' own RAW units, which is what the
+  -- tracks are in: model.height is measured after the model_root scale.
+  local moveBreak = nil
+  if k > 0 then
+    local root = model.rootScale
+    if not (root and root > 0) then root = 1 end
+    local h = (model.height or 0) / root
+    if h > 0 then moveBreak = h * BREAK_MOVE end
+  end
 
   for b = 1, n do
     local o3 = (b - 1) * 3
@@ -244,6 +308,38 @@ function StadiumRig:pose(anim, frame, wrap)
       kx = sampleAt(comps[7], i0)
       ky = sampleAt(comps[8], i0)
       kz = sampleAt(comps[9], i0)
+      if k > 0 then
+        -- ROTATION, all three at once: a bone that snaps holds its frame,
+        -- and a bone that moves holds none of it (see BREAK_ANGLE)
+        local dx = angleDelta(comps[4], i0, i1)
+        local dy = angleDelta(comps[5], i0, i1)
+        local dz = angleDelta(comps[6], i0, i1)
+        if dx < 0 then dx = -dx end
+        if dy < 0 then dy = -dy end
+        if dz < 0 then dz = -dz end
+        if dx <= BREAK_ANGLE and dy <= BREAK_ANGLE and dz <= BREAK_ANGLE then
+          rx = rx + angleDelta(comps[4], i0, i1) * k
+          ry = ry + angleDelta(comps[5], i0, i1) * k
+          rz = rz + angleDelta(comps[6], i0, i1) * k
+        end
+        -- TRANSLATION, likewise together: the three are one offset
+        local mx = linearDelta(comps[1], i0, i1)
+        local my = linearDelta(comps[2], i0, i1)
+        local mz = linearDelta(comps[3], i0, i1)
+        local far = false
+        if moveBreak then
+          far = (mx > moveBreak or mx < -moveBreak)
+                or (my > moveBreak or my < -moveBreak)
+                or (mz > moveBreak or mz < -moveBreak)
+        end
+        if not far then
+          tx, ty, tz = tx + mx * k, ty + my * k, tz + mz * k
+        end
+        -- SCALE, which cannot land anywhere the two ends did not bracket
+        kx = kx + linearDelta(comps[7], i0, i1) * k
+        ky = ky + linearDelta(comps[8], i0, i1) * k
+        kz = kz + linearDelta(comps[9], i0, i1) * k
+      end
     else
       -- a bone this animation never touches keeps its rest transform
       tx, ty, tz = restT[o3 + 1], restT[o3 + 2], restT[o3 + 3]

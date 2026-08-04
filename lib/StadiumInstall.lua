@@ -17,11 +17,16 @@
 -- because PhysFS searches the save directory AND the game folder under the
 -- same names:
 --
---   * a folder install, or a checkout -- `baseroms/` next to main.lua, which
---     is also where the decompilation's own `make init` puts it
+--   * a folder install, or a checkout -- `baseroms/` next to main.lua
 --   * a packaged or fused build, where the game folder is inside an archive
 --     and cannot be written to -- `baseroms/` in the save directory, whose
 --     absolute path this reports on screen so it can be found
+--
+-- The file goes STRAIGHT IN THERE, with no revision subfolder under it. The
+-- decompilation's own `make init` uses `baseroms/us/`, and the offline
+-- pipeline under model_extract/ still reads from there because it shares that
+-- tree -- but the instruction given to a player is "drop the file in this
+-- folder", and one folder is the whole of it.
 --
 -- Any of `.z64`, `.n64` and `.v64` is accepted; StadiumRom normalises the
 -- byte order on load.
@@ -52,11 +57,17 @@ StadiumInstall.FORMAT = "DSM3"
 
 StadiumInstall.COUNT = 151
 
--- Named ROM files, in the order the decompilation's own pipeline looks for
--- them, then any ROM at all sitting in the folder.
+-- Named ROM files, then any ROM at all sitting in the folder.
+--
+-- Flat in `baseroms/`, with no revision subfolder: the offline pipeline under
+-- model_extract/ keeps the decompilation's own `baseroms/us/` convention
+-- because it shares that tree, but what is being asked of a PLAYER here is
+-- "drop the file in this folder", and one folder is the whole of that
+-- instruction. A path they have to build out of two parts is a path half of
+-- them will get wrong, and the failure is silent -- the rungs are simply not
+-- on the row.
 local NAMED = {
   StadiumInstall.ROM_DIR .. "/baserom.z64",
-  StadiumInstall.ROM_DIR .. "/us/baserom.z64",
   StadiumInstall.ROM_DIR .. "/baserom.n64",
   StadiumInstall.ROM_DIR .. "/baserom.v64",
 }

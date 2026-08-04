@@ -60,47 +60,80 @@ if DEBUG == nil or DEBUG == false then DEBUG = nil end
 OverworldBattle.KEY = "battles"
 OverworldBattle.LABEL = "3D-BTL"
 
--- Four rungs, and the ladder's order is the order they were added in rather
--- than OFF-to-most:
+-- Five rungs. Two independent choices, laid out as one ladder because they
+-- are one question to the player -- WHAT is standing there, and WHERE:
 --
---   2D-3D      the mode this file was written for: the fight is staged on
+--              on the MAP              on two DISCS
+--   pics       2D-3D A                 2D-3D B
+--   models     STADIUM A               STADIUM B
+--
+--   2D-3D A    the mode this file was written for: the fight is staged on
 --              the map and the two Pokemon are the GB's OWN PICS, stood up
 --              on their tiles as quads (BattleBillboard).
---   STADIUM A  the same staged fight with the Pokemon Stadium battle models
---              in place of those quads -- skinned, animated, and playing the
+--   2D-3D B    those same pics on a pair of DISCS against the sky, with no
+--              map at all (see lib/StadiumStage.lua). The Game Boy's own
+--              framing with the Game Boy's own art, in three dimensions --
+--              and, like every B rung, it works everywhere, including the
+--              caves and shop floors that have nowhere to stage a fight.
+--   STADIUM A  the staged fight with the Pokemon Stadium battle models in
+--              place of those quads -- skinned, animated, and playing the
 --              animation the move being used actually calls for (see
 --              lib/Stadium.lua). The world is still the world: the fight
 --              happens on real ground, in the map's own weather and light.
---   STADIUM B  the same models on a pair of DISCS against the sky, with no
---              map at all -- the Game Boy's own framing, staged rather than
---              found (see lib/StadiumStage.lua). Works everywhere, including
---              the maps that have nowhere to put a fight.
+--   STADIUM B  the models on the discs: both halves swapped at once.
 --   OFF        the engine's own white battle screen.
 --
--- 2D-3D stays FIRST because ModSetting's values[1] is both the default and
+-- A and B is the STAGE and it is the same stage either way -- the discs do
+-- not know what is standing on them and BattleScene draws them off
+-- `arena.discs` alone, which is why the second column cost a value in this
+-- table and nothing else. The four combinations are all reachable rather
+-- than only the diagonal, because a player who cannot use the STADIUM rungs
+-- -- no ROM, or a ROM they would rather not go and find -- should still be
+-- able to have the disc framing, and because the discs are the answer to
+-- "this map has nowhere to fight" whichever art is standing on them.
+--
+-- 2D-3D A stays FIRST because ModSetting's values[1] is both the default and
 -- what an unrecognised stored value falls back to, and the stored value for
 -- this row has been `true` since the row existed. Keeping `true` at the head
--- means every save written before the STADIUM rungs existed reads back as
--- the 2D-3D it was written for, and a mod whose headline is "the world in
--- 3D" still does not need the player to go and find the switch.
+-- means every save written before the later rungs existed reads back as the
+-- 2D-3D it was written for, and a mod whose headline is "the world in 3D"
+-- still does not need the player to go and find the switch.
 --
--- The stored value for STADIUM A is still the bare string "stadium" it was
--- before there was a B, so a save written against the three-rung ladder
--- keeps the mode it chose.
+-- Every other stored value is likewise the one it has always been --
+-- "stadium" from before there was a B, "stadiumB" from before there was a
+-- flat one -- so no save loses the mode it chose.
 --
 -- Both STADIUM rungs are GATED on the models existing: the mod ships no
 -- Pokemon Stadium data, and until the player's own ROM has been found and
 -- built from (StadiumInstall) the row simply has two fewer stops. See
 -- ModSetting.setGate for why they are skipped rather than shown and refused.
+-- 2D-3D B is NOT gated: its stage is generated in Lua and its Pokemon are
+-- the game's own art, so it needs nothing the base game did not ship.
+OverworldBattle.FLAT_B = "flatB"
+
 OverworldBattle.setting =
   ModSetting.new(OverworldBattle.KEY, OverworldBattle.LABEL,
-                 { true, "stadium", "stadiumB", false },
-                 { "2D-3D", "STADIUM A", "STADIUM B", "OFF" })
+                 { true, "flatB", "stadium", "stadiumB", false },
+                 { "2D-3D A", "2D-3D B", "STADIUM A", "STADIUM B", "OFF" })
   :setGate(function(value)
     if value ~= "stadium" and value ~= "stadiumB" then return true end
     local ok, install = pcall(V.require, "StadiumInstall")
     return ok and install and install.available()
   end)
+
+-- Whether the fight stands on the two carried DISCS rather than on the map
+-- -- the B column above, whichever row of it. Asked by stageFor (what to
+-- stage on), wantsFront (whether this map needs an arena at all) and, once
+-- the arena carries the answer as `arena.discs`, by BattleScene and
+-- VoxelScene for what to draw.
+--
+-- Read straight off the row rather than through Stadium, because it is a
+-- question about the STAGE and half the rungs that answer yes have no
+-- Stadium models on them at all.
+function OverworldBattle.discs()
+  local value = OverworldBattle.setting:get()
+  return (value == OverworldBattle.FLAT_B or value == "stadiumB")
+end
 
 -- Whether the VR row is ON -- read lazily, because VR requires modules
 -- that sit above this one. While it is, this mode stops being optional:
@@ -216,10 +249,9 @@ function OverworldBattle.wantsFront()
   local g = require("src.core.Game")
   local ow = g and g.overworld
   if not (ow and ow.map and ow.player) then return false end
-  -- STADIUM B carries its own stage, so the answer is yes on every map and
+  -- a B rung carries its own stage, so the answer is yes on every map and
   -- there is nothing to search or to cache
-  local okS, stadium = pcall(V.require, "Stadium")
-  if okS and stadium and stadium.discs() then return true end
+  if OverworldBattle.discs() then return true end
   if staged.mapId ~= ow.map.id then
     local ok, arena = pcall(BattleArena.find, ow.map,
                             ow.player.cellX, ow.player.cellY,
@@ -468,17 +500,16 @@ function OverworldBattle.forceOG(g)
 end
 
 -- Where THIS fight stands, on whichever rung is running: the map's own
--- ground, or the pair of discs STADIUM B carries with it.
+-- ground, or the pair of discs a B rung carries with it.
 --
--- The one place the two rungs actually diverge, and it is worth stating
--- plainly. On every other rung the answer can be NO -- a corridor, a shop
--- floor, a map whose authored entry is a refusal -- and the battle then plays
--- exactly as the vanilla game does. STADIUM B cannot fail: its stage is not
--- something the map has to have room for, so a fight in the tightest cave in
--- Kanto is staged as readily as one on Route 1.
+-- The one place the two columns actually diverge, and it is worth stating
+-- plainly. On an A rung the answer can be NO -- a corridor, a shop floor, a
+-- map whose authored entry is a refusal -- and the battle then plays exactly
+-- as the vanilla game does. A B rung cannot fail: its stage is not something
+-- the map has to have room for, so a fight in the tightest cave in Kanto is
+-- staged as readily as one on Route 1.
 function OverworldBattle.stageFor(state)
-  local ok, stadium = pcall(V.require, "Stadium")
-  if ok and stadium and stadium.discs() and Voxel3D.available() then
+  if OverworldBattle.discs() and Voxel3D.available() then
     local okStage, arena = pcall(function()
       return V.require("StadiumStage").arena(state.map)
     end)

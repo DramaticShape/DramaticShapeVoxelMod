@@ -1,8 +1,16 @@
--- STADIUM B: the two discs the fight is staged on.
+-- The B rungs: the two discs the fight is staged on.
 --
--- The 3D-BTL row's fourth rung. Where STADIUM A puts the Pokemon Stadium
--- models on the MAP -- real ground, whatever the route happens to look like
--- -- this puts them on two platforms against the sky and draws no map at all.
+-- Where an A rung puts the fight on the MAP -- real ground, whatever the
+-- route happens to look like -- a B rung puts it on two platforms against
+-- the sky and draws no map at all.
+--
+-- ------- one stage, two rungs
+--
+-- The discs do not know what is standing on them. 2D-3D B stands the Game
+-- Boy's own battle pics there and STADIUM B stands the Pokemon Stadium
+-- models, and this file is identical for both: it draws two platforms at two
+-- cells and sizes each to whatever footprint it is given. That is why the
+-- flat disc rung cost a value in the 3D-BTL ladder and nothing else.
 --
 -- ------- why this is a rung and not a fix
 --
@@ -73,10 +81,12 @@ StadiumStage.RADIUS = 18
 StadiumStage.MAX_RADIUS = 34
 StadiumStage.PAD = 1.8
 
--- The platform for a mon of this footprint. `r` may be nil (nothing standing
--- there yet, which is every frame of the send-out before the model appears),
--- and then the platform is the plain one -- it has to be there BEFORE the
--- Pokemon lands on it.
+-- The platform for a mon of this footprint. `r` may be nil -- nothing is
+-- standing there yet, which is every frame of the send-out before the model
+-- appears, and it is also the whole of the flat 2D-3D B rung, where a
+-- Pokemon is a battle pic sized to cover exactly one map cell and RADIUS is
+-- already a little over that. Either way the platform is the plain one, and
+-- it has to be there BEFORE the Pokemon lands on it.
 function StadiumStage.radiusFor(r)
   local want = (r or 0) * StadiumStage.PAD
   if want < StadiumStage.RADIUS then return StadiumStage.RADIUS end
@@ -275,7 +285,7 @@ end
 
 -- ------- the synthetic arena
 --
--- STADIUM B does not search the map, because it does not stand on it. The
+-- A B rung does not search the map, because it does not stand on it. The
 -- arena is the same WIDE shape every other staged fight uses -- so the two
 -- cells are three apart down the middle and BattleCam frames them exactly as
 -- it always has -- just placed at a fixed spot rather than a found one.

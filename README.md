@@ -18,7 +18,7 @@ menu.
 | `5`, or the **V-GRID** options row | OFF / ON — a one-pixel wireframe on every voxel |
 | `6`, or the **T-SHIFT** options row | OFF → 1 → 2 → 3 → OFF (miniature blur) |
 | `7`, or the **V-CURVE** options row | OFF → 1 → 2 → 3 — bend the world over the horizon |
-| `8`, or the **3D-BTL** options row | ON / OFF — fight on the map instead of on a white field |
+| `8`, or the **3D-BTL** options row | 2D-3D A / 2D-3D B / STADIUM A / STADIUM B / OFF — fight in 3D instead of on a white field. **A** stages it on the map, **B** on two discs against the sky; **2D-3D** uses the game's own battle pics and **STADIUM** the Pokémon Stadium battle models |
 | `9`, or the **WATER** options row | FULL / SKY / OFF — waves and reflections on water. **SKY** gives the surface its pixel-tall wave columns and puts the sky, the sun, the moon and the cast in them; **FULL** adds a screen-space ray march that also reflects the shoreline, the trees and the buildings standing behind it |
 | the **BACK SPRITES** options row | OFF / ON — keep your own Pokémon on the battle menu, seen from behind in its classic slot, instead of standing it on the map; the foe is still out there. Only on the menu while **3D-BTL** is on, because it decides nothing without it |
 | the **AA** options row | OFF / 2X / 4X — smooth the stair-stepped edges of the 3D world by rendering the diorama larger than the window and folding it back down. The ladder is samples per display pixel: 2X is a canvas root-two wider and taller, 4X one exactly twice the size. Every edge in the projected picture softens with the silhouettes — the tileset's own texels are quads in a perspective view and cross the pixel grid at the same arbitrary angles — so the diorama reads smoother rather than sharper. The most expensive row in the mod, so it is OFF by default and **FULL** leaves it alone |
@@ -82,21 +82,33 @@ the one the rig was solved for.
 
 ## STADIUM battles
 
-The **3D-BTL** row has four rungs:
+The **3D-BTL** row has five rungs, which are two choices — what is standing
+there, and where:
 
 | rung | the fight |
 | --- | --- |
-| **2D-3D** | staged on the map, with the Game Boy's own pics stood up on their tiles |
+| **2D-3D A** | staged on the map, with the Game Boy's own pics stood up on their tiles |
+| **2D-3D B** | those same pics on two discs against the sky, with no map drawn |
 | **STADIUM A** | staged on the map, with the Pokémon Stadium battle models |
-| **STADIUM B** | the same models on two discs against the sky, with no map drawn |
+| **STADIUM B** | those models on the discs |
 | **OFF** | the engine's own battle screen |
 
-All 151 species, skinned and animated, playing the animation the move being
-used actually calls for — the Stadium ROM's own per-species move table, so
-**DIG** really does put Diglett into the ground. Damage plays the hit
-reaction, fainting plays the faint and holds there, a send-out plays the
-entrance, and between all of that the standby loop runs. Eyes blink and go
-dizzy; Charmander's tail flame and Weezing's gas are drawn over the body.
+**A** is the map — real ground, in that place's own weather and light. **B**
+is the carried stage, which works everywhere, including the caves and shop
+floors that have nowhere to put a fight. Only the STADIUM rungs need a ROM;
+**2D-3D B** is generated in Lua and uses the game's own art.
+
+Skinned and animated, playing the animation the move being used actually
+calls for — the Stadium ROM's own per-species move table, so **DIG** really
+does put Diglett into the ground. Damage plays the hit reaction, fainting
+plays the faint and holds there, a send-out plays the entrance, and between
+all of that the standby loop runs. Eyes blink and go dizzy; Charmander's tail
+flame and Weezing's gas are drawn over the body.
+
+148 of the 151 have models. Exeggutor, Tangela and Magmar come out of the ROM
+with corrupt standby loops and stand as their Game Boy battle sprites
+instead, on their own tile, in the same arena — the same per-Pokémon fallback
+a substitute doll and the pre-send-out trainer pic already take.
 
 **B is for the maps that cannot host a fight.** Half of Kanto's interiors are
 furniture, a cave floor can be nothing but corridors, and a map where neither
@@ -112,12 +124,13 @@ under that cave's void and its own flat light.
 data. What ships is the reader; you supply the cartridge, exactly as this
 engine already asks you to supply the Game Boy ROM it is a recompilation of.
 
-1. Put a **Pokémon Stadium (US)** ROM in a `baseroms/` folder beside the game.
-   `.z64`, `.n64` and `.v64` all work — the byte order is detected.
+1. Put a **Pokémon Stadium (US)** ROM in a `baseroms/` folder beside the game
+   — straight in it, not in a subfolder. `.z64`, `.n64` and `.v64` all work;
+   the byte order is detected.
    In a packaged build, `baseroms/` goes in the save directory; the mod logs
    the exact path on startup when it cannot find one.
 2. Start the game. The 151 models are built out of the ROM on a loading
-   screen, in about ten seconds.
+   screen that says so and shows a progress bar, in about ten seconds.
 3. The two STADIUM rungs appear on the 3D-BTL row.
 
 The built models live in the save directory, not in the mod folder, and are

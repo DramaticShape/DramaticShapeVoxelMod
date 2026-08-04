@@ -1088,7 +1088,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
       -- model faces its opponent, not the viewer, so both eyes see the same
       -- pose from their own seats, which is what makes it read as solid.
       --
-      -- On STADIUM B the platforms come with them. In a headset the world is
+      -- On a disc rung the platforms come with them. In a headset the world is
       -- still drawn -- the player is standing IN it, which is the whole point
       -- of the headset, so the rung's "no map" does not apply here -- and the
       -- discs then read as a stage set down on the ground, which is what they
