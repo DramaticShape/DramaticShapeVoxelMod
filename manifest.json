@@ -15,6 +15,6 @@
     "engine_internals"
   ],
   "affects_link": false,
-  "description": "Draws the overworld as a 3D diorama -- extruded terrain, depth-buffered occlusion so buildings really hide what is behind them, voxel characters, cast shadows, reflective water, a day/night cycle and a tilt-shift miniature pass -- with optional first-person, third-person and VR cameras. Battles are fought out there too, shot over the shoulder with a depth-of-field pass, standing either the game's own battle sprites or the Pokemon Stadium 3D models on the map or on a pair of discs against the sky.",
+  "description": "Draws the overworld as a 3D diorama.",
   "github": "DramaticShape/DramaticShapeVoxelMod"
 }
