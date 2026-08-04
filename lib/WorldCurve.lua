@@ -42,7 +42,7 @@ local ModSetting = V.require("ModSetting")
 local WorldCurve = {}
 
 WorldCurve.KEY = "curve"
-WorldCurve.LABEL = "V-CURVE"
+WorldCurve.LABEL = "ROUND WORLD"
 
 -- The ladder, calibrated against the FAR EDGE of the visible ground -- a
 -- little over two view-heights out at the low camera rungs. Since the drop
@@ -60,7 +60,7 @@ WorldCurve.AMOUNTS = { 0, 0.05, 0.10, 0.18 }
 
 WorldCurve.setting = ModSetting.new(WorldCurve.KEY, WorldCurve.LABEL,
                                     { 0, 1, 2, 3 },
-                                    { "OFF", "1", "2", "3" })
+                                    { "OFF", "LIGHT", "MEDIUM", "STRONG" })
 
 function WorldCurve.level()
   return WorldCurve.setting:get() or 0

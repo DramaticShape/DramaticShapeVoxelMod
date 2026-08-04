@@ -31,8 +31,8 @@ T.check(type(defs) == "table", "the merge created the render_pipelines namespace
 T.check(type(defs.voxel) == "table", "the voxel pipeline is registered")
 T.check(type(defs.tiltshift) == "table", "the tiltshift pipeline is registered")
 
-T.eq(defs.voxel.label, "VOXEL", "voxel carries its options-row label")
-T.eq(defs.tiltshift.label, "T-SHIFT", "tiltshift carries its options-row label")
+T.eq(defs.voxel.label, "3D WORLD", "voxel carries its options-row label")
+T.eq(defs.tiltshift.label, "MINIATURE", "tiltshift carries its options-row label")
 T.eq(defs.voxel.hotkey, "3", "voxel claims hotkey 3")
 T.eq(defs.tiltshift.hotkey, "6", "tiltshift claims hotkey 6")
 T.check(type(defs.voxel.drawWorld) == "function",
@@ -105,9 +105,9 @@ local rows = Pipelines.rows({ save = { options = opts } })
 T.eq(#rows, 2, "each pipeline contributes exactly one options row")
 local byLabel = {}
 for _, row in ipairs(rows) do byLabel[row.label] = row end
-T.check(byLabel.VOXEL ~= nil, "the VOXEL row is offered")
-T.check(byLabel["T-SHIFT"] ~= nil, "the T-SHIFT row is offered")
-T.eq(byLabel.VOXEL.value(), "FULL", "the row renders the current rung's label")
+T.check(byLabel["3D WORLD"] ~= nil, "the 3D WORLD row is offered")
+T.check(byLabel["MINIATURE"] ~= nil, "the T-SHIFT row is offered")
+T.eq(byLabel["3D WORLD"].value(), "FULL", "the row renders the current rung's label")
 
 -- ------- this mod's own settings
 --
@@ -403,11 +403,11 @@ T.eq(water.value(), "SKY",
 T.eq(daytime.label, "DAYTIME", "the day/night row carries its label")
 T.eq(daytime.value(), "SYNC",
   "and defaults to SYNC -- no value set follows the clock on the wall")
-T.eq(grid.label, "V-GRID", "the grid row carries its label")
+T.eq(grid.label, "BLOCK EDGES", "the grid row carries its label")
 T.eq(grid.value(), "OFF", "the grid starts off")
-T.eq(curve.label, "V-CURVE", "the curve row carries its label")
+T.eq(curve.label, "ROUND WORLD", "the curve row carries its label")
 T.eq(curve.value(), "OFF", "the curve starts off")
-T.eq(battles.label, "3D-BTL", "the overworld-battle row carries its label")
+T.eq(battles.label, "3D BATTLES", "the overworld-battle row carries its label")
 T.eq(battles.value(), "ON",
   "overworld battles are on by default -- the mode's headline is the world "
   .. "in 3D, and a battle is where the player spends half the game")
@@ -431,18 +431,18 @@ T.eq(grid.value(), "OFF", "stepping again toggles it back")
 
 -- the curve is a four-rung ladder rather than a toggle, and wraps
 curve.step(settingGame, 1)
-T.eq(curve.value(), "1", "stepping the curve climbs its ladder")
+T.eq(curve.value(), "LIGHT", "stepping the curve climbs its ladder")
 T.eq(settingGame.save.options.modOptions.DRAMATIC_SHAPE.curve, 1,
   "the curve level persists alongside the grid, not over it")
 T.eq(settingGame.save.options.modOptions.DRAMATIC_SHAPE.grid, false,
   "and the grid it shares a bucket with is untouched")
 curve.step(settingGame, 1)
 curve.step(settingGame, 1)
-T.eq(curve.value(), "3", "the ladder reaches its top rung")
+T.eq(curve.value(), "STRONG", "the ladder reaches its top rung")
 curve.step(settingGame, 1)
 T.eq(curve.value(), "OFF", "and wraps back to OFF")
 curve.step(settingGame, -1)
-T.eq(curve.value(), "3", "stepping down from OFF wraps to the top")
+T.eq(curve.value(), "STRONG", "stepping down from OFF wraps to the top")
 curve.step(settingGame, 1)
 
 -- the strength scales with the view height, so a rung looks the same at
@@ -483,7 +483,7 @@ local AntiAlias = run.loader.exports.DRAMATIC_SHAPE.lib.require("AntiAlias")
 local VoxelGrid = run.loader.exports.DRAMATIC_SHAPE.lib.require("VoxelGrid")
 local aaGame = { save = { options = {} }, mods = { modOptions = {} } }
 local aa = hookedRows[8]
-T.eq(aa.label, "AA", "the anti-aliasing row carries its label")
+T.eq(aa.label, "SMOOTHING", "the anti-aliasing row carries its label")
 T.eq(aa.value(), "OFF",
   "and starts off -- supersampling is a cost knob, and a mod must not spend "
   .. "four times the fill rate of the machine it lands on unasked")

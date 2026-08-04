@@ -148,7 +148,7 @@ function voidFill.check()
 end
 
 mod.content.render_pipelines:register("voxel", {
-  label = "VOXEL",
+  label = "3D WORLD",
   levels = Voxel.ANGLE_LABELS,
   -- 3 is the engine's TILT key, which this mode supersedes -- see the
   -- hotkey block near the bottom of this file for how it is claimed
@@ -294,7 +294,7 @@ mod.content.render_pipelines:register("voxel", {
 })
 
 mod.content.render_pipelines:register("tiltshift", {
-  label = "T-SHIFT",
+  label = "MINIATURE",
   levels = TiltShift.LABELS,
   -- 6 is free: no engine branch claims it, so this one alone reaches the
   -- registry by the documented route
