@@ -106,6 +106,18 @@ StadiumMon.HOVER_CAP = 0.5
 -- same rate.
 StadiumMon.FPS = StadiumPack.FPS
 
+-- How far an animation may carry the Pokemon off its tile, in the Pokemon's
+-- own body-heights, before the excess is taken back out (StadiumRig.anchor).
+--
+-- Measured against the frame rather than chosen by eye. A mon is drawn
+-- REF_HEIGHT world pixels tall and the GB frame holds about 38 world pixels
+-- at the far cell, with the foe's feet on row 56 of 144 -- so there is
+-- roughly one body-height of room above it and about one and a half either
+-- side. Three quarters of a height keeps every part of a travelling Pokemon
+-- inside that with a margin, and leaves the 83 species that never reach it
+-- untouched.
+StadiumMon.TRAVEL = 0.75
+
 -- ------- the animation the fight is asking for
 --
 -- Each entry says which context slot to look up, whether it loops, and
@@ -378,6 +390,10 @@ function StadiumMon:build()
   -- self.anim is nil while a species has nothing to play, and pose() reads
   -- that as "the bind pose", which is exactly what is wanted
   self.rig:pose(self.anim, self.time * StadiumMon.FPS, self.loop)
+  -- and then back onto the tile, because these animations were authored for
+  -- a camera that followed the Pokemon and this one does not move (see
+  -- StadiumRig.anchor)
+  self.rig:anchor(StadiumMon.TRAVEL)
   self.rig:skin(self.yaw or 0)
   -- no clock of its own: the texture animation rides the frame pose() just
   -- resolved, which is what keeps a blink inside its standby loop and a

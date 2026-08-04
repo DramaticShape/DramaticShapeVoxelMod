@@ -1361,6 +1361,98 @@ end)()
     "and a whole frame is that frame exactly, with nothing blended into it")
 end)()
 
+-- ------- the pack cache must not evict a Pokemon that is standing there
+--
+-- The eviction order is keyed on LOADS, and a side only loads when its
+-- species changes -- so a Pokemon that has been out for a few turns is the
+-- least recently loaded thing in the cache. A fifth species entering the
+-- battle evicted it and RELEASED ITS TEXTURES mid-fight, and the next draw
+-- threw "Cannot use object after it has been released" from inside the scene
+-- pass, which took both models off the screen for the rest of the battle.
+;(function()
+  if not HAVE_STADIUM_PACKS then return end
+  local Pack = run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumPack")
+  local keep = Pack.KEEP
+  Pack.forget()
+  Pack.KEEP = 2
+
+  local held = Pack.load(1)
+  T.check(held ~= nil, "a model loads")
+  local slot = held.textures and held.textures[1]
+  T.check(slot ~= nil, "and carries at least one texture slot")
+
+  -- more species than the cache holds, WITHOUT saying the first is in use
+  Pack.load(4) Pack.load(7) Pack.load(10)
+  T.eq(slot.image, nil,
+    "an evicted model's texture slot is CLEARED, not left holding a released "
+    .. "object -- a released Image is still truthy, so the corpse came back "
+    .. "out of image() and died at mesh:setTexture")
+
+  -- and with `keep` said every frame, as the mode does, it is never evicted
+  Pack.forget()
+  local live = Pack.load(1)
+  for _, dex in ipairs({ 4, 7, 10, 13 }) do
+    Pack.keep(1)
+    Pack.load(dex)
+  end
+  T.eq(Pack.load(1), live,
+    "a species the mode keeps saying is on the field is still the same "
+    .. "cached model after four others have loaded past it")
+
+  Pack.KEEP = keep
+  Pack.forget()
+end)()
+
+-- ------- and an animation must not walk the Pokemon out of the shot
+--
+-- Stadium's animations were authored for a camera that followed the Pokemon;
+-- this one holds two fixed cells. 65 of the 148 send-out entrances travel
+-- more than a body-height off the spot, up to seven and a half -- which is
+-- not drama here, it is an empty tile.
+;(function()
+  if not HAVE_STADIUM_PACKS then return end
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local Pack, Rig, Mon = lib.require("StadiumPack"), lib.require("StadiumRig"),
+                         lib.require("StadiumMon")
+  local model = Pack.load(87)                    -- Dewgong, the worst of them
+  local rig = setmetatable({ model = model, pivotM = {}, drawM = {},
+                             accX = {}, accY = {}, accZ = {}, parts = {} }, Rig)
+  rig:measureBind()
+
+  local function centre()
+    local n, xs, ys, zs = model.boneCount, {}, {}, {}
+    for b = 1, n do
+      local o = (b - 1) * 12
+      xs[b], ys[b], zs[b] = rig.drawM[o + 4], rig.drawM[o + 8], rig.drawM[o + 12]
+    end
+    table.sort(xs) table.sort(ys) table.sort(zs)
+    local h = math.floor(n / 2) + 1
+    return xs[h], ys[h], zs[h]
+  end
+  local raw = model.height / (model.rootScale > 0 and model.rootScale or 1)
+  local slot = model.ctx[Pack.SLOT.entrance]
+  local anim = slot + 1
+
+  local function driftAt(frame, limit)
+    rig:pose(anim, frame, false)
+    rig:anchor(limit)
+    local x, y, z = centre()
+    return (((x - model.bindCX) ^ 2 + (y - model.bindCY) ^ 2
+             + (z - model.bindCZ) ^ 2) ^ 0.5) / raw
+  end
+
+  T.check(driftAt(40, nil) > 5,
+    "unanchored, Dewgong's entrance carries it more than five body-heights "
+    .. "off its tile -- straight out of a frame that holds about one")
+  T.check(driftAt(40, Mon.TRAVEL) <= Mon.TRAVEL * 1.001,
+    "anchored, it stays inside the travel limit")
+  -- and the animations that never travel are left completely alone
+  local before = driftAt(0, nil)
+  T.eq(driftAt(0, Mon.TRAVEL), before,
+    "a frame already inside the limit is not moved at all -- the anchor takes "
+    .. "out the EXCESS, so a lunge is still a lunge")
+end)()
+
 -- ------- the three species the extraction cannot read stand as PICS
 --
 -- Exeggutor, Tangela and Magmar come out of the ROM with standby loops that

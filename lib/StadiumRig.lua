@@ -110,6 +110,9 @@ function StadiumRig.new(model)
     -- what the pose walk last answered, so a frame that neither moved the
     -- animation nor turned the model can skip the whole thing
     poseKey = nil,
+    -- scratch for the body-centre estimate (see anchor), kept on the rig so
+    -- a per-frame measurement allocates nothing
+    cx = {}, cy = {}, cz = {},
   }, StadiumRig)
 
   -- One mesh per primitive: a primitive is already "the triangles sharing
@@ -131,6 +134,9 @@ function StadiumRig.new(model)
     pcall(mesh.setVertexMap, mesh, prim.index)
     self.parts[i] = { mesh = mesh, rows = rows, prim = prim }
   end
+  -- the spot the animations are measured against, taken while there is no
+  -- pose to overwrite (see measureBind)
+  pcall(self.measureBind, self)
   return self
 end
 
@@ -399,6 +405,118 @@ function StadiumRig:pose(anim, frame, wrap)
     drw[o + 7], drw[o + 8] = pivot[o + 7] * ez, pivot[o + 8]
     drw[o + 9], drw[o + 10] = pivot[o + 9] * ex, pivot[o + 10] * ey
     drw[o + 11], drw[o + 12] = pivot[o + 11] * ez, pivot[o + 12]
+  end
+end
+
+-- ------- keeping the Pokemon on its own tile
+--
+-- Stadium's animations MOVE the Pokemon, and they move it a long way. Half
+-- the set's send-out entrances walk the body more than its own height off
+-- the spot it started on; Dewgong's faint travels nearly ten body-heights,
+-- and its entrance seven and a half. Every one of them ends exactly where it
+-- began, because that game framed each Pokemon with a camera of its OWN that
+-- followed the performance around a stage.
+--
+-- This mode has one camera, solved to put two named map cells at two fixed
+-- points in a 160x144 frame (BattleCam), and a Pokemon that travels seven
+-- body-heights out of that frame is simply GONE -- which is what sending out
+-- a Farfetch'd looked like: an empty tile for three and a half seconds,
+-- while its animation played somewhere off to the left of the shot.
+--
+-- So the bulk travel is taken back out. The pose is measured, and whatever
+-- has carried the body further than `limit` from where the bind pose put it
+-- is subtracted from every bone.
+--
+-- ------- why a LIMIT and not an anchor
+--
+-- Pinning the body outright would flatten the animations into mime: a lunge,
+-- a hop, a recoil and a collapse are all the body moving, and they are the
+-- part worth having. What breaks the shot is not motion, it is EXCURSION --
+-- and the two are told apart by how far. Inside the limit nothing is touched
+-- at all, so the 83 species whose animations stay put are bit-for-bit what
+-- they were; past it the excess alone is removed, so a big move still reads
+-- as big and still comes back to the tile it left.
+--
+-- ------- and why the MEDIAN bone
+--
+-- The centre is the median bone origin on each axis, not the mean and not
+-- the root. The mean is dragged by exactly the thing that must not count --
+-- Farfetch'd's five-bone trail streaks three thousand units out while the
+-- bird stays put -- and the root is a bone like any other, which several
+-- species animate independently of the body hanging off it. The median is
+-- the position most of the skeleton agrees on, and a handful of bones flung
+-- anywhere cannot move it.
+
+-- The body centre of the pose currently in drawM.
+local function centre(self, n)
+  -- made on demand as well as in new(), so the probes and the QA sweep --
+  -- which build a rig with no meshes by hand, because pose() needs none --
+  -- can measure without having to know about this scratch
+  local xs, ys, zs = self.cx, self.cy, self.cz
+  if not xs then
+    xs, ys, zs = {}, {}, {}
+    self.cx, self.cy, self.cz = xs, ys, zs
+  end
+  local d = self.drawM
+  for b = 1, n do
+    local o = (b - 1) * 12
+    xs[b], ys[b], zs[b] = d[o + 4], d[o + 8], d[o + 12]
+  end
+  for i = n + 1, #xs do xs[i], ys[i], zs[i] = nil, nil, nil end
+  table.sort(xs) table.sort(ys) table.sort(zs)
+  local h = floor(n / 2) + 1
+  return xs[h], ys[h], zs[h]
+end
+
+-- Where the BIND pose puts it -- the spot every animation is measured
+-- against. Cached on the shared MODEL, because it is a fact about the model
+-- and not about this instance of it.
+--
+-- Called once, from new(), and deliberately not lazily from anchor(): taking
+-- this measurement means POSING the bind pose, which would overwrite the
+-- animated pose anchor() was called to correct. Doing it while the rig is
+-- still being built is the one moment there is no pose to lose.
+function StadiumRig:measureBind()
+  local model = self.model
+  if model.bindCX then return end
+  self:pose(nil, 0, false)
+  model.bindCX, model.bindCY, model.bindCZ = centre(self, model.boneCount)
+end
+
+-- Pull the pose back toward the tile. `limit` is in the Pokemon's own
+-- body-heights; nil or a non-positive value leaves the pose exactly as posed.
+function StadiumRig:anchor(limit)
+  if not (limit and limit > 0) then return end
+  local model = self.model
+  local n = model.boneCount
+  -- the vertices are in RAW units, before the model_root scale that
+  -- model.height is measured after
+  local root = model.rootScale
+  if not (root and root > 0) then root = 1 end
+  local h = (model.height or 0) / root
+  if not (h > 0) then return end
+
+  local bx, by, bz = model.bindCX, model.bindCY, model.bindCZ
+  if not bx then return end          -- never measured; leave the pose alone
+  local x, y, z = centre(self, n)
+  local dx, dy, dz = x - bx, y - by, z - bz
+  local dist = (dx * dx + dy * dy + dz * dz) ^ 0.5
+  local allow = limit * h
+  if dist <= allow or dist <= 0 then return end
+
+  -- the EXCESS only: what is inside the limit stays, so the motion keeps its
+  -- shape and only the part that would leave the frame is removed
+  local k = (dist - allow) / dist
+  local ox, oy, oz = dx * k, dy * k, dz * k
+  local pivot, drw = self.pivotM, self.drawM
+  for b = 1, n do
+    local o = (b - 1) * 12
+    pivot[o + 4] = pivot[o + 4] - ox
+    pivot[o + 8] = pivot[o + 8] - oy
+    pivot[o + 12] = pivot[o + 12] - oz
+    drw[o + 4] = drw[o + 4] - ox
+    drw[o + 8] = drw[o + 8] - oy
+    drw[o + 12] = drw[o + 12] - oz
   end
 end
 

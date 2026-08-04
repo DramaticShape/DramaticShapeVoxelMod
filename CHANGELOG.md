@@ -169,6 +169,37 @@
 - `tests/stadium_shots.lua`, a shot driver for both rungs, with a control
   mode and a pinned clock so two runs of it can be compared.
 
+- **`tests/stadium_anim_qa.lua`: every Pokemon, every animation, every
+  frame.** A battle asks a species for one of its animations and then poses,
+  skins, re-textures and draws it sixty times a second, and nothing exercised
+  that chain -- the pack probe reads the format and walks a bind pose, the
+  shot drivers show one species in one animation at a time. So the failures
+  only some species have had no way of being found except by a player calling
+  that Pokemon out, which is exactly how the eviction crash above was found.
+
+  This is that sweep, headless: the real StadiumPack, StadiumRig and
+  StadiumMon over stubs for the three things a graphics context provides, and
+  the stubs are not lenient -- a released object throws with LOVE's own
+  message, because a stub that quietly accepted one would hide the class of
+  bug the sweep exists to find. 151 species, 403,716 posed frames, 25
+  seconds. It also drives the state machine over all 165 move slots and
+  reproduces the cache eviction directly, which no amount of playing one
+  species' animations can reach.
+
+  What it found, and what happened to each:
+
+  | finding | count | outcome |
+  | --- | --- | --- |
+  | pack cache evicted a model still on the field | 2 | **fixed** -- see above |
+  | animation walks the Pokemon off its tile | 65 entrances, 36 hits, 35 faints | **fixed** -- see above |
+  | part has no texture | 104,728 | **not a defect.** 39 primitives across 37 species, 1.6% of the set's vertices, every one with all-zero UVs: they are flat-shaded geometry in the original. The pack stores texture indices one-based, so the packer's `0xFFFF` "untextured" sentinel arrives as 65,536 and resolves to nothing, which is correct. Counted rather than reported now |
+  | pose flies apart | 250 | **understood, left alone.** Two species in one animation each: Farfetch'd's entrance at 6.0x its bind height and Dewgong's at 6.1x, both just over the threshold, and both because the measurement is a bounding box that includes an authored trail -- Farfetch'd's is a dedicated 30-vertex primitive on a five-bone chain. The bodies are intact and, since the anchor, in frame |
+  | NaN or infinite vertex, rig would not build, loopStart out of range, missing aux animation, track indexed off its end, move slot with no animation | 0 | none |
+
+  The three species the packer already declines (Exeggutor, Tangela, Magmar)
+  are skipped rather than swept: they are never posed in a game, and sweeping
+  them anyway produced 356 of the 362 original "flies apart" findings.
+
 ### Fixed
 
 - **Idle animations snapped, and then ran at half the frame rate.** Two
@@ -254,6 +285,56 @@
   fired late at whoever is standing there. Measured rather than eyeballed:
   the shot driver's `DS_FAINT` case prints the frame the bar empties against
   the frame the animation starts, and they are the same frame.
+
+- **A Pokemon calling out a fifth species killed every model in the fight.**
+  Reported as `Cannot use object after it has been released` out of
+  `Voxel3D.draw`, after which nothing 3D drew for the rest of the battle.
+
+  The pack cache holds four models and evicts the least recently *loaded* --
+  and `load` only runs when a side's species CHANGES, so a Pokemon that has
+  been standing there for a few turns is the oldest entry in the cache. Send
+  out a fifth species and it was evicted mid-fight and **its textures
+  released**, while it was still being drawn sixty times a second.
+
+  Two things were wrong. The eviction released each texture but left the dead
+  object in its slot -- and a released Image is still a truthy value, so the
+  next `image()` handed the corpse straight back out to `mesh:setTexture`.
+  Slots are now cleared, so an evicted model simply decodes its textures
+  again. And the mode now says, every frame, which two species are actually
+  standing there (`StadiumPack.keep`), so the two in use are always the two
+  most recent and cannot reach the front of the queue at all.
+
+- **And a model that does fail now fails gracefully.** Both draws were a bare
+  loop inside the caller's single pcall, so a throw on the first side skipped
+  the second -- one broken Pokemon took its opponent off the screen with it
+  -- and nothing recorded that it had happened, so the same throw came back
+  every frame forever. Each side is now drawn, cast and posed inside its own
+  guard, and a side that throws is RETIRED: its rig is released and
+  OverworldBattle renders its flat battle pic from the next frame on, which
+  is the fallback a species with no pack has always had. The fight carries on
+  with a flat Pokemon instead of a missing one, and its opponent is
+  untouched.
+
+- **Half the set's animations walked the Pokemon out of the shot.** Found by
+  the sweep below, not by a bug report, and it is the biggest of them: 65 of
+  the 148 send-out entrances carry the body more than its own height off the
+  spot it started on -- Dewgong's reaches seven and a half, and its faint
+  nearly ten. Every one returns to exactly where it began, because Pokemon
+  Stadium framed each Pokemon with a camera of its OWN that followed the
+  performance around a stage. This mode has one camera, solved to hold two
+  fixed map cells, so a Pokemon that travels seven body-heights is simply
+  gone: sending out a Farfetch'd left an empty tile for three and a half
+  seconds while its animation played somewhere off to the left of the frame.
+
+  `StadiumRig.anchor` now takes the excess back out -- the pose is measured
+  against where the bind pose put the body, and whatever has carried it
+  further than `StadiumMon.TRAVEL` (three quarters of a body-height, which is
+  what the frame holds) is subtracted from every bone. The EXCESS only: the
+  83 species that never reach the limit are bit-for-bit what they were, and a
+  lunge, a hop or a collapse still reads as big and still comes back to the
+  tile it left. The centre is the median bone origin rather than the mean or
+  the root, so Farfetch'd's five-bone trail streaking three thousand units
+  out cannot drag the bird with it.
 
 - **FLY and DIG now take the model off the field.** The charging turn of a
   two-turn move puts the Pokemon out of reach, and the engine says so through

@@ -73,6 +73,19 @@ local STEP = tonumber(args.step or "0.5")
 -- hundreds of units off the body, which comes out in the dozens.
 local EXPLODE = 6.0
 
+-- The texture index of a primitive the source says has no texture. The pack
+-- stores indices one-based, so the packer's 0xFFFF sentinel arrives as this.
+local UNTEXTURED = 0xFFFF + 1
+
+-- species -> true, for the ones that carry such a primitive. Counted rather
+-- than reported (see the texture check).
+local untextured = {}
+
+-- How far the mode lets an animation carry the Pokemon off its tile, in body
+-- heights. Read from StadiumMon rather than repeated, so the sweep cannot go
+-- on passing against a number the mode has since changed.
+local TRAVEL = nil
+
 -- ------- the harness
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
@@ -195,6 +208,7 @@ end }
 local Pack = V.require("StadiumPack")
 local Rig = V.require("StadiumRig")
 local Mon = V.require("StadiumMon")
+TRAVEL = Mon.TRAVEL
 
 -- ------- findings
 
@@ -211,6 +225,26 @@ local function report(kind, dex, anim, frame, detail)
 end
 
 -- ------- one animation, frame by frame
+
+-- Where the BODY of a posed rig is: the median bone origin on each axis.
+--
+-- The median rather than the mean or the root, for the reason StadiumRig's
+-- own anchor uses it -- Farfetch'd's five-bone trail streaks three thousand
+-- units out while the bird stays where it is, and a mean would follow the
+-- trail. This is deliberately a second, independent implementation of the
+-- same idea: a check that shared the code it is checking would agree with it
+-- by construction.
+local function bodyCentreOf(rig)
+  local n = rig.model.boneCount
+  local xs, ys, zs, d = {}, {}, {}, rig.drawM
+  for b = 1, n do
+    local o = (b - 1) * 12
+    xs[b], ys[b], zs[b] = d[o + 4], d[o + 8], d[o + 12]
+  end
+  table.sort(xs) table.sort(ys) table.sort(zs)
+  local h = math.floor(n / 2) + 1
+  return xs[h], ys[h], zs[h]
+end
 
 local function bboxOf(rig)
   local lo, hi = math.huge, -math.huge
@@ -258,10 +292,18 @@ local function sweepSpecies(dex)
   end
 
   -- the bind pose, as the yardstick every posed frame is measured against
+  rig:measureBind()
   rig:pose(nil, 0, false)
   rig:skin(0)
   local bind = bboxOf(rig)
   if not (bind > 0) then bind = 1 end
+  -- and where the bind pose puts the BODY, for the travel check below. The
+  -- tracks are in raw units, before the model_root scale model.height is
+  -- measured after.
+  local bcx, bcy, bcz = bodyCentreOf(rig)
+  local rawHeight = (model.height or 0)
+                    / ((model.rootScale or 0) > 0 and model.rootScale or 1)
+  if not (rawHeight > 0) then rawHeight = 1 end
 
   local steps = 0
   for index, anim in ipairs(model.anims) do
@@ -302,6 +344,28 @@ local function sweepSpecies(dex)
           report("threw while playing", dex, name, f, tostring(err))
           break
         end
+        -- ------- does it stay on its tile?
+        --
+        -- Stadium's animations were authored for a camera that FOLLOWED the
+        -- Pokemon around a stage; this mode's camera is solved to hold two
+        -- fixed map cells and does not move. So an animation that walks the
+        -- body several of its own heights away does not look dramatic here,
+        -- it looks like the Pokemon is missing -- which is what sending out
+        -- a Farfetch'd did for three and a half seconds.
+        --
+        -- StadiumRig.anchor takes the excess back out, and this is the check
+        -- that it did: measured AFTER the anchor, the same way the mode
+        -- draws it, so what is reported is what a player would actually see.
+        rig:anchor(TRAVEL)
+        local cx, cy, cz = bodyCentreOf(rig)
+        local drift = (((cx - bcx) ^ 2 + (cy - bcy) ^ 2 + (cz - bcz) ^ 2) ^ 0.5)
+                      / rawHeight
+        if drift > TRAVEL * 1.05 then
+          report("animation walks the Pokemon off its tile", dex, name, f,
+                 ("body centre %.1f body-heights from where it started")
+                 :format(drift))
+        end
+
         local h, bad = bboxOf(rig)
         if bad then
           report("posed vertex is NaN or infinite", dex, name, f, "")
@@ -310,13 +374,29 @@ local function sweepSpecies(dex)
                  ("%.0f units tall against a %.0f-unit bind pose (%.1fx)")
                  :format(h, bind, h / bind))
         end
-        -- every piece of the Pokemon has to have a texture to be drawn with;
-        -- one that resolves to nothing is a limb that is simply not there
+        -- Every piece of the Pokemon has to have a texture to be drawn with,
+        -- and one that resolves to nothing is a limb that is simply not
+        -- there -- EXCEPT where the source says it has none.
+        --
+        -- StadiumPack stores the texture index one-based (`u16 + 1`), so the
+        -- packer's 0xFFFF "this primitive is untextured" sentinel arrives
+        -- here as 65536. That is 39 primitives across 37 species, 1.6% of the
+        -- set's vertices, and every one of them has all-zero UVs -- they are
+        -- flat-shaded geometry in the original, not a texture that went
+        -- missing. Reported as a finding they were 104,728 lines of noise
+        -- (one per prim per sampled frame) burying two real bugs.
+        --
+        -- Counted rather than dropped: "how much of this set is untextured"
+        -- is worth knowing, and a number that suddenly moves is worth seeing.
         for i, part in ipairs(rig.parts) do
           if not part.texture then
-            report("part has no texture", dex, name, f,
-                   ("prim %d wants texture %s of %d")
-                   :format(i, tostring(part.prim.tex), model.texCount or 0))
+            if part.prim.tex == UNTEXTURED then
+              untextured[dex] = true
+            else
+              report("part has no texture", dex, name, f,
+                     ("prim %d wants texture %s of %d")
+                     :format(i, tostring(part.prim.tex), model.texCount or 0))
+            end
           end
         end
         f = f + STEP
@@ -395,12 +475,21 @@ local started = os.clock()
 local steps = 0
 local staticPose = {}
 for _, dex in ipairs(list) do
-  local ok, err = pcall(function() steps = steps + sweepSpecies(dex) end)
-  if not ok then
-    report("the sweep itself threw", dex, nil, nil, tostring(err))
-  end
   local m = Pack.load(dex)
-  if m and m.staticPose then staticPose[#staticPose + 1] = dex end
+  -- SKIPPED, not swept. The packer measures each species' standby loop
+  -- against its own bind pose and flags the ones whose animation data is
+  -- corrupt at source, and StadiumMon declines those outright -- they stand
+  -- as flat battle pics and no frame of them is ever posed in a game. Sweeping
+  -- them anyway produced 356 of the 362 "pose flies apart" findings, which is
+  -- a report that is mostly about Pokemon this mode does not draw.
+  if m and m.staticPose then
+    staticPose[#staticPose + 1] = dex
+  else
+    local ok, err = pcall(function() steps = steps + sweepSpecies(dex) end)
+    if not ok then
+      report("the sweep itself threw", dex, nil, nil, tostring(err))
+    end
+  end
   if not args.quiet and dex % 10 == 0 then
     io.write(("  ... %d/%d  %.0f MB\n")
              :format(dex, #list, collectgarbage("count") / 1024))
@@ -453,8 +542,14 @@ print("")
 print(("stadium animation QA: %d species, %d posed frames, %.1fs")
       :format(#list, steps, elapsed))
 print(("packs: %s"):format(packDir))
+local nUntextured = 0
+for _ in pairs(untextured) do nUntextured = nUntextured + 1 end
+if nUntextured > 0 then
+  print(("species with flat-shaded (untextured) primitives: %d -- expected, "
+         .. "the source has no texture for those"):format(nUntextured))
+end
 if #staticPose > 0 then
-  print(("staticPose (declined by the packer, never drawn): %s")
+  print(("staticPose (declined by the packer, never drawn, not swept): %s")
         :format(table.concat(staticPose, " ")))
 end
 print("")

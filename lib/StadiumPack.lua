@@ -477,9 +477,36 @@ local function touch(species)
         if slot.image and slot.image.release then
           pcall(slot.image.release, slot.image)
         end
+        -- CLEARED, not just released. A released Image is still a truthy
+        -- value, and `image()` below hands back whatever is in this field
+        -- without looking at it -- so leaving the corpse here meant the next
+        -- ask returned a dead object, which reached mesh:setTexture and threw
+        -- "Cannot use object after it has been released" from inside the
+        -- scene pass. Nil means the next ask decodes it again, which is the
+        -- whole point of the slot being lazy.
+        slot.image = nil
       end
     end
   end
+end
+
+-- Say that this species is IN USE, so the cache does not evict it.
+--
+-- The eviction order above is a least-recently-LOADED list, not a
+-- least-recently-used one: `touch` runs from `load`, and `load` is only
+-- reached when a side's species CHANGES (StadiumMon.setSpecies returns early
+-- otherwise). A Pokemon that stands on the field for several turns therefore
+-- never refreshes its position, drifts to the front of the queue, and is
+-- evicted -- its textures released -- while it is still being drawn sixty
+-- times a second. That is what a fifth species entering a battle did: call
+-- out a Clefairy and whatever had been standing longest lost its textures
+-- mid-fight.
+--
+-- So the mode says, every frame, which two species are actually standing
+-- there (see Stadium.update). With KEEP at 4 and two sides, the two in use
+-- are always the two most recent and cannot reach the front of the queue.
+function StadiumPack.keep(species)
+  if species and cache[species] then touch(species) end
 end
 
 -- Whether a pack for this species is on disk at all. Cheap enough to ask

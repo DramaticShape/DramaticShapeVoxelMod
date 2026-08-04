@@ -115,6 +115,10 @@ end
 function Stadium.begin(arena)
   Stadium.finish()
   if not Stadium.enabled() then return false end
+  -- a new fight gets its own first complaint: `reported` is a one-shot so the
+  -- console is not filled sixty times a second, but latched for the whole
+  -- process it would swallow every failure after the first one ever
+  Stadium.reported = false
   session = {
     arena = arena,
     groundY = 0,
@@ -345,6 +349,13 @@ function Stadium.update(dt, battle, groundY)
     end
 
     mon:setSpecies(dex)
+    -- and tell the pack cache this one is standing there, every frame. Its
+    -- eviction order is keyed on LOADS, and a side only loads when its
+    -- species changes -- so without this a Pokemon that has been out for a
+    -- few turns is the least recently loaded thing in the cache and gets its
+    -- textures released out from under it the moment a fifth species enters
+    -- the battle (see StadiumPack.keep).
+    if mon.species then StadiumPack.keep(mon.species) end
     mon.visible = (mon.rig ~= nil) and onField(battle, side, mon)
                   and not (battler and battler.substituteHP)
     -- cleared up front, so a side that has just lost its rig cannot leave
@@ -361,10 +372,16 @@ function Stadium.update(dt, battle, groundY)
         local cell = arena[side]
         local other = arena[side == "player" and "enemy" or "player"]
         if cell and other then
-          mon.model_matrix = mon:matrix(cell[1], session.groundY, cell[2],
-                                        other[1] - cell[1],
-                                        other[2] - cell[2])
-          mon:build()
+          -- posed and skinned inside the same guard the draws use: this is
+          -- where a bad track or a released texture is first touched, and a
+          -- throw here would take the OTHER side's update with it (the
+          -- caller wraps this whole function in one pcall)
+          Stadium.guard(side, mon, "build", function()
+            mon.model_matrix = mon:matrix(cell[1], session.groundY, cell[2],
+                                          other[1] - cell[1],
+                                          other[2] - cell[2])
+            mon:build()
+          end)
         else
           mon.model_matrix = nil
         end
@@ -384,12 +401,46 @@ end
 -- flash are all already set. StadiumRig turns the wireframe and the glass
 -- mask off around its own draws and puts them back.
 
+-- ------- one model going wrong is not both
+--
+-- These two draws used to be a bare loop inside the caller's single pcall,
+-- which had two consequences and both were bad. A throw on the FIRST side
+-- skipped the second, so one broken Pokemon took its opponent off the screen
+-- with it. And nothing recorded that it had happened, so the same throw came
+-- back every frame for the rest of the fight -- the mode's own fallback (that
+-- side draws its flat pic instead) was sitting right there and never reached,
+-- because falling back needs somebody to decide the model is not working.
+--
+-- So each side is drawn inside its own pcall, and a side that throws is
+-- RETIRED: its rig is released, which is exactly the state a species with no
+-- pack is in, and OverworldBattle renders a billboard for it from the next
+-- frame on. The fight carries on with a flat Pokemon instead of a missing
+-- one, which is the difference the player actually sees.
+-- On the TABLE rather than a local, because Stadium.update calls it and sits
+-- above this line: a local would still be nil there.
+function Stadium.guard(side, mon, what, fn)
+  local ok, err = pcall(fn)
+  if ok then return true end
+  Stadium.report(err)
+  -- release rather than merely hide: the rig holds meshes and texture
+  -- references, and whatever went wrong with them is not going to be better
+  -- next frame. setSpecies rebuilds from scratch if this Pokemon is sent out
+  -- again later.
+  if mon.rig then pcall(mon.release, mon) end
+  mon.rig, mon.visible, mon.model_matrix = nil, false, nil
+  if session then session.broken = session.broken or {} end
+  if session then session.broken[side] = what end
+  return false
+end
+
 function Stadium.draw(pull)
   if not session then return end
   for _, side in ipairs({ "enemy", "player" }) do
     local mon = session[side]
     if mon.rig and mon.visible and mon.model_matrix then
-      mon.rig:draw(mon.model_matrix, pull)
+      Stadium.guard(side, mon, "draw", function()
+        mon.rig:draw(mon.model_matrix, pull)
+      end)
     end
   end
 end
@@ -402,7 +453,9 @@ function Stadium.cast(shadowMap)
   for _, side in ipairs({ "enemy", "player" }) do
     local mon = session[side]
     if mon.rig and mon.visible and mon.model_matrix then
-      mon.rig:caster(shadowMap, mon.model_matrix)
+      Stadium.guard(side, mon, "cast", function()
+        mon.rig:caster(shadowMap, mon.model_matrix)
+      end)
     end
   end
 end
@@ -561,13 +614,14 @@ end
 -- model is indistinguishable from an invisible one -- so the first failure
 -- of a battle says so, once, and the rest of the fight carries on without
 -- it.
-local reported = false
+Stadium.reported = false
 
 function Stadium.report(err)
-  if reported then return end
-  reported = true
-  V.mod.log:warn("stadium: a model failed to draw: %s -- this battle runs "
-                 .. "without it", tostring(err))
+  if Stadium.reported then return end
+  Stadium.reported = true
+  V.mod.log:warn("stadium: a model failed and was retired for this battle: "
+                 .. "%s -- that Pokemon falls back to its flat battle pic, "
+                 .. "and its opponent is unaffected", tostring(err))
 end
 
 -- DS_STADIUM_DEBUG=1 prints what each side resolved to once a second, which
