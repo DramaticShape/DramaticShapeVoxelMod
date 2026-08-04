@@ -200,6 +200,19 @@ mod.content.render_pipelines:register("voxel", {
     -- and the whole battle. Ahead of the active() gate below, because a 3D
     -- battle does not require the free-roam mode to be switched on.
     OverworldBattle.update(dt)
+    -- The one-time build of the Pokemon Stadium battle models out of the
+    -- player's own ROM, if there is one to build from and it has not been
+    -- done (see StadiumInstall). Rides this hook for the same reason the
+    -- battle does -- it is the tick that runs whatever is on the stack -- and
+    -- asks exactly once, on the first frame the player is actually in the
+    -- world, so it is never fighting the engine's own launcher for the
+    -- screen.
+    pcall(function() V.require("StadiumScreen").maybePush() end)
+    -- and a ROM the system file picker dropped in the save directory while
+    -- we were not the top activity (Android; see StadiumRomPick.poll)
+    pcall(function()
+      V.require("StadiumRomPick").poll(require("src.core.Game"))
+    end)
     -- The horde, on the same always-running tick and for the same reason:
     -- it owns no pass of the frame, it is a MODE over the overworld, and
     -- it has to keep thinking while a warp's wipe covers the screen (the
@@ -421,8 +434,18 @@ local SETTINGS = {
   -- and forbids back sprites (backPinned answers false), so both rows
   -- decide nothing there and a dead switch on the menu reads as broken.
   { OverworldBattle.setting,
-    "Fight on the map: the battle draws over the nearest clear ground, "
-    .. "shot over the shoulder with a slow parallax drift.",
+    "Fight in three dimensions, shot over the shoulder with a slow parallax "
+    .. "drift. 2D-3D stands the game's own battle pics up as cards; STADIUM "
+    .. "replaces them with the Pokemon Stadium battle models, animated, "
+    .. "playing the animation the move being used actually calls for. A "
+    .. "stages the fight on the MAP -- the nearest clear ground, in that "
+    .. "place's own weather and light; B stands it on two discs against the "
+    .. "sky instead, which works everywhere, including the caves and shop "
+    .. "floors that have nowhere to stage a fight. The STADIUM rungs only "
+    .. "appear once the models have been built, and building them needs a "
+    .. "Pokemon Stadium (US) 1.0 ROM of your own -- import it from the "
+    .. "STADIUM ROM row, or drop it in the baseroms folder and restart. No "
+    .. "other version works: the reader is keyed to that one cartridge.",
     when = function() return not VR.enabled() end, full = true },
   -- Only offered while a fight can actually be staged on the map: with 3D-BTL
   -- off the engine draws the classic screen, which is this row's ON already,
@@ -496,7 +519,7 @@ mod.options:define(schema)
 --   5  V-GRID   toggle the wireframe         (new)
 --   6  T-SHIFT  cycle the blur ladder        (was 9)
 --   7  V-CURVE  cycle the horizon bend       (new)
---   8  3D-BTL   toggle overworld battles     (new)
+--   8  3D-BTL   cycle overworld battles      (new)
 --   9  WATER    cycle the water reflections  (new; 9 was T-SHIFT's old key)
 --
 -- Only 6 arrives by the documented route. Game:keypressed answers the
@@ -779,6 +802,19 @@ mod.hooks:wrap("ui.options.rows", function(next, game, rows)
                     and (not entry.when or entry.when())
     if offered then extra[#extra + 1] = entry[1]:row() end
   end
+  -- and the ROM import, which is an ACTION and not a setting: there is no
+  -- rung to store, nothing for the mod manager's page to persist and nothing
+  -- to restore on the next boot, so it is appended here rather than living in
+  -- SETTINGS. nil on a platform with no file dialog, which takes it off the
+  -- menu rather than offering a button that cannot do anything.
+  -- On EVERY platform. Where there is no file dialog it says WHERE? and
+  -- shows the folder to put the cartridge in, which is the one thing a
+  -- player on a phone could not otherwise find out -- the row used to vanish
+  -- there, which reads as the feature being missing rather than manual.
+  local okPick, importRow = pcall(function()
+    return V.require("StadiumRomPick").row()
+  end)
+  if okPick and importRow then extra[#extra + 1] = importRow end
   return insertGrouped(out, extra)
 end)
 

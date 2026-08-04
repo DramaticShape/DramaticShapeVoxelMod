@@ -204,8 +204,19 @@ T.check(not pinnedIds["battleLayout"],
 T.eq(layoutGame.save.options.battleLayout, "og",
   "and a save that had WIDE is set to OG -- the only layout the shot composes in")
 
+-- the STADIUM rung is still a staged fight, so it pins the layout exactly
+-- as 2D-3D does: what changes on that rung is what stands on the cells, not
+-- where the cells are or what screen they are composed for
+Battles.setting:setValue("stadium", layoutGame)
+T.eq(Battles.enabled(), true, "STADIUM stages the fight like 2D-3D does")
+layoutGame.save.options.battleLayout = "wide"
+Runtime.call("ui.options.rows", function(_, r) return r end, layoutGame,
+             { { id = "battleLayout" } })
+T.eq(layoutGame.save.options.battleLayout, "og",
+  "and pins BATTLE LAYOUT to OG the same way")
+
 -- switching 3D-BTL off hands the row straight back, WIDE and all
-Battles.setting:setIndex(2, layoutGame)
+Battles.setting:setValue(false, layoutGame)
 T.eq(Battles.enabled(), false, "3D-BTL off")
 local handedBack = Runtime.call("ui.options.rows", function(_, r) return r end,
                                 layoutGame,
@@ -235,7 +246,7 @@ T.eq(layoutGame.save.options.battleLayout, "wide",
 -- switch the row back on and the pin comes back with it, FULL or no FULL.
 -- (Arriving at FULL for real runs applyFull, which switches the row on -- so
 -- in the game the pin still follows the preset, by way of the row.)
-Battles.setting:setIndex(1, layoutGame)
+Battles.setting:setValue(true, layoutGame)
 Runtime.call("ui.options.rows", function(_, r) return r end, layoutGame,
              { { id = "battleLayout" } })
 T.eq(layoutGame.save.options.battleLayout, "og",
@@ -366,7 +377,7 @@ T.check(rowIndex(menu, "pipeline:tiltshift"), "T-SHIFT too")
 -- down than the player left it.
 do
 local Battles = run.loader.exports.DRAMATIC_SHAPE.lib.require("OverworldBattle")
-Battles.setting:setIndex(2, menuGame)             -- staged battles off
+Battles.setting:setValue(false, menuGame)         -- staged battles off
 menuGame.save.options.battleLayout = "wide"
 Pipelines.setLevel("voxel", 2)
 local layoutMenu = OptionsMenu.new(menuGame)
@@ -389,7 +400,12 @@ end
 Pipelines.setLevel("voxel", 2)
 local hookedRows = Runtime.call("ui.options.rows", function(_, r) return r end,
                                { data = Data }, { { id = "text_speed" } })
-T.eq(#hookedRows, 9, "the options hook added a row per setting")
+-- one per setting, plus the STADIUM ROM action row -- which is not a setting
+-- (nothing to store, nothing for the mod manager to persist) and is offered
+-- on every platform, saying WHERE? rather than IMPORT where there is no file
+-- dialog to open
+T.eq(#hookedRows, 10, "the options hook added a row per setting, plus the "
+  .. "STADIUM ROM action row")
 local grid, curve, water = hookedRows[2], hookedRows[3], hookedRows[4]
 local battles, backRow, daytime = hookedRows[5], hookedRows[6], hookedRows[7]
 -- the AA row is hookedRows[8]; it is read in its own block below, because
@@ -408,9 +424,10 @@ T.eq(grid.value(), "OFF", "the grid starts off")
 T.eq(curve.label, "V-CURVE", "the curve row carries its label")
 T.eq(curve.value(), "OFF", "the curve starts off")
 T.eq(battles.label, "3D-BTL", "the overworld-battle row carries its label")
-T.eq(battles.value(), "ON",
-  "overworld battles are on by default -- the mode's headline is the world "
-  .. "in 3D, and a battle is where the player spends half the game")
+T.eq(battles.value(), "2D-3D A",
+  "overworld battles are on by default, on the rung that stands the game's "
+  .. "own pics on the map -- the mode's headline is the world in 3D, and a "
+  .. "battle is where the player spends half the game")
 T.eq(backRow.label, "BACK SPRITES", "the back-pic row carries its label")
 T.eq(backRow.value(), "OFF",
   "and is off by default -- what the mode advertises is BOTH mons out on the "
@@ -1124,11 +1141,553 @@ Game.keypressed(keyGame, "7")
 T.neq(Curve.setting:get(), curveBefore, "7 cycles V-CURVE")
 
 local Battles = run.loader.exports.DRAMATIC_SHAPE.lib.require("OverworldBattle")
-T.eq(Battles.setting:get(), true, "3D-BTL starts on")
+
+-- The two STADIUM rungs are gated on the models being installed, and they are
+-- not installed anywhere this suite runs: the repository carries no Pokemon
+-- Stadium data, so a clean clone has none and a developer checkout has them
+-- only after tools/stadium_pack.py has been run. What the walk below is about
+-- is the LADDER -- five rungs, in order, wrapping -- so the gate is held OPEN
+-- for it and the skipping behaviour is tested on its own further down, where
+-- it is the subject rather than an accident of the machine it ran on.
+--
+-- Held in GLOBALS rather than locals, here and for the pack probe below: this
+-- chunk is at Lua's 200-local ceiling and three more would not compile.
+BATTLE_ROW_GATE = Battles.setting.gate
+Battles.setting:setGate(function() return true end)
+
+T.eq(Battles.setting:get(), true, "3D-BTL starts on 2D-3D A")
+T.eq(Battles.discs(), false, "which stages the fight on the map")
 Game.keypressed(keyGame, "8")
-T.eq(Battles.setting:get(), false, "8 toggles overworld battles off")
+T.eq(Battles.setting:get(), "flatB",
+  "8 steps to 2D-3D B -- the same pics, on the discs")
+T.eq(Battles.discs(), true,
+  "and that IS a disc rung, with no Stadium model anywhere in it")
 Game.keypressed(keyGame, "8")
-T.eq(Battles.setting:get(), true, "and back on")
+T.eq(Battles.setting:get(), "stadium",
+  "again and it is STADIUM A, the models on the map")
+T.eq(Battles.discs(), false, "back on the map")
+Game.keypressed(keyGame, "8")
+T.eq(Battles.setting:get(), "stadiumB",
+  "again and it is STADIUM B, the models on the discs")
+T.eq(Battles.discs(), true, "on the discs again")
+Game.keypressed(keyGame, "8")
+T.eq(Battles.setting:get(), false, "again and overworld battles are off")
+Game.keypressed(keyGame, "8")
+T.eq(Battles.setting:get(), true, "and the ladder wraps back to 2D-3D A")
+
+Battles.setting:setGate(BATTLE_ROW_GATE)
+
+-- ------- importing a ROM instead of being told where to put one
+--
+-- The row is an ACTION, not a setting: it has no stored rung, so it is not in
+-- SETTINGS and the mod manager's page does not carry it. What it shows is a
+-- state, and what it does is open the host's file dialog -- which is why it
+-- is absent where no dialog can be opened rather than being offered as a
+-- button that does nothing.
+;(function()
+  local Pick = run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumRomPick")
+  local Install =
+    run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumInstall")
+
+  T.check(type(Pick.canDialog()) == "boolean",
+    "the picker reports whether this platform has a file dialog at all")
+
+  -- The row is offered on EVERY platform. It used to be dropped where no
+  -- dialog could be opened, which on Android read as the feature being
+  -- missing rather than manual -- and the folder path it needed to show was
+  -- only ever written to a console a phone does not have.
+  local row = Pick.row()
+  T.check(row ~= nil, "the row is offered whatever the platform can do")
+  T.eq(row.label, "STADIUM ROM", "and says what it is for")
+  T.check(type(row.step) == "function", "and does something when pressed")
+  T.eq(row.value(),
+    Install.available() and "READY" or (Pick.canDialog() and "IMPORT" or "WHERE?"),
+    "reading READY once installed, IMPORT where a dialog can be opened, and "
+    .. "WHERE? where pressing it can only name the folder -- a row that said "
+    .. "IMPORT and then did not import would be the worse lie")
+
+  -- and the drop folder it would name is an absolute path, which the note
+  -- screen has to be able to show in full
+  T.check(type(Install.romHint()) == "string" and #Install.romHint() > 0,
+    "there is a folder to name")
+
+  -- A ROM that carries no models must be refused BEFORE anything is written.
+  -- An empty build otherwise completes with nothing attempted and therefore
+  -- nothing failed, and the marker gets written saying so -- which on a
+  -- machine that already had a set would uninstall it, because the marker is
+  -- the only thing that makes 151 files on disk count as installed.
+  T.eq(Install.beginFrom("", "empty"), false,
+    "an empty file is refused outright")
+  T.eq(select(2, Install.beginFrom(("\0"):rep(4096), "zeros")) ~= nil, true,
+    "and so is a file that is not a ROM, with a reason")
+  T.eq(Install.status.state ~= "building", true,
+    "and neither of those started a build")
+end)()
+
+-- ------- the model set, when there is one
+--
+-- Everything below that loads a .dsm needs a BUILT set, and the repository
+-- deliberately carries none: the models are Pokemon Stadium's data, built out
+-- of the player's own ROM at runtime (StadiumInstall) or by
+-- tools/stadium_pack.py into assets/stadium/ in a developer checkout. So a
+-- clean clone has nothing to read, and these say so and stand down rather
+-- than failing for the absence of data that is absent on purpose.
+--
+-- Announced rather than silent. A test that quietly evaporates when its
+-- fixture is missing is a test that has stopped running and not told anyone,
+-- which is worse than one that fails.
+HAVE_STADIUM_PACKS =
+  run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumPack").available(25)
+if not HAVE_STADIUM_PACKS then
+  print("SKIP stadium model tests -- no built .dsm set (run "
+        .. "tools/stadium_pack.py, or play once with a ROM in baseroms/)")
+end
+
+-- ------- the eyes blink once a loop, not six times a second
+--
+-- A texture animation is sampled at the SKELETAL animation's frame and HOLDS
+-- its last entry past the end of its own stream, which is what the game's own
+-- sampler does. Wrapping on the stream's length instead plays it over and
+-- over: Rattata's standby loop is 40 frames and its blink is 5, so that came
+-- out as six blinks a second.
+--
+-- Driven through a stub rather than a real rig, because building one needs
+-- meshes and there is no graphics context here -- and the rule under test is
+-- pure index arithmetic that does not care.
+;(function()
+  local Rig = run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumRig")
+  -- one prim on channel 0, whose stream values 6/7/8 map to textures 60/70/80
+  local prim = { tex = 1, texAnim = 0, texMap = { [6] = 60, [7] = 70,
+                                                  [8] = 80 } }
+  local model = {
+    prims = { prim },
+    textures = { [1] = { w = 1, h = 1 }, [60] = { w = 1, h = 1 },
+                 [70] = { w = 1, h = 1 }, [80] = { w = 1, h = 1 } },
+    -- Rattata's actual blink: open, half, closed, half, open
+    auxAnims = { { frames = 5, loopStart = 0, channels = { { 6, 8, 7, 8, 6 } } } },
+  }
+  local part = { prim = prim }
+  local stub = setmetatable({ model = model, parts = { part } }, Rig)
+
+  -- StadiumPack.image wants a real texture; what is asserted here is WHICH
+  -- index was chosen, so record it instead
+  local Pack = run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumPack")
+  local realImage = Pack.image
+  local picked
+  Pack.image = function(_, index) picked = index return nil end
+
+  local function at(frame)
+    stub.frameAt = frame
+    stub:textures(1)
+    return picked
+  end
+
+  T.eq(at(0), 60, "frame 0 of the blink is the open eye")
+  T.eq(at(1), 80, "frame 1 is half closed")
+  T.eq(at(2), 70, "frame 2 is shut")
+  T.eq(at(4), 60, "and frame 4 is open again -- one blink, five frames")
+  -- the whole point: frames 5..39 of the forty-frame idle are NOT a second
+  -- blink, they are the eye staying open
+  T.eq(at(5), 60, "frame 5, past the end of the blink, HOLDS the open eye")
+  T.eq(at(20), 60, "and so does frame 20")
+  T.eq(at(39), 60, "and frame 39, the last of the idle loop")
+
+  Pack.image = realImage
+end)()
+
+-- ------- the skeleton runs at 60, the textures step at 30
+--
+-- The animation streams carry one value per frame at 30 Hz, so replayed
+-- honestly against a 60 Hz camera every pose holds for two frames and the
+-- models visibly stutter against everything around them. StadiumRig blends
+-- between consecutive frames instead -- but NOT across a snap, because these
+-- are Euler triples and two triples that describe nearly the same rotation
+-- can be nowhere near each other component by component. Walking from one to
+-- the other is a bone flipping over inside a frame, which is exactly the
+-- glitch a naive version of this shipped with.
+--
+-- Driven on a REAL species, through a rig with no meshes (there is no
+-- graphics context here, and pose() only touches the matrix arrays).
+;(function()
+  if not HAVE_STADIUM_PACKS then return end
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local Pack, Rig = lib.require("StadiumPack"), lib.require("StadiumRig")
+  local model = Pack.load(25)                     -- Pikachu
+  local rig = setmetatable({ model = model, pivotM = {}, drawM = {},
+                             accX = {}, accY = {}, accZ = {}, parts = {} }, Rig)
+  local slot = model.ctx[Pack.SLOT.idle]
+  local anim = (slot ~= Pack.NONE) and (slot + 1) or nil
+  local frames = anim and model.anims[anim].frames or 0
+
+  -- every bone's world origin under the pose as it stands
+  local function origins()
+    local out = {}
+    for b = 1, model.boneCount do
+      local o = (b - 1) * 12
+      out[b] = { rig.drawM[o + 4], rig.drawM[o + 8], rig.drawM[o + 12] }
+    end
+    return out
+  end
+
+  T.check(frames > 8, "Pikachu's standby loop is long enough to sample")
+
+  rig:pose(anim, 3, true)
+  local a = origins()
+  rig:pose(anim, 4, true)
+  local c = origins()
+  rig:pose(anim, 3.5, true)
+  local b = origins()
+
+  T.eq(rig.frameAt, 3,
+    "half a frame in, the TEXTURE frame is still the whole one -- an eye is "
+    .. "open or it is shut and there is no halfway swap to draw")
+
+  -- the bone that travels furthest between those two frames is the one with
+  -- something to say about the blend
+  local best, moved = nil, 0
+  for i = 1, #a do
+    local d = ((c[i][1] - a[i][1]) ^ 2 + (c[i][2] - a[i][2]) ^ 2
+               + (c[i][3] - a[i][3]) ^ 2) ^ 0.5
+    if d > moved then best, moved = i, d end
+  end
+  T.check(moved > 0, "and some bone actually moves between frames 3 and 4")
+
+  -- halfway is HALFWAY: within a twentieth of the step of the midpoint of the
+  -- two frames it sits between, on every axis. A blend that overshoots, or
+  -- that walks the long way round a wrapped angle, fails this by miles.
+  local slack = moved / 20
+  for axis = 1, 3 do
+    local mid = (a[best][axis] + c[best][axis]) / 2
+    T.check(math.abs(b[best][axis] - mid) <= slack,
+      ("the half-frame pose sits between its two frames on axis %d"):format(axis))
+  end
+
+  -- and a whole frame is the frame itself, untouched: the blend has to be
+  -- exactly nothing at k = 0, or every stepped caller (the blink probe, the
+  -- oracle diff) is reading a pose the pack does not contain
+  rig:pose(anim, 4, true)
+  local again = origins()
+  T.eq(again[best][1], c[best][1],
+    "and a whole frame is that frame exactly, with nothing blended into it")
+end)()
+
+-- ------- growing out of the ball
+--
+-- The engine sizes its flat pic in the Game Boy's three steps across the
+-- twelve frames AFTER the ball has finished opening. The model runs its own
+-- ramp instead, started when the poof begins: continuous, and overlapping the
+-- ball rather than following it.
+;(function()
+  if not HAVE_STADIUM_PACKS then return end
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local Mon = lib.require("StadiumMon")
+
+  local mon = Mon.new("player")
+  T.eq(mon:growScale(), 1, "a Pokemon that is not arriving is full size")
+  T.eq(mon:beginGrow(), false,
+    "and one with no model cannot start growing -- there is nothing to size")
+
+  mon.model = { height = 10, rootScale = 1 }
+  T.eq(mon:beginGrow(), true, "with a model, the arrival starts")
+  T.eq(mon:growScale(), 0, "from nothing at all")
+  T.eq(mon:beginGrow(), false,
+    "and starting again is refused -- the engine's own send-out seam fires a "
+    .. "third of a second later and must not restart the ramp")
+
+  -- the curve: slow, then quick through the middle, then settling
+  local last, monotonic = -1, true
+  for i = 0, 10 do
+    mon.grow = i / 10
+    local s = mon:growScale()
+    if s < last then monotonic = false end
+    last = s
+  end
+  T.check(monotonic, "the ramp never goes backwards")
+  mon.grow = 0.5
+  T.eq(mon:growScale(), 0.5, "and is half size exactly half way through")
+  mon.grow = 0.25
+  T.check(mon:growScale() < 0.25,
+    "slower than linear early, so the Pokemon is still small while the ball "
+    .. "is coming apart")
+
+  -- and it ends, rather than sticking at 0.99
+  mon.grow = nil
+  mon.dt = 0
+  mon:beginGrow()
+  for _ = 1, 200 do mon:update(1 / 60) end
+  T.eq(mon.grow, nil, "the ramp finishes")
+  T.eq(mon:growScale(), 1, "at exactly full size")
+  T.eq(mon.grewOwn, true,
+    "and remembers it owned this arrival, so the engine's three-step ramp is "
+    .. "not consulted for it afterwards -- it reads 5/7 in the gap and shrank "
+    .. "the Pokemon back down at the very end of the grow")
+end)()
+
+-- ------- the pack cache must not evict a Pokemon that is standing there
+--
+-- The eviction order is keyed on LOADS, and a side only loads when its
+-- species changes -- so a Pokemon that has been out for a few turns is the
+-- least recently loaded thing in the cache. A fifth species entering the
+-- battle evicted it and RELEASED ITS TEXTURES mid-fight, and the next draw
+-- threw "Cannot use object after it has been released" from inside the scene
+-- pass, which took both models off the screen for the rest of the battle.
+;(function()
+  if not HAVE_STADIUM_PACKS then return end
+  local Pack = run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumPack")
+  local keep = Pack.KEEP
+  Pack.forget()
+  Pack.KEEP = 2
+
+  local held = Pack.load(1)
+  T.check(held ~= nil, "a model loads")
+  local slot = held.textures and held.textures[1]
+  T.check(slot ~= nil, "and carries at least one texture slot")
+
+  -- more species than the cache holds, WITHOUT saying the first is in use
+  Pack.load(4) Pack.load(7) Pack.load(10)
+  T.eq(slot.image, nil,
+    "an evicted model's texture slot is CLEARED, not left holding a released "
+    .. "object -- a released Image is still truthy, so the corpse came back "
+    .. "out of image() and died at mesh:setTexture")
+
+  -- and with `keep` said every frame, as the mode does, it is never evicted
+  Pack.forget()
+  local live = Pack.load(1)
+  for _, dex in ipairs({ 4, 7, 10, 13 }) do
+    Pack.keep(1)
+    Pack.load(dex)
+  end
+  T.eq(Pack.load(1), live,
+    "a species the mode keeps saying is on the field is still the same "
+    .. "cached model after four others have loaded past it")
+
+  Pack.KEEP = keep
+  Pack.forget()
+end)()
+
+-- ------- and an animation must not walk the Pokemon out of the shot
+--
+-- Stadium's animations were authored for a camera that followed the Pokemon;
+-- this one holds two fixed cells. 65 of the 148 send-out entrances travel
+-- more than a body-height off the spot, up to seven and a half -- which is
+-- not drama here, it is an empty tile.
+;(function()
+  if not HAVE_STADIUM_PACKS then return end
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local Pack, Rig, Mon = lib.require("StadiumPack"), lib.require("StadiumRig"),
+                         lib.require("StadiumMon")
+  local model = Pack.load(87)                    -- Dewgong, the worst of them
+  local rig = setmetatable({ model = model, pivotM = {}, drawM = {},
+                             accX = {}, accY = {}, accZ = {}, parts = {} }, Rig)
+  rig:measureBind()
+
+  -- the same quantity StadiumRig.anchor corrects -- bone origins averaged and
+  -- weighted by the vertices each bone moves -- written out here rather than
+  -- called, so this checks the behaviour and not its own arithmetic
+  local weight, total = {}, 0
+  for b = 1, model.boneCount do weight[b] = 0 end
+  for _, prim in ipairs(model.prims) do
+    for k = 1, prim.vertCount do
+      local b = prim.bone[k]
+      if weight[b] then weight[b] = weight[b] + 1; total = total + 1 end
+    end
+  end
+  local function centre()
+    local x, y, z = 0, 0, 0
+    for b = 1, model.boneCount do
+      local q = weight[b]
+      if q > 0 then
+        local o = (b - 1) * 12
+        x = x + rig.drawM[o + 4] * q
+        y = y + rig.drawM[o + 8] * q
+        z = z + rig.drawM[o + 12] * q
+      end
+    end
+    return x / total, y / total, z / total
+  end
+  local raw = model.height / (model.rootScale > 0 and model.rootScale or 1)
+  local slot = model.ctx[Pack.SLOT.entrance]
+  local anim = slot + 1
+
+  local function driftAt(frame, limit)
+    rig:pose(anim, frame, false)
+    rig:anchor(limit)
+    local x, y, z = centre()
+    return (((x - model.bindCX) ^ 2 + (y - model.bindCY) ^ 2
+             + (z - model.bindCZ) ^ 2) ^ 0.5) / raw
+  end
+
+  T.check(driftAt(40, nil) > 5,
+    "unanchored, Dewgong's entrance carries it more than five body-heights "
+    .. "off its tile -- straight out of a frame that holds about one")
+  T.check(driftAt(40, Mon.TRAVEL) <= Mon.TRAVEL * 1.001,
+    "anchored, it stays inside the travel limit")
+  -- and the animations that never travel are left completely alone
+  local before = driftAt(0, nil)
+  T.eq(driftAt(0, Mon.TRAVEL), before,
+    "a frame already inside the limit is not moved at all -- the anchor takes "
+    .. "out the EXCESS, so a lunge is still a lunge")
+end)()
+
+-- ------- the three species the extraction cannot read stand as PICS
+--
+-- Exeggutor, Tangela and Magmar come out of the ROM with standby loops that
+-- throw bones off the body; the packer measures that and flags them. They
+-- used to hold their bind pose for the whole fight, which among a hundred and
+-- forty-eight species that breathe reads as broken rather than as still. So
+-- they decline the model outright and the Game Boy's own battle pic stands
+-- instead -- the same fallback a species with no pack at all takes.
+;(function()
+  if not HAVE_STADIUM_PACKS then return end
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local Mon = lib.require("StadiumMon")
+  for _, dex in ipairs({ 103, 114, 126 }) do
+    local mon = Mon.new("enemy")
+    T.eq(mon:setSpecies(dex), false,
+      ("dex %d has corrupt animation data, so no model stands for it")
+      :format(dex))
+    T.eq(mon.rig, nil, "and there is no rig left behind to draw")
+  end
+end)()
+
+-- ------- the collapse waits for the HP bar
+--
+-- onFaint fires the moment HP reaches zero, but the engine queues the visible
+-- collapse behind the move animation and the bar drain -- seconds later. The
+-- model has to wait for the same thing, or a Pokemon lies down while its own
+-- health is still draining above it. `shownHP` is the engine's own bar
+-- position, so this is the bar and not a guess at how long it takes.
+;(function()
+  local Stad = run.loader.exports.DRAMATIC_SHAPE.lib.require("Stadium")
+  local ready, due = Stad._faintReady, Stad._faintStillDue
+
+  T.eq(ready({ shownHP = 19, mon = { hp = 0 } }), false,
+    "a battler at 0 HP whose bar still reads 19 is NOT ready to collapse")
+  T.eq(ready({ shownHP = 1, mon = { hp = 0 } }), false,
+    "nor at one point left on the bar")
+  T.eq(ready({ shownHP = 0, mon = { hp = 0 } }), true,
+    "and is the moment the bar reaches zero")
+  T.eq(ready({ mon = { hp = 0 } }), true,
+    "a battler with no bar to drain collapses at once, rather than never")
+  T.eq(ready(nil), false, "and a battler that is gone is not ready")
+
+  T.eq(due({ faintQueued = true, mon = { hp = 0 } }), true,
+    "a queued faint at 0 HP is still owed")
+  T.eq(due({ faintQueued = true, mon = { hp = 12 } }), false,
+    "one that has been healed since is not -- the debt is dropped, not paid "
+    .. "late at whoever is standing there")
+  T.eq(due({ mon = { hp = 0 } }), false, "and an unqueued battler owes nothing")
+end)()
+
+-- ------- and it gets to FINISH
+--
+-- The engine takes a fainted pic off the field when its slide ends, which is
+-- fourteen frames of a 60 Hz clock -- under a quarter of a second. The
+-- shortest faint animation in the Stadium set is 49 frames of a 30 Hz one,
+-- the median 110 and the longest 230, so held to the pic's window every model
+-- was cut off inside the first fifth of its own collapse. It now stays until
+-- the animation is done, and not one frame past that.
+;(function()
+  local Stad = run.loader.exports.DRAMATIC_SHAPE.lib.require("Stadium")
+  local onField = Stad._onField
+
+  -- the engine's own guards, mirrored in the shape onField reads them
+  local battle = { fxHidden = function() return false end,
+                   fxFaintActive = function(_, b) return b.sliding end }
+  local function mon(state, done)
+    return { state = state, finished = function() return done end }
+  end
+
+  battle.enemy = { sprite = true }
+  T.eq(onField(battle, "enemy", mon("idle", false)), true,
+    "a Pokemon that is standing there is on the field")
+
+  battle.enemy = { sprite = true, fainted = true, sliding = true }
+  T.eq(onField(battle, "enemy", mon("faint", false)), true,
+    "and one whose pic is still sliding is too, as it always was")
+
+  battle.enemy = { sprite = true, fainted = true, sliding = false }
+  T.eq(onField(battle, "enemy", mon("faint", false)), true,
+    "the pic has gone but the model has not finished falling -- it STAYS, "
+    .. "which is the whole of the fix: a quarter-second window was cutting "
+    .. "off animations that run for one to eight seconds")
+  T.eq(onField(battle, "enemy", mon("faint", true)), false,
+    "and the frame its collapse finishes, it goes -- nothing is left lying "
+    .. "on the field for the rest of the fight")
+  T.eq(onField(battle, "enemy", mon("idle", false)), false,
+    "a fainted battler whose model never got as far as the faint goes with "
+    .. "the pic, exactly as before")
+  T.eq(onField(battle, "enemy", nil), false,
+    "and a side with no model at all is not held open by this")
+
+  -- ------- FLY and DIG take it off the field entirely
+  --
+  -- The charge turn runs a 19-24 frame slide and ends by setting
+  -- `picFx[battler].hidden`; the release turn clears it. That field is the
+  -- engine's whole answer to "is this Pokemon on screen", and it is NOT
+  -- fxHidden, which is the damage blink alone -- so a model reading only the
+  -- blink stood on its tile while every attack aimed at it missed.
+  battle.enemy = { sprite = true }
+  battle.picFx = { [battle.enemy] = { hidden = true } }
+  T.eq(onField(battle, "enemy", mon("attack", false)), false,
+    "a Pokemon that has flown up or dug in is not on the field, however "
+    .. "much of its own animation is still to play")
+
+  battle.picFx = { [battle.enemy] = { kind = "slideOff", t = 4 } }
+  T.eq(onField(battle, "enemy", mon("attack", false)), true,
+    "but it IS while the engine's slide is still running -- which is the "
+    .. "window its own launch animation plays in")
+
+  battle.picFx = { [battle.enemy] = {} }
+  T.eq(onField(battle, "enemy", mon("idle", false)), true,
+    "and a pic program that has finished and cleared leaves it standing")
+  battle.picFx = nil
+end)()
+
+-- ------- and the two STADIUM rungs are SKIPPED when the models are not there
+--
+-- The mod ships no Pokemon Stadium data, so on a machine whose owner has not
+-- supplied that ROM the row has three stops rather than five. Checked by
+-- gating them off by hand rather than by hiding the packs, because what is
+-- being tested is the ladder's behaviour and not the installer's.
+--
+-- 2D-3D B survives that, which is the point of it being its own rung: the
+-- discs are generated in Lua and the Pokemon on them are the game's own art,
+-- so the disc framing is available to a player who has no Stadium ROM at all.
+;(function()
+  local gate = Battles.setting.gate
+  Battles.setting:setGate(function(value)
+    return value ~= "stadium" and value ~= "stadiumB"
+  end)
+  T.eq(Battles.setting:rungs(), 3,
+    "with no models built the 3D-BTL row offers three rungs, not five")
+  Battles.setting:setValue(true, Game)
+  Game.keypressed(keyGame, "8")
+  T.eq(Battles.setting:get(), "flatB",
+    "8 still reaches 2D-3D B, which needs no ROM")
+  Game.keypressed(keyGame, "8")
+  T.eq(Battles.setting:get(), false,
+    "and the next press steps straight past both STADIUM rungs to OFF")
+  Game.keypressed(keyGame, "8")
+  T.eq(Battles.setting:get(), true, "and back to 2D-3D A")
+
+  -- a save that CHOSE stadium before the ROM went missing reads as the
+  -- default, rather than as a mode with nothing behind it -- and the stored
+  -- value is left alone, so putting the ROM back restores the choice
+  Battles.setting.index = 3
+  T.eq(Battles.setting:get(), true,
+    "a stored STADIUM with no models behind it reads as 2D-3D A")
+  -- and opening the gate hands the choice straight back, off the stored
+  -- value that was never overwritten. Opened by HAND rather than by putting
+  -- the real gate back: the real one answers "are the models installed on
+  -- this machine", which is false wherever this suite runs from a clean
+  -- clone -- and the subject here is the ladder, not the installer.
+  Battles.setting:setGate(function() return true end)
+  T.eq(Battles.setting:get(), "stadium",
+    "and comes back the moment the models do")
+  Battles.setting:setGate(gate)
+  Battles.setting:setValue(true, Game)
+end)()
 
 -- ------- SELECT makes the same step the 3 key does
 --
@@ -2579,7 +3138,7 @@ T.eq(Battles.backPinned(), false, "so nothing is pinned to the menu")
 
 local backGame = { save = { options = { modOptions = {} } },
                    mods = { modOptions = {} } }
-Battles.setting:setIndex(1, backGame)              -- 3D-BTL on
+Battles.setting:setValue(true, backGame)           -- 3D-BTL on 2D-3D
 Battles.backSetting:setIndex(2, backGame)          -- BACK SPRITES on
 T.eq(Battles.backPinned(), true, "switched on, the back pic is pinned")
 T.eq(backGame.save.options.modOptions.DRAMATIC_SHAPE.battleBack, true,
@@ -2590,7 +3149,7 @@ T.eq(backGame.save.options.modOptions.DRAMATIC_SHAPE.battles, true,
 -- and it means nothing at all with staged battles off: there is no staged
 -- shot for a back pic to be pinned in front of, and the engine's own battle
 -- screen already draws exactly this
-Battles.setting:setIndex(2, backGame)
+Battles.setting:setValue(false, backGame)
 T.eq(Battles.backPinned(), false,
   "with 3D-BTL off the setting decides nothing, whatever it is left at")
 T.eq(Battles.backSetting:get(), true, "without being rewritten underneath")
@@ -2606,7 +3165,7 @@ T.check(offIds["DRAMATIC_SHAPE:battles"], "3D-BTL itself is still offered")
 T.check(not offIds["DRAMATIC_SHAPE:battleBack"],
   "but BACK SPRITES is off the menu while there is no staged fight to be about")
 
-Battles.setting:setIndex(1, backGame)
+Battles.setting:setValue(true, backGame)
 local onRows = Runtime.call("ui.options.rows", function(_, r) return r end,
                             backGame, { { id = "tilt" } })
 local onAt = {}
@@ -4927,6 +5486,106 @@ end)()
   T.eq(select(1, Gun.ammo()), mag, "a refused shot spends no round")
   T.eq(Gun.reload(), false, "nor reloaded when it is already full")
   T.eq(Gun.visible(), false, "and it is not drawn with the mode off")
+end)()
+
+-- ------- STADIUM: the .dsm packs, and the rig that reads them
+--
+-- Wrapped in its own scope for the same reason the horde block above is:
+-- the main chunk is at Lua's 200-local ceiling, so a new top-level local
+-- would refuse to compile.
+--
+-- What this is really guarding is the FORMAT SEAM. tools/stadium_pack.py
+-- writes those files and lib/StadiumPack.lua reads them, and the two agree
+-- only by having been written to agree -- there is no schema between them.
+-- A field inserted on one side and not the other slides every byte after it
+-- and produces no error at all: the models load, the numbers are garbage,
+-- and every Pokemon is silently scaled to nothing. That is exactly what
+-- happened once during development, and the assertion that caught it is the
+-- one below -- walk the bind pose with the REAL rig code and check it
+-- against the header the packer wrote, which cannot agree by accident.
+;(function()
+local Pack = run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumPack")
+local Rig = run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumRig")
+
+-- The packs are generated (tools/stadium_pack.py) and a checkout without
+-- them is a legitimate state -- the mode declines per Pokemon. So the whole
+-- block is skipped rather than failed when they are not there.
+if not Pack.available(25) then
+  T.check(true, "stadium packs are not installed -- pack assertions skipped")
+  return
+end
+
+local pikachu = Pack.load(25)
+T.check(pikachu ~= nil, "a stadium pack loads")
+T.eq(pikachu.species, 25, "and knows which species it is")
+T.eq(pikachu.boneCount, 37, "Pikachu's rig is 37 bones, as the extract reports")
+T.check(pikachu.rootScale > 0.09 and pikachu.rootScale < 0.11,
+  "the model_root scale came through as the 0.1 the geo layout sets")
+
+-- the battle system's own slot table: idle is animation 0 for all 151
+-- species (manifest.json's animationSlots calls that one `code` evidence)
+T.eq(pikachu.ctx[Pack.SLOT.idle], 0, "the idle slot resolves to animation 0")
+T.check(pikachu.ctx[Pack.SLOT.faint] ~= Pack.NONE, "and the faint slot resolves")
+T.check(pikachu.ctx[Pack.SLOT.entrance] ~= Pack.NONE, "and the entrance slot")
+
+-- the move table is the Gen 1 move id, which is the engine's own `index`
+T.eq(#pikachu.moveAnim, Pack.N_MOVES, "every move id has a row")
+T.check(pikachu.moveAnim[85] ~= Pack.NONE,
+  "and THUNDERBOLT (move 85) names an animation Pikachu has")
+
+-- animations decode lazily; asking for one is what builds its tracks
+local tracks = Pack.tracks(pikachu, 1)
+T.check(type(tracks) == "table", "an animation's tracks decode on demand")
+local animated = 0
+for b = 1, pikachu.boneCount do if tracks[b] then animated = animated + 1 end end
+T.check(animated > 0 and animated <= pikachu.boneCount,
+  "and move a sane number of the rig's bones")
+
+-- THE SEAM. Walk the bind pose with the shipping rig code and measure it
+-- the way tools/stadium_pack.py measured it. The packer's own answer was
+-- checked against the reference glTF export on all 151 species, so
+-- agreement here means the byte layout, the bone tree, the rotation basis
+-- and the two-chain scale split all survived the trip into Lua.
+local function bindExtent(model)
+  local rig = setmetatable({
+    model = model, pivotM = {}, drawM = {}, accX = {}, accY = {}, accZ = {},
+    parts = {},
+  }, Rig)
+  rig:pose(nil, 0, false)
+  local drw = rig.drawM
+  local lo, hi = math.huge, -math.huge
+  for _, prim in ipairs(model.prims) do
+    for k = 1, prim.vertCount do
+      local o = (prim.bone[k] - 1) * 12
+      local y = drw[o + 5] * prim.px[k] + drw[o + 6] * prim.py[k]
+                + drw[o + 7] * prim.pz[k] + drw[o + 8]
+      y = y * model.rootScale
+      if y < lo then lo = y end
+      if y > hi then hi = y end
+    end
+  end
+  return hi - lo, lo
+end
+
+for _, dex in ipairs({ 25, 6, 95, 143 }) do
+  local model = Pack.load(dex)
+  if model then
+    local h, f = bindExtent(model)
+    -- a tenth of a game unit of slack: bone translations are stored as
+    -- integers and the packer measured in doubles
+    T.check(math.abs(h - model.height) < 0.5,
+      ("species %d: the rig's bind pose is the height the pack recorded "
+       .. "(walked %.2f, header %.2f)"):format(dex, h, model.height))
+    T.check(math.abs(f - model.floor) < 0.5,
+      ("species %d: and its feet are where the pack put them"):format(dex))
+  end
+end
+
+-- the three species whose standby loop is corrupt in the source extraction
+-- are marked to hold their bind pose instead of coming apart
+T.eq(Pack.load(126).staticPose, true,
+  "Magmar is held at its bind pose -- its source animations are broken")
+T.eq(pikachu.staticPose, false, "and a species with good data is not")
 end)()
 
 Pipelines.reset()

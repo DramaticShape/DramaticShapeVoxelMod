@@ -1,5 +1,547 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+
+- **STADIUM battles, and a disc stage: three new rungs on the 3D-BTL row.**
+  The row that used to read ON / OFF now reads **2D-3D A / 2D-3D B /
+  STADIUM A / STADIUM B / OFF**, which is two independent choices laid out
+  as one ladder -- WHAT is standing there, and WHERE:
+
+  |            | on the MAP  | on two DISCS |
+  | ---------- | ----------- | ------------ |
+  | **pics**   | 2D-3D A     | 2D-3D B      |
+  | **models** | STADIUM A   | STADIUM B    |
+
+  2D-3D A is what ON always was -- the fight staged on the map with the Game
+  Boy's own pics stood up on their tiles as quads. The STADIUM rungs keep
+  the whole staging and replace those quads with the **Pokemon Stadium
+  battle models**: all 151 species, skinned, lit and animated, playing the
+  animation the move being used actually calls for.
+
+  **A** stands the fight on the map, in the world's own light and weather.
+  **B** stands it on two discs against the sky and draws no map at all --
+  the Game Boy's own framing, staged rather than found.
+
+  All four combinations are reachable rather than only the diagonal. The
+  discs do not know what is on them -- they are two platforms at two cells,
+  drawn off the arena alone -- so **2D-3D B** costs one value on the ladder
+  and gives the disc framing to a player who has no Pokemon Stadium ROM and
+  would rather not go and find one. It needs nothing the base game did not
+  ship: the stage is generated in Lua and the Pokemon on it are the game's
+  own art.
+
+  B exists because the map does not always cooperate. Half of Kanto's
+  interiors are furniture, a cave floor can be nothing but two-cell
+  corridors, and some maps have nowhere a fight can be SEEN from a low
+  camera and are declined outright -- which drops the player back to the
+  flat battle screen with no warning. A carried stage has none of those
+  problems: it works on every map, at every step, and the framing is the
+  same every time. What it gives up is the thing A is for, which is
+  fighting somewhere real.
+
+  It is abstracted from the GROUND, not from the world. The sky behind the
+  discs is the hour's own -- gold at dusk, navy at midnight -- and a fight
+  in a cave or a shop is under that place's void and its own flat light, so
+  walking into Mt. Moon at night and starting a battle looks like Mt. Moon
+  at night.
+
+  The discs themselves are flat: one quad apiece, wearing a painted circle
+  that fades out at its rim, sized to the Pokemon standing on it. The fade
+  is an ordered dither baked into the texture's alpha rather than a smooth
+  ramp -- the scene shader discards under half alpha outright, so a ramp
+  would come out as a hard-edged circle -- which is the same trick the sky's
+  own bands use and reads as intended on a mode built out of visible texels.
+
+  Nothing else about the fight moves. The arena is picked the same way, the
+  camera is solved the same way, and the HUDs, the frosted text box, the
+  move animations and the depth of field are all exactly what 2D-3D draws
+  -- because every one of those is hung off the arena's CELLS rather than
+  off the pics. Swapping what stands on a cell changes nothing about where
+  the cell projects to, which is why this is a rung on the mode rather than
+  a second mode.
+
+  The animations are driven from the fight itself: a move plays the animation
+  that species' own battle table names for that move (the Stadium ROM's
+  per-species move table, packed into the assets, keyed by the same Gen 1
+  move id the engine's move defs already carry -- so DIG really does put
+  Diglett into the ground), fainting plays the faint and holds on its last
+  frame, and a send-out grows the Pokemon out of the ball as it opens and
+  plays the entrance with it. Between all of that, the standby loop. The eyes blink and go
+  dizzy on their own counter, which is a texture animation glTF has no
+  channel for and the pack carries anyway. Charmander's tail flame and
+  Weezing's gas are there too, drawn additively over the body.
+
+  The models go through the mod's OWN vertex format and shader rather than
+  a path of their own, which is what earns them everything the rest of the
+  diorama has: the depth buffer decides what is in front of what, the sun
+  pass throws a shadow of the actual pose, the hour's tint lands on them,
+  the hit flash flattens them and the tilt-shift and depth of field see
+  them as part of the picture. Skinning is done on the CPU -- these are
+  674-vertex models and exactly two are ever on screen -- and once per
+  frame, so the sun, the camera and both VR eyes draw the same posed mesh.
+
+  It declines per POKEMON rather than per battle: a species whose pack is
+  missing, a substitute doll, or the trainer's own pic before the send-out
+  all fall back to the flat card, on that side alone, with the other side
+  keeping its model.
+
+  Stored as new values on the same key, with 2D-3D A still first -- so a
+  save written before this update reads back as exactly the mode it was
+  written for.
+
+- **The models are built on your machine, from your own cartridge.** The
+  mod ships no Pokemon Stadium data and cannot: it is that game's. What it
+  ships is the READER.
+
+  **Press STADIUM ROM on the OPTIONS menu and pick the file.** The row opens
+  the host's own file dialog -- osascript on macOS, PowerShell's
+  OpenFileDialog on Windows, zenity then kdialog on Linux, which are the same
+  four the engine's own Game Boy importer uses -- and the models are built
+  from whatever comes back. `.z64`, `.n64` and `.v64` all work; the byte
+  order is detected. The row reads IMPORT before and READY after, and
+  pressing it again imports a different cartridge.
+
+  The ROM is **not kept**: it is read, built from, and forgotten. A Stadium
+  cartridge is 32 MB and the models built out of it are 34, so keeping both
+  would double the cost of the feature for a file with no further use -- the
+  marker still records its md5, so a swapped cartridge is noticed.
+
+  The wrong file is refused with a reason on the loading screen rather than
+  half-built, and refused BEFORE anything is written -- which matters more
+  than it sounds, because the marker is the only thing that makes 151 files
+  on disk count as installed, so a refusal that wrote one anyway would
+  uninstall a working set.
+
+  The original route still works everywhere, and is the answer on the
+  platforms with no dialog (Android; a Linux install with neither zenity nor
+  kdialog): drop a Pokemon Stadium (US) ROM into a `baseroms/` folder beside
+  the game, straight in it rather than in a revision subfolder under it, and
+  the first time it runs
+  the 151 battle models are built out of it on a loading screen, in about ten
+  seconds, one species a frame. The screen says what it is doing in those
+  words -- **ONE-TIME EXTRACTION OF STADIUM ASSETS** -- carries a progress bar
+  filled by species written rather than by elapsed time, and names the
+  Pokemon it is on, which is the difference between a bar that is trusted and
+  one that is suspected of having hung. After that they sit in
+  the save directory and are read like any other asset. Until then the two
+  STADIUM rungs simply are not on the row: they are skipped rather than
+  shown and refused, because a setting that can be selected and then does
+  nothing is indistinguishable from a broken mod.
+
+  This is the same arrangement the engine already has for the Game Boy ROM
+  it is a recompilation of, and it is why nothing ROM-derived is in this
+  repository.
+
+  Doing it needed the whole extraction pipeline in Lua: the archive and its
+  Yay0 streams (`StadiumRom`), a geo-layout walk and an F3DEX2 interpreter
+  with six texture codecs and a bit-packed animation sampler
+  (`StadiumFragment`), the generated flame and gas stand-ins (`StadiumFx`),
+  and the bind-pose measurement and packer (`StadiumBuild`).
+
+  **Pure Lua, and deliberately so: it runs anywhere LOVE does, phones
+  included.** No FFI, no native helper, no second process, nothing outside
+  the standard library and stock LOVE calls. On desktop it is about seven
+  seconds and peaks at 68 MB of Lua heap, 32 MB of which is the cartridge
+  itself; the working set does not grow across the run.
+  `tests/stadium_budget_test.lua` measures both and fails if either stops
+  being bounded, because a transient peak a desktop shrugs off is what gets
+  a process killed on a phone. On Android the save directory is the app's
+  external-files folder, so `baseroms/` there is reachable over USB or a
+  file manager without root.
+
+- **Acknowledgement for [pret/pokestadium](https://github.com/pret/pokestadium)**,
+  in README.md, model_extract/README.md and mod.card. The STADIUM extractor is
+  original code, but the decompilation is what it was written against -- the
+  bone matrix chain and the fact that scale is kept out of it, the rotation
+  basis, the animation and texture-animation samplers, the battle context
+  slots and the move-id constants all came from reading that project. None of
+  its code or data is vendored here or needed to run this, and the credit says
+  so as plainly as it says what was owed.
+
+- `tools/stadium_pack.py` now reads the ROM directly rather than a
+  pre-extracted tree, which makes it the ORACLE the Lua port is verified
+  against: `tests/stadium_extract_test.lua` runs both over the same
+  cartridge and requires all 151 packed files to come out **byte for byte
+  identical**. That is the only honest test of a port of that much numeric
+  code -- every rounding mode, iteration order and off-by-one shows up as a
+  differing byte, and there are thirty-four megabytes of them.
+
+- `ModSetting:setValue`, which sets a setting by its stored value rather
+  than by its place on the ladder, and `ModSetting:setGate`, which lets a
+  rung exist only when there is something behind it. 3D-BTL grew two rungs
+  in the middle of itself, and every caller that had counted to two would
+  otherwise have quietly meant something else afterwards.
+
+- `tests/stadium_shots.lua`, a shot driver for both rungs, with a control
+  mode and a pinned clock so two runs of it can be compared.
+
+- **`tests/stadium_anim_qa.lua`: every Pokemon, every animation, every
+  frame.** A battle asks a species for one of its animations and then poses,
+  skins, re-textures and draws it sixty times a second, and nothing exercised
+  that chain -- the pack probe reads the format and walks a bind pose, the
+  shot drivers show one species in one animation at a time. So the failures
+  only some species have had no way of being found except by a player calling
+  that Pokemon out, which is exactly how the eviction crash above was found.
+
+  This is that sweep, headless: the real StadiumPack, StadiumRig and
+  StadiumMon over stubs for the three things a graphics context provides, and
+  the stubs are not lenient -- a released object throws with LOVE's own
+  message, because a stub that quietly accepted one would hide the class of
+  bug the sweep exists to find. 151 species, 403,716 posed frames, 25
+  seconds. It also drives the state machine over all 165 move slots and
+  reproduces the cache eviction directly, which no amount of playing one
+  species' animations can reach.
+
+  What it found, and what happened to each:
+
+  | finding | count | outcome |
+  | --- | --- | --- |
+  | pack cache evicted a model still on the field | 2 | **fixed** -- see above |
+  | animation walks the Pokemon off its tile | 65 entrances, 36 hits, 35 faints | **fixed** -- see above |
+  | part has no texture | 104,728 | **not a defect.** 39 primitives across 37 species, 1.6% of the set's vertices, every one with all-zero UVs: they are flat-shaded geometry in the original. The pack stores texture indices one-based, so the packer's `0xFFFF` "untextured" sentinel arrives as 65,536 and resolves to nothing, which is correct. Counted rather than reported now |
+  | pose flies apart | 250 | **understood, left alone.** Two species in one animation each: Farfetch'd's entrance at 6.0x its bind height and Dewgong's at 6.1x, both just over the threshold, and both because the measurement is a bounding box that includes an authored trail -- Farfetch'd's is a dedicated 30-vertex primitive on a five-bone chain. The bodies are intact and, since the anchor, in frame |
+  | NaN or infinite vertex, rig would not build, loopStart out of range, missing aux animation, track indexed off its end, move slot with no animation | 0 | none |
+
+  The three species the packer already declines (Exeggutor, Tangela, Magmar)
+  are skipped rather than swept: they are never posed in a game, and sweeping
+  them anyway produced 356 of the 362 original "flies apart" findings.
+
+### Fixed
+
+- **Idle animations snapped, and then ran at half the frame rate.** Two
+  bugs with the same cause, fixed in opposite directions.
+
+  The animation streams are not keyframes: they carry one value per frame at
+  30 Hz and the game steps them. Blended naively against a 60 Hz camera
+  that produced the reported glitch -- Rattata's idle snapping almost upside
+  down for a frame, Charmander's arms turning inside out for a few --
+  because rotations here are **Euler triples**, and two triples can describe
+  nearly the same orientation while being nowhere near each other component
+  by component. `(0, 20976, 32736)` and `(0, -19936, -5904)` are a real
+  consecutive pair out of the set. Walking from one to the other passes
+  through orientations that are nothing like either end.
+
+  Dropping the blend fixed that and cost the smoothness: every pose then
+  held for two frames, and a set of models moving at half the rate of
+  everything around them reads as a stutter. So the blend is back, and the
+  snaps are **detected** rather than smoothed. A bone whose rotation moves
+  more than a quarter turn inside one 30 Hz frame is not being animated, it
+  is being re-expressed, and it holds its frame instead of blending -- all
+  three components together, because they are one rotation. The same guard
+  covers a translation that teleports more than half the Pokemon's own
+  height in a frame. Angles blend the short way round the +-pi seam, and
+  texture animations still step whole frames, because an eye is open or shut
+  and there is no halfway swap to draw.
+
+  Measured, not eyeballed: walking every species' standby loop in quarter
+  frames and differencing each bone's world origin against itself, the
+  number of species that jump more than a quarter of their own height in a
+  quarter frame goes **42 -> 11 -> 3**: naive blend, stepped, guarded blend.
+  The three that remain (Pidgeot, Dodrio, Grimer) have erratic rotation data
+  at source and are held rather than smoothed, which is exactly the guard
+  doing its job.
+
+- **Exeggutor, Tangela and Magmar are drawn as battle sprites instead of
+  models.** Those three come out of the ROM with standby loops that throw
+  bones hundreds of units off the body -- the game's own index arithmetic
+  evidently reads their channel streams differently from the way this does.
+  They used to stand still in their **bind pose** instead, on the reasoning
+  that a Pokemon looking like itself beats one coming apart.
+
+  It does, but only just: a bind pose is a rigging pose, not a portrait, and
+  three species holding a T-pose among a hundred and forty-eight that
+  breathe read as broken rather than as still. So they now decline the model
+  outright and the Game Boy's own battle pic stands on the tile instead --
+  the same per-Pokemon fallback a species with no pack at all already took,
+  in the same arena, under the same light.
+
+  Keyed on the packer's own measurement rather than on a list of dex
+  numbers, so a re-extraction that fixes those streams -- or breaks a fourth
+  species -- moves this with it.
+
+- **The eyes blinked several times a second.** A texture animation was
+  running on a clock of its own and wrapping on its own stream's length.
+  Rattata's standby loop is forty frames and its blink is five -- `6 8 7 8
+  6`, open through shut and back -- so that played it six times a second,
+  and every species with a short blink twitched the same way.
+
+  Two things were wrong, and the data says so plainly: 507 of the 691
+  animation/texture-animation pairs in the set are exactly the same length
+  as each other, which is what one shared frame counter looks like from the
+  outside. So the texture animation now rides the SKELETAL animation's own
+  frame, and it HOLDS its last entry past the end of its stream rather than
+  looping -- which is what the game's own sampler does (`func_80017540`).
+  Rattata now blinks once at the top of each idle loop and keeps its eyes
+  open for the other thirty-five frames.
+
+  The frame is not recomputed for the textures; `pose` stashes the one it
+  resolved and `textures` reads it, so the two cannot drift apart.
+
+- **The faint animation no longer plays while the HP bar is still
+  draining.** `onFaint` runs the instant HP reaches zero, but the engine
+  queues the visible collapse behind the move animation and the bar drain
+  -- and that drain takes real time, some two and a half seconds on a
+  full-health Pokemon. The model was therefore lying down while its own
+  health went on emptying above it.
+
+  The request is now recorded when HP hits zero and played when the bar
+  reaches zero, off the engine's own `shownHP` -- the same number the bar is
+  drawn from, so the two cannot drift. A faint that stops being owed in the
+  meantime (a revive, a battler replaced under us) is dropped rather than
+  fired late at whoever is standing there. Measured rather than eyeballed:
+  the shot driver's `DS_FAINT` case prints the frame the bar empties against
+  the frame the animation starts, and they are the same frame.
+
+- **Being hit played the ATTACK animation.** The context slot the mod called
+  `hit` is not a damage reaction: read against the move table, Bulbasaur's is a
+  95-frame animation that 66 of its moves play, and Pidgey's is 138 frames --
+  four and a half seconds -- shared by 111 of its moves. That is the species'
+  DEFAULT ATTACK, which is why taking damage looked exactly like swinging: it
+  was the swing. Slots 173, 178, 179, 180 and 181 all point at the same one.
+
+  Nor is a reaction hiding elsewhere. Exactly one animation per species is
+  claimed by no slot and no move, and it is the same length as that species'
+  idle for essentially all of them -- 48/48, 56/56, 60/60, 84/84 -- so it is a
+  second standby loop, not a recoil. **This set has no damage reaction in it.**
+
+  So damage now plays nothing and the Pokemon carries on with what it was
+  doing, which is what the engine already communicates through its own screen
+  flash, pic blink and HP drain. The slot is renamed `attack_default`
+  throughout (a label on a position -- the file format is the ORDER, so no
+  bytes changed), and the generic swing a move with no table entry falls back
+  to now uses it rather than resolving to the standby loop.
+
+- **The battle menu no longer changes colour with the scenery.** There was a
+  pass that measured each frosted panel's average brightness and flipped the
+  glyphs to white over a dark one, with hysteresis so a drifting camera could
+  not strobe them. It worked, and it was still wrong: the battle menu is the
+  part of the frame the player reads constantly, and having its colour depend
+  on where the camera happens to point makes it unreliable furniture. Gen 1's
+  battle ink is black, so it is black -- on a cave floor as much as on a
+  meadow -- and the panel's tint, which always pushes toward white, is what
+  earns it its contrast. Removing it also took out a one-pixel GPU readback
+  that ran several times a second to answer a question nothing asks any more.
+
+- **The required ROM is now named everywhere: Pokemon Stadium (US) 1.0.** It
+  always was the only one that works -- every offset in the reader was
+  measured against that cartridge -- but the docs and the file picker just
+  said "Pokemon Stadium (US)", which is three different ROMs. The picker's
+  title, the OPTIONS help, the README, mod.card and the manifest all name the
+  revision now, the README carries the reference md5
+  (`ed1378bc12115f71209a77844965ba50`) so a player can check their own file,
+  and a build from anything else says so on the loading screen as well as the
+  console rather than quietly producing wrong models.
+
+- **The extraction screen just says STADIUM EXTRACTION now**, with the
+  progress bar and the species name under it; the "this runs once" line is
+  gone.
+
+- **Pokemon now grow out of the ball, instead of appearing beside it.**
+  Measured, the send-out is: the ball is thrown, the POOF animation runs for
+  27 frames, and `startGrowIn` fires on the frame AFTER it ends. So the model
+  did not begin to exist until the ball had finished opening -- the ball came
+  apart, and then a Pokemon was switched on next to it.
+
+  The engine's own ramp is the Game Boy's three steps (0, 3/7, 5/7, full)
+  across the twelve frames after that, which on a 56-pixel sprite is a chunky
+  pop and on a smooth 3D model is just a pop.
+
+  The model now runs its own ramp, started when the POOF BEGINS and
+  continuous: it grows out of nothing while the ball is coming apart and
+  reaches full size exactly as the engine's own grow finishes -- 39 frames
+  end to end, which is the poof's 27 plus the engine's 12. Smoothstep rather
+  than linear or ease-out, because the ball is still opening through the first
+  half and a curve that was already near full size by then would have the
+  Pokemon standing about waiting for it. The entrance animation starts with
+  the grow, so the arrival is one performance rather than a grow followed by
+  a flourish.
+
+  Its own ramp OWNS the arrival once it starts: falling back to the engine's
+  afterwards shrank the Pokemon from 0.96 back to 0.71 and then snapped it to
+  full, because the two finish a few frames apart -- a visible hitch at the
+  end of the one animation that exists to not have one.
+
+- **The first Pokemon of a battle arrived, left, and arrived again.** Every
+  guard deciding whether the player's Pokemon is on the field is a field the
+  engine sets once the battle is RUNNING, and during the opening none of them
+  is set yet: `showPlayerBack` is still nil (BattleState assigns it further
+  in), `playerBackPic` is nil with it, and `sendingOut` does not go true until
+  the ball is thrown. So the whole intro read as "this Pokemon is standing on
+  the field" -- two and a half seconds of it, on its tile, playing its standby
+  loop, before the trainer sprite it is meant to be hiding behind had even
+  appeared. It then vanished when that sprite arrived and came back with its
+  entrance when the ball opened. A switch has no intro, which is why a switch
+  always looked right and was the thing worth comparing against. The player's
+  side is now simply not on the field during the intro phase.
+
+- **The anchor made birds shake, and the shake read as fast flapping.** The
+  body estimate it corrects toward was the MEDIAN bone origin -- robust to a
+  few bones flung out, which is what it was chosen for, and wrong in a way
+  that only shows on a flapping model: a median is a RANK, and on a bird most
+  of the skeleton is wing, so which bone sits at the middle of the sorted list
+  swaps between the up cluster and the down one every beat. Measured, the
+  estimate moved a tenth of a body-height between adjacent half-frames on
+  Pidgey and three whole body-heights on Pidgeot, and the anchor turned that
+  into a translation of the entire Pokemon -- the body counter-shaking against
+  its own wings, which reads as flapping at twice the real speed.
+
+  The centre is now the bone origins averaged and **weighted by how many
+  vertices each bone moves**. The weights are a property of the mesh, computed
+  once, so there is no rank to flip -- and a bone with little geometry barely
+  counts, which is the robustness the median was for in the first place
+  (Farfetch'd's trail is 30 vertices on five bones). On top of that the
+  correction is low-passed, so what survives is where the Pokemon has drifted
+  to and never how it is shaking on the way. Pidgey's shake goes from 0.24 to
+  **0.10 pixels a frame** on a fourteen-pixel model, and travel correction
+  improved with it.
+
+  Two species -- Pidgeot and Dodrio -- have standby loops with genuinely junk
+  rotation frames, which move the estimate three and two body-heights in a
+  single frame against a fifth of a body-height for the fastest real motion in
+  the set. No filter separates those: rate-limiting the correction bounded the
+  shake but put 33 of the 148 entrances back outside the frame, and
+  rate-limiting the measurement could not tell a spike from an excursion
+  because they are only a factor of fifteen apart. So each species' own
+  standby loop is walked once, at rig construction, and one whose estimate is
+  that unsteady is **not anchored at all**: it travels as far as its animation
+  says and does not vibrate, which is exactly how it behaved before the anchor
+  existed. One species trading a framing problem for no problem beats 147
+  trading a solved framing problem for a shake.
+
+- **A Pokemon calling out a fifth species killed every model in the fight.**
+  Reported as `Cannot use object after it has been released` out of
+  `Voxel3D.draw`, after which nothing 3D drew for the rest of the battle.
+
+  The pack cache holds four models and evicts the least recently *loaded* --
+  and `load` only runs when a side's species CHANGES, so a Pokemon that has
+  been standing there for a few turns is the oldest entry in the cache. Send
+  out a fifth species and it was evicted mid-fight and **its textures
+  released**, while it was still being drawn sixty times a second.
+
+  Two things were wrong. The eviction released each texture but left the dead
+  object in its slot -- and a released Image is still a truthy value, so the
+  next `image()` handed the corpse straight back out to `mesh:setTexture`.
+  Slots are now cleared, so an evicted model simply decodes its textures
+  again. And the mode now says, every frame, which two species are actually
+  standing there (`StadiumPack.keep`), so the two in use are always the two
+  most recent and cannot reach the front of the queue at all.
+
+- **And a model that does fail now fails gracefully.** Both draws were a bare
+  loop inside the caller's single pcall, so a throw on the first side skipped
+  the second -- one broken Pokemon took its opponent off the screen with it
+  -- and nothing recorded that it had happened, so the same throw came back
+  every frame forever. Each side is now drawn, cast and posed inside its own
+  guard, and a side that throws is RETIRED: its rig is released and
+  OverworldBattle renders its flat battle pic from the next frame on, which
+  is the fallback a species with no pack has always had. The fight carries on
+  with a flat Pokemon instead of a missing one, and its opponent is
+  untouched.
+
+- **Half the set's animations walked the Pokemon out of the shot.** Found by
+  the sweep below, not by a bug report, and it is the biggest of them: 65 of
+  the 148 send-out entrances carry the body more than its own height off the
+  spot it started on -- Dewgong's reaches seven and a half, and its faint
+  nearly ten. Every one returns to exactly where it began, because Pokemon
+  Stadium framed each Pokemon with a camera of its OWN that followed the
+  performance around a stage. This mode has one camera, solved to hold two
+  fixed map cells, so a Pokemon that travels seven body-heights is simply
+  gone: sending out a Farfetch'd left an empty tile for three and a half
+  seconds while its animation played somewhere off to the left of the frame.
+
+  `StadiumRig.anchor` now takes the excess back out -- the pose is measured
+  against where the bind pose put the body, and whatever has carried it
+  further than `StadiumMon.TRAVEL` (three quarters of a body-height, which is
+  what the frame holds) is subtracted from every bone. The EXCESS only: the
+  83 species that never reach the limit are bit-for-bit what they were, and a
+  lunge, a hop or a collapse still reads as big and still comes back to the
+  tile it left. The centre is the median bone origin rather than the mean or
+  the root, so Farfetch'd's five-bone trail streaking three thousand units
+  out cannot drag the bird with it.
+
+- **FLY and DIG now take the model off the field.** The charging turn of a
+  two-turn move puts the Pokemon out of reach, and the engine says so through
+  `picFx[battler].hidden` -- FLY runs `SE_SLIDE_MON_OFF` and DIG
+  `SE_SLIDE_MON_DOWN`, each a 19-24 frame slide that ends by setting that
+  flag, and the release turn puts the pic back. The model was reading
+  `fxHidden`, which is the damage BLINK and nothing else, so it stood on its
+  tile while the game insisted it was underground -- and insisted in the
+  strongest way it has, by making every attack aimed at it miss.
+
+  It now reads the same field the pic does, which also covers every other
+  vanishing act on that seam: the user of Explosion, a Pokemon Teleported
+  away. Read as the engine's own answer rather than as a list of move ids,
+  so a mod that adds a third two-turn move gets it for free.
+
+  It is deliberately NOT held to the end of its own animation the way a
+  collapse is. The Stadium animations are authored as the WHOLE move --
+  Charizard's DIG is 3.83 seconds of burrow, emerge and strike, because
+  Stadium plays it in one turn -- so cutting at the engine's own hide shows
+  the burrowing and holds the strike back for the turn it actually lands on.
+  Verified as a timeline (`DS_FLY`, and `DS_MOVE=DIG`): the pic hid at frame
+  67, the model went with it, and both came back at 264.
+
+- **And the faint animation now gets to finish.** A fainted Pokemon left the
+  field when its PIC did, and the engine's pic slide is fourteen frames of a
+  60 Hz clock -- `SlideDownFaintedMonPic`, seven rows two frames apart, under
+  a quarter of a second. The Stadium faint animations are nothing like that
+  short: the briefest in the set is 49 frames of a 30 Hz clock, the median is
+  110 and the longest 230. Every model was therefore cut off inside the first
+  fifth of its own collapse -- the Pokemon began to fall and then vanished
+  mid-fall, which is worse than not animating at all.
+
+  A model that is collapsing now stays until it has finished collapsing, and
+  the two timings are simply not tied to each other any more: how long a flat
+  pic takes to slide off the bottom of a 160x144 frame has nothing to say
+  about how long it takes a Gyarados to fall over. Bounded at both ends --
+  it ends when the animation does, so nothing is left lying on the field for
+  the rest of the fight, and the side is reset outright the moment a
+  different battler stands in that slot, which is what stops the next
+  Pokemon out of the ball arriving face down (that one bites when a trainer
+  leads with two of the same species, where the dex number never changes and
+  nothing downstream would otherwise notice the swap).
+
+  `DS_FAINT` now prints the span as well as the moment: 127 frames against
+  the pic's 14.
+
+- Two ordering bugs in the extraction pipeline that made its output
+  **non-reproducible**. The generated flame nodes were deduplicated through
+  a Python `set` of tuples containing strings, so their order moved with
+  `PYTHONHASHSEED` and Ponyta, Rapidash and Moltres got differently-seeded
+  flames on different runs of the same build; and texture registration
+  order came from iterating a `set` of ints, which is stable across runs
+  but is a CPython implementation detail rather than a fact about the data.
+  Both now go in order of appearance, which is the game's own order and the
+  one a Lua port can reproduce.
+
+### Changed
+
+- The packed format is now **DSM3**: textures are stored as raw RGBA rather
+  than PNG. An ImageData over those bytes costs nothing where a PNG costs a
+  decode on the frame a battle starts -- but the reason it was done is that
+  PNG means zlib, and Python's deflate and LOVE's need not agree byte for
+  byte, which would have made the extractor impossible to check against the
+  packer. Uncompressed pixels are the same pixels whoever wrote them. The
+  set is 34 MB rather than 24 MB, and it is generated locally rather than
+  shipped, so that is a trade worth making.
+
+### Known
+
+- Three species -- Exeggutor, Tangela and Magmar -- have standby loops that
+  are corrupt in the source extraction, and fall back to their battle
+  sprites on the STADIUM rungs (see above). 148 of the 151 have models.
+
+- Pidgeot, Dodrio and Grimer have a handful of erratic rotation frames in
+  their standby loops -- a few frames of junk at the top of the loop rather
+  than a corrupt stream. The blend guard holds those frames rather than
+  smoothing through them, so they step where the source steps, and Pidgeot
+  and Dodrio are additionally left unanchored because those frames move the
+  body estimate too far to measure against (see above). Not chased
+  further: the extraction is byte-identical to a reference pipeline whose
+  sampling was validated against the decompilation's own arithmetic, and
+  guessing at the format to fix three species risks the other 145.
+
 ## 1.5.5
 
 ### Added
