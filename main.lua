@@ -208,6 +208,11 @@ mod.content.render_pipelines:register("voxel", {
     -- world, so it is never fighting the engine's own launcher for the
     -- screen.
     pcall(function() V.require("StadiumScreen").maybePush() end)
+    -- and a ROM the system file picker dropped in the save directory while
+    -- we were not the top activity (Android; see StadiumRomPick.poll)
+    pcall(function()
+      V.require("StadiumRomPick").poll(require("src.core.Game"))
+    end)
     -- The horde, on the same always-running tick and for the same reason:
     -- it owns no pass of the frame, it is a MODE over the overworld, and
     -- it has to keep thinking while a warp's wipe covers the screen (the
@@ -802,6 +807,10 @@ mod.hooks:wrap("ui.options.rows", function(next, game, rows)
   -- to restore on the next boot, so it is appended here rather than living in
   -- SETTINGS. nil on a platform with no file dialog, which takes it off the
   -- menu rather than offering a button that cannot do anything.
+  -- On EVERY platform. Where there is no file dialog it says WHERE? and
+  -- shows the folder to put the cartridge in, which is the one thing a
+  -- player on a phone could not otherwise find out -- the row used to vanish
+  -- there, which reads as the feature being missing rather than manual.
   local okPick, importRow = pcall(function()
     return V.require("StadiumRomPick").row()
   end)

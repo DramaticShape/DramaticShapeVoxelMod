@@ -70,31 +70,37 @@ end
 -- overflow tidily off one side, it clips off BOTH and loses its first word as
 -- well as its last ("that is not a Pokemon Stadium ROM" came out as "at is
 -- not a Pokemon").
+--
+-- Fixed, and it stays fixed: shrinking the text to fit more in was tried and
+-- the font will not take it. These are 1-bit 8x8 bitmaps, so a fractional
+-- downscale drops whole pixel rows out of every glyph -- at 0.75 the last
+-- line of an Android save path came out as mush. Long strings get more LINES
+-- instead (see the note layout in draw).
 local COLS = 20
 
--- Break a reason into lines that fit, on word boundaries, and never more than
--- `limit` of them -- the plate has room for two and a message nobody can read
--- the end of is not improved by adding a third.
-local function wrapped(str, limit)
+-- Break a string into lines that fit, on word boundaries, and never more than
+-- `limit` of them.
+local function wrapped(str, limit, cols)
   limit = limit or 2
+  cols = cols or COLS
   local lines, line = {}, nil
   local function push(text)
     if #lines < limit then lines[#lines + 1] = text end
   end
   for word in tostring(str):gmatch("%S+") do
     local try = line and (line .. " " .. word) or word
-    if #try <= COLS then
+    if #try <= cols then
       line = try
     else
       if line then push(line) end
       -- A word longer than the line is BROKEN ACROSS lines rather than cut.
       -- It is always a path, and a path is the one thing here that has to be
-      -- readable in full -- an absolute Android save directory runs to about
-      -- seventy characters and has no spaces in it at all, so truncating at
+      -- readable in full -- an absolute Android save directory runs to
+      -- ninety-odd characters with no spaces in it at all, so truncating at
       -- twenty told the player almost nothing.
-      while #word > COLS do
-        push(word:sub(1, COLS))
-        word = word:sub(COLS + 1)
+      while #word > cols do
+        push(word:sub(1, cols))
+        word = word:sub(cols + 1)
       end
       line = word
     end
@@ -149,8 +155,9 @@ end
 --
 -- Same state shape and the same plate as the build screen, so there is one
 -- look and one set of stack manners rather than two.
-function StadiumScreen.newNote(game, title, body)
-  return setmetatable({ game = game, note = { title = title, body = body } },
+function StadiumScreen.newNote(game, title, lead, body)
+  return setmetatable({ game = game,
+                        note = { title = title, lead = lead, body = body } },
                       StadiumScreen)
 end
 
@@ -168,8 +175,38 @@ function StadiumScreen:enter()
   end
 end
 
+-- The buttons that dismiss a note. Every face button and START, because the
+-- prompt says ANY and a player who has to hunt for the right one on a phone
+-- has been lied to.
+local DISMISS = { "a", "b", "start", "select" }
+
 function StadiumScreen:update()
-  if self.note then return end        -- a note waits for a key, not a clock
+  -- ------- a note is dismissed by a BUTTON, not by a key
+  --
+  -- `onKeyPressed` is the keyboard, and a phone has none: the touch overlay
+  -- feeds the engine's Input as virtual buttons (Input.overlayPressed), so a
+  -- state that only listens for keys cannot be closed by touch at all. That
+  -- stranded a player on this screen with no way off it -- the one screen in
+  -- the mod whose entire job is to tell somebody something and then get out
+  -- of the way.
+  --
+  -- Polled here rather than handled as an event because `wasPressed` is the
+  -- edge test the engine's own battle screens use, and it is fed by the
+  -- keyboard, the gamepad AND the overlay through one path.
+  if self.note then
+    local input = self.game and self.game.input
+    if input and input.wasPressed then
+      for _, btn in ipairs(DISMISS) do
+        if input:wasPressed(btn) then
+          if self.game.stack and self.game.stack:top() == self then
+            self.game.stack:pop()
+          end
+          return
+        end
+      end
+    end
+    return
+  end
   local status = StadiumInstall.status
   if status.state == "building" then
     if not StadiumInstall.step() then
@@ -206,8 +243,9 @@ local function pop(self)
 end
 
 function StadiumScreen:onKeyPressed(key)
-  -- a note is dismissed by ANY key: it is telling the player something, and
-  -- making them guess which button acknowledges it would be its own joke
+  -- A note takes any key too. This is the KEYBOARD path and it is not the
+  -- one that matters on a phone -- see update, which polls the engine's
+  -- Input so the touch overlay's virtual buttons work as well.
   if self.note then pop(self) return true end
   if key == "escape" or key == "x" or key == "backspace" then
     StadiumInstall.cancel()
@@ -225,12 +263,20 @@ function StadiumScreen:draw()
   love.graphics.rectangle("fill", 0, 0, W, H)
 
   if self.note then
-    centred(self.note.title, 20)
-    -- six lines is the plate's room; an absolute path on Android runs to
-    -- about seventy characters, which is four of them
-    local lines = wrapped(self.note.body, 6)
-    for i, line in ipairs(lines) do centred(line, 44 + (i - 1) * 10) end
-    centred("PRESS ANY KEY", 124)
+    centred(self.note.title, 12)
+    -- The sentence is kept SHORT so the path can have the rest of the plate
+    -- at full size. Shrinking the path was tried first and does not survive
+    -- the font: these are 1-bit 8x8 bitmaps, so a fractional downscale drops
+    -- whole pixel rows out of every glyph and the last line came out as
+    -- mush. Nine rows of twenty characters is 180, which is longer than any
+    -- real save path, so nothing has to be shrunk to fit.
+    local lead = wrapped(self.note.lead or "", 2)
+    for i, line in ipairs(lead) do centred(line, 30 + (i - 1) * 10) end
+    local y = 30 + #lead * 10 + 6
+    for i, line in ipairs(wrapped(self.note.body or "", 9)) do
+      centred(line, y + (i - 1) * 9)
+    end
+    centred("PRESS ANY KEY", 130)
     love.graphics.setColor(1, 1, 1, 1)
     return
   end
@@ -319,16 +365,17 @@ function StadiumScreen.maybePush()
       -- no restart. The folder is still said, once, for the platforms with no
       -- dialog (Android, a handheld Linux with neither zenity nor kdialog)
       -- and for anyone who would rather drop a file than click through one.
+      -- The STADIUM ROM row is on the OPTIONS menu on every platform now, so
+      -- point at it rather than reciting a path here: where a file dialog can
+      -- be opened it opens one, and where it cannot it shows this same folder
+      -- on screen -- which is the part a phone could not otherwise find out.
       local okPick, pick = pcall(V.require, "StadiumRomPick")
-      local canPick = okPick and pick and pick.available()
-      V.mod.log:info("stadium: no Pokemon Stadium ROM found, so the STADIUM "
-                     .. "battle rungs are off. %s",
-                     canPick
-                       and ("Import one from OPTIONS -> " .. pick.LABEL
-                            .. ", or put a .z64/.n64/.v64 in "
-                            .. StadiumInstall.romHint() .. " and restart.")
-                       or ("Put one (.z64/.n64/.v64) in "
-                           .. StadiumInstall.romHint() .. " and restart."))
+      local label = (okPick and pick and pick.LABEL) or "STADIUM ROM"
+      local how = (okPick and pick and pick.canDialog())
+                  and "opens a file picker" or "says where to put one"
+      V.mod.log:info("stadium: no Pokemon Stadium (US) 1.0 ROM found, so the "
+                     .. "STADIUM battle rungs are off. OPTIONS -> %s %s; the "
+                     .. "folder is %s", label, how, StadiumInstall.romHint())
     end
     return false
   end

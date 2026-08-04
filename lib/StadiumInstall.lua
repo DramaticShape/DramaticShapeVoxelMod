@@ -117,6 +117,20 @@ function StadiumInstall.romHint()
   return base .. "/" .. StadiumInstall.ROM_DIR
 end
 
+-- The same thing with a FILENAME on the end, which is what a player actually
+-- needs: a folder alone leaves them guessing what to call the file, and the
+-- guess is not obviously "baserom.z64".
+--
+-- Taken from the head of NAMED rather than retyped, so the name shown is by
+-- construction the first name looked for. It is not the ONLY one that works
+-- -- `.n64` and `.v64` are accepted, and so is any other name carrying one
+-- of those extensions -- but an instruction that names one file is one a
+-- player can follow, and an instruction that lists every possibility is one
+-- they have to interpret.
+function StadiumInstall.romHintFile()
+  return StadiumInstall.romHint() .. "/" .. (NAMED[1]:match("[^/]+$") or "")
+end
+
 -- ------- the marker
 
 local function readMarker()

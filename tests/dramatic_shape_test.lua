@@ -400,7 +400,12 @@ end
 Pipelines.setLevel("voxel", 2)
 local hookedRows = Runtime.call("ui.options.rows", function(_, r) return r end,
                                { data = Data }, { { id = "text_speed" } })
-T.eq(#hookedRows, 9, "the options hook added a row per setting")
+-- one per setting, plus the STADIUM ROM action row -- which is not a setting
+-- (nothing to store, nothing for the mod manager to persist) and is offered
+-- on every platform, saying WHERE? rather than IMPORT where there is no file
+-- dialog to open
+T.eq(#hookedRows, 10, "the options hook added a row per setting, plus the "
+  .. "STADIUM ROM action row")
 local grid, curve, water = hookedRows[2], hookedRows[3], hookedRows[4]
 local battles, backRow, daytime = hookedRows[5], hookedRows[6], hookedRows[7]
 -- the AA row is hookedRows[8]; it is read in its own block below, because
@@ -1184,22 +1189,27 @@ Battles.setting:setGate(BATTLE_ROW_GATE)
   local Install =
     run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumInstall")
 
-  T.check(type(Pick.available()) == "boolean",
+  T.check(type(Pick.canDialog()) == "boolean",
     "the picker reports whether this platform has a file dialog at all")
 
+  -- The row is offered on EVERY platform. It used to be dropped where no
+  -- dialog could be opened, which on Android read as the feature being
+  -- missing rather than manual -- and the folder path it needed to show was
+  -- only ever written to a console a phone does not have.
   local row = Pick.row()
-  if not Pick.available() then
-    T.eq(row, nil,
-      "with no dialog available there is no row -- a button that cannot open "
-      .. "anything is worse than the folder instruction it would replace")
-  else
-    T.check(row ~= nil, "and where there is one, there is a row")
-    T.eq(row.label, "STADIUM ROM", "which says what it is for")
-    T.check(type(row.step) == "function", "and does something when pressed")
-    -- the value is the STATE, so a player can see whether it worked
-    T.eq(row.value(), Install.available() and "READY" or "IMPORT",
-      "reading READY once the models are installed and IMPORT before that")
-  end
+  T.check(row ~= nil, "the row is offered whatever the platform can do")
+  T.eq(row.label, "STADIUM ROM", "and says what it is for")
+  T.check(type(row.step) == "function", "and does something when pressed")
+  T.eq(row.value(),
+    Install.available() and "READY" or (Pick.canDialog() and "IMPORT" or "WHERE?"),
+    "reading READY once installed, IMPORT where a dialog can be opened, and "
+    .. "WHERE? where pressing it can only name the folder -- a row that said "
+    .. "IMPORT and then did not import would be the worse lie")
+
+  -- and the drop folder it would name is an absolute path, which the note
+  -- screen has to be able to show in full
+  T.check(type(Install.romHint()) == "string" and #Install.romHint() > 0,
+    "there is a folder to name")
 
   -- A ROM that carries no models must be refused BEFORE anything is written.
   -- An empty build otherwise completes with nothing attempted and therefore

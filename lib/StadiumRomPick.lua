@@ -96,25 +96,41 @@ local function commandOutput(cmd)
   return (out ~= "") and out or nil
 end
 
--- ------- can this machine open one at all
+-- ------- can this machine open a DIALOG
 --
--- Desktop only, and honestly so. On ANDROID the picker is a native bridge
--- (love.system.pickFile) whose kind -> filename mapping is a fixed list of
--- three in the engine's own C++, and an unrecognised kind falls through to
--- `picked_rom.gb` -- which is the file the engine's Game Boy importer is
--- watching. Calling it for a 32 MB N64 ROM would hand that to the wrong
--- importer, so it is not called.
+-- Desktop only, and honestly so.
 --
--- Android does not need it as badly, either: conf.lua points the save
--- directory at the app's external-files folder, so `baseroms/` there is
--- reachable over USB or any file manager with no root and no permission
--- prompt, which is the flow the engine's own comment describes for
--- picker-less builds.
-function StadiumRomPick.available()
+-- On ANDROID the picker is a native bridge (love.system.pickFile) whose
+-- kind -> filename mapping is a fixed list of three in the engine's own C++,
+-- and an unrecognised kind falls through to `picked_rom.gb`. That is not
+-- merely the wrong name -- it is the file the engine's Game Boy importer is
+-- watching, and reading that code settles it: the importer's size test only
+-- SKIPS a 1 MB file it has already imported, so a 32 MB N64 ROM landing
+-- there falls straight through to `love.filesystem.remove` and
+-- `startData` -- deleted, and then reported to the player as a broken Game
+-- Boy ROM. So the bridge is not called until it learns the kind, which is a
+-- two-line change in System.cpp and an APK rebuild (see README).
+--
+-- Android is not stuck without it: conf.lua points the save directory at the
+-- app's external-files folder, so `baseroms/` there is reachable over USB or
+-- any file manager with no root and no permission prompt. What Android
+-- lacked was being TOLD that -- the row vanished, and the folder's absolute
+-- path was only ever written to a console no phone shows. That is what the
+-- note below is for.
+function StadiumRomPick.canDialog()
   if not (haveShell() and haveFiles()) then return false end
   local p = osName()
   return p == "Windows" or p == "OS X" or p == "Linux"
 end
+
+-- Kept as the old name for callers that only wanted "is there a dialog".
+StadiumRomPick.available = StadiumRomPick.canDialog
+
+-- Where a SAF pick would land if the native bridge grows a Stadium kind.
+-- Watched unconditionally (see poll): on a build that never writes it this
+-- costs one getInfo a frame, and on one that does the mod needs no further
+-- change to use it.
+StadiumRomPick.PICKED = "picked_stadium.z64"
 
 -- Open the dialog. Returns the chosen absolute path, or nil when the player
 -- cancelled or no dialog could be opened.
@@ -184,10 +200,22 @@ end
 -- that quietly goes on saying IMPORT.
 function StadiumRomPick.import(game)
   if StadiumInstall.status.state == "building" then return false end
+  local StadiumScreen = V.require("StadiumScreen")
+
+  -- No dialog on this platform: say where the file goes, on screen, because
+  -- that is the whole of what the player is missing and the console is not
+  -- somewhere they can read it.
+  if not StadiumRomPick.canDialog() then
+    if game and game.stack then
+      game.stack:push(StadiumScreen.newNote(game, "STADIUM ROM",
+        "PUT STADIUM US 1.0 HERE:",
+        StadiumInstall.romHintFile()))
+    end
+    return false
+  end
+
   local path = StadiumRomPick.choose()
   if not path then return false end
-
-  local StadiumScreen = V.require("StadiumScreen")
   local function fail(why)
     StadiumInstall.status.state = "failed"
     StadiumInstall.status.error = why
@@ -223,19 +251,59 @@ end
 -- nil where no dialog can be opened, which takes the row off the menu
 -- entirely rather than offering a button that cannot do anything.
 function StadiumRomPick.row()
-  if not StadiumRomPick.available() then return nil end
   return {
     id = StadiumRomPick.ID,
     label = StadiumRomPick.LABEL,
     value = function()
       if StadiumInstall.status.state == "building" then return "BUILDING" end
-      return StadiumInstall.available() and "READY" or "IMPORT"
+      if StadiumInstall.available() then return "READY" end
+      -- WHERE, not IMPORT, where pressing it can only tell you the folder:
+      -- a row that says IMPORT and then does not import is a worse row than
+      -- one that says what it actually does
+      return StadiumRomPick.canDialog() and "IMPORT" or "WHERE?"
     end,
     step = function(game)
       pcall(StadiumRomPick.import, game)
       return true
     end,
   }
+end
+
+-- ------- a pick that landed while we were not looking
+--
+-- The desktop dialog BLOCKS, so `import` above can read the answer on the
+-- next line. A SAF pick cannot work that way: it is a separate activity,
+-- Android is free to destroy the game while it is up, and the file appears
+-- some frames later -- so the only way to notice one is to look for it.
+--
+-- Nothing writes this filename today (see canDialog). It is watched anyway so
+-- that teaching the native bridge one more kind is the whole of the Android
+-- picker work, with no second change needed here.
+--
+-- Consumed and DELETED either way: a 32 MB file left in the save directory
+-- would be imported again on the next boot, and kept forever if the import
+-- failed.
+function StadiumRomPick.poll(game)
+  local f = love and love.filesystem
+  if not (f and f.getInfo) then return false end
+  if StadiumInstall.status.state == "building" then return false end
+  local ok, info = pcall(f.getInfo, StadiumRomPick.PICKED, "file")
+  if not (ok and info) then return false end
+
+  local okRead, bytes = pcall(f.read, StadiumRomPick.PICKED)
+  pcall(f.remove, StadiumRomPick.PICKED)
+  if not (okRead and type(bytes) == "string") then return false end
+
+  local StadiumScreen = V.require("StadiumScreen")
+  local started, err = StadiumInstall.beginFrom(bytes, StadiumRomPick.PICKED)
+  if not started then
+    StadiumInstall.status.state = "failed"
+    StadiumInstall.status.error = tostring(err)
+  end
+  if game and game.stack then
+    game.stack:push(StadiumScreen.new(game, true))
+  end
+  return true
 end
 
 return StadiumRomPick
