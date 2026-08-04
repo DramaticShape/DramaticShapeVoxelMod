@@ -60,13 +60,47 @@ if DEBUG == nil or DEBUG == false then DEBUG = nil end
 OverworldBattle.KEY = "battles"
 OverworldBattle.LABEL = "3D-BTL"
 
--- On by default: a mod whose headline is "the world in 3D" should not need
--- the player to go and find the switch before the world shows up in a
--- battle. ON is first, so it is also what an unreadable stored value falls
--- back to.
-OverworldBattle.setting = ModSetting.new(OverworldBattle.KEY,
-                                         OverworldBattle.LABEL,
-                                         { true, false }, { "ON", "OFF" })
+-- Four rungs, and the ladder's order is the order they were added in rather
+-- than OFF-to-most:
+--
+--   2D-3D      the mode this file was written for: the fight is staged on
+--              the map and the two Pokemon are the GB's OWN PICS, stood up
+--              on their tiles as quads (BattleBillboard).
+--   STADIUM A  the same staged fight with the Pokemon Stadium battle models
+--              in place of those quads -- skinned, animated, and playing the
+--              animation the move being used actually calls for (see
+--              lib/Stadium.lua). The world is still the world: the fight
+--              happens on real ground, in the map's own weather and light.
+--   STADIUM B  the same models on a pair of DISCS against the sky, with no
+--              map at all -- the Game Boy's own framing, staged rather than
+--              found (see lib/StadiumStage.lua). Works everywhere, including
+--              the maps that have nowhere to put a fight.
+--   OFF        the engine's own white battle screen.
+--
+-- 2D-3D stays FIRST because ModSetting's values[1] is both the default and
+-- what an unrecognised stored value falls back to, and the stored value for
+-- this row has been `true` since the row existed. Keeping `true` at the head
+-- means every save written before the STADIUM rungs existed reads back as
+-- the 2D-3D it was written for, and a mod whose headline is "the world in
+-- 3D" still does not need the player to go and find the switch.
+--
+-- The stored value for STADIUM A is still the bare string "stadium" it was
+-- before there was a B, so a save written against the three-rung ladder
+-- keeps the mode it chose.
+--
+-- Both STADIUM rungs are GATED on the models existing: the mod ships no
+-- Pokemon Stadium data, and until the player's own ROM has been found and
+-- built from (StadiumInstall) the row simply has two fewer stops. See
+-- ModSetting.setGate for why they are skipped rather than shown and refused.
+OverworldBattle.setting =
+  ModSetting.new(OverworldBattle.KEY, OverworldBattle.LABEL,
+                 { true, "stadium", "stadiumB", false },
+                 { "2D-3D", "STADIUM A", "STADIUM B", "OFF" })
+  :setGate(function(value)
+    if value ~= "stadium" and value ~= "stadiumB" then return true end
+    local ok, install = pcall(V.require, "StadiumInstall")
+    return ok and install and install.available()
+  end)
 
 -- Whether the VR row is ON -- read lazily, because VR requires modules
 -- that sit above this one. While it is, this mode stops being optional:
@@ -81,6 +115,15 @@ end
 function OverworldBattle.enabled()
   if vrOn() then return true end
   return OverworldBattle.setting:get() and true or false
+end
+
+-- Whether the STADIUM rung is the one selected -- read through Stadium so
+-- there is one answer to that question and it lives with the mode it
+-- describes. Required lazily: Stadium sits above this file and requires it
+-- back (for the row), which a load-time require would deadlock.
+function OverworldBattle.stadium()
+  local ok, stadium = pcall(V.require, "Stadium")
+  return (ok and stadium and stadium.enabled()) and true or false
 end
 
 -- ------- BACK SPRITES: the player's own mon stays on the menu
@@ -173,6 +216,10 @@ function OverworldBattle.wantsFront()
   local g = require("src.core.Game")
   local ow = g and g.overworld
   if not (ow and ow.map and ow.player) then return false end
+  -- STADIUM B carries its own stage, so the answer is yes on every map and
+  -- there is nothing to search or to cache
+  local okS, stadium = pcall(V.require, "Stadium")
+  if okS and stadium and stadium.discs() then return true end
   if staged.mapId ~= ow.map.id then
     local ok, arena = pcall(BattleArena.find, ow.map,
                             ow.player.cellX, ow.player.cellY,
@@ -420,6 +467,31 @@ function OverworldBattle.forceOG(g)
   return true
 end
 
+-- Where THIS fight stands, on whichever rung is running: the map's own
+-- ground, or the pair of discs STADIUM B carries with it.
+--
+-- The one place the two rungs actually diverge, and it is worth stating
+-- plainly. On every other rung the answer can be NO -- a corridor, a shop
+-- floor, a map whose authored entry is a refusal -- and the battle then plays
+-- exactly as the vanilla game does. STADIUM B cannot fail: its stage is not
+-- something the map has to have room for, so a fight in the tightest cave in
+-- Kanto is staged as readily as one on Route 1.
+function OverworldBattle.stageFor(state)
+  local ok, stadium = pcall(V.require, "Stadium")
+  if ok and stadium and stadium.discs() and Voxel3D.available() then
+    local okStage, arena = pcall(function()
+      return V.require("StadiumStage").arena(state.map)
+    end)
+    if okStage and arena then return arena end
+    -- the discs could not be built; fall through to the map, which is a
+    -- worse picture but a real one
+  end
+  local okFind, arena = pcall(BattleArena.find, state.map,
+                              state.player.cellX, state.player.cellY,
+                              state.player.surfing)
+  return (okFind and arena) or nil
+end
+
 -- Stage a battle triggered from `state`, if this mode can. Returns true when
 -- a session started -- which is also the only case where anything visible
 -- changes, so a map with no room for an arena plays exactly the vanilla
@@ -430,10 +502,8 @@ function OverworldBattle.begin(state, battle)
   if not (state and state.map and state.player) then return false end
   if not Voxel3D.available() then return false end
 
-  local ok, arena = pcall(BattleArena.find, state.map,
-                          state.player.cellX, state.player.cellY,
-                          state.player.surfing)
-  if not (ok and arena) then return false end
+  local arena = OverworldBattle.stageFor(state)
+  if not arena then return false end
 
   -- the fight is staged from here on, so the layout it is composed for is not
   -- optional any more (see forceOG)
@@ -443,6 +513,9 @@ function OverworldBattle.begin(state, battle)
               armed = false, token = 0 }
   cullCast(state)
   BattleCam.reset()
+  -- and, on the STADIUM rung, the pair of models that will stand on this
+  -- arena's two cells. Declines quietly on any other rung.
+  pcall(function() V.require("Stadium").begin(arena) end)
   return true
 end
 
@@ -473,6 +546,7 @@ function OverworldBattle.finish()
   restoreCast()
   session = nil
   Voxel3D.camera = nil
+  pcall(function() V.require("Stadium").finish() end)
 end
 
 -- ------- per-frame
@@ -523,6 +597,17 @@ function OverworldBattle.update(dt)
   -- the world pass is hidden behind the battle, so mesh builds get the wide
   -- slice: nothing visible can hitch on them
   ChunkMesher.pump(true)
+
+  -- The STADIUM models, ahead of the pics, because what they decide is
+  -- WHICH pics are needed: a side a model is standing on gets no billboard
+  -- texture rendered for it at all (see Stadium.covers). Posed and skinned
+  -- here too, once for the frame -- the sun pass, the camera and, in a
+  -- headset, both eyes all draw the same skinned meshes.
+  pcall(function()
+    local host = (session.arena and session.arena.map) or session.state.map
+    V.require("Stadium").update(dt, session.battle,
+                                BattleScene.groundY(host, session.arena))
+  end)
 
   -- The mons' textures are rendered HERE, with no canvas bound, for the same
   -- reason the scene is: the pics layer binds its own targets, and doing that
@@ -710,6 +795,9 @@ function OverworldBattle.invalidate()
   BattleDOF.invalidate()
   BattleHud.invalidate()
   BattlePics.invalidate()
+  -- the STADIUM models hold meshes and textures of this graphics context
+  -- like everything else here does
+  pcall(function() V.require("Stadium").invalidate() end)
 end
 
 -- ------- the battle screen's background
@@ -908,6 +996,14 @@ local OFF = {
 -- feet ended up, in canvas coordinates.
 function OverworldBattle.sideTexture(battle, side)
   if not (innerPics and battle) then return nil end
+  -- On the STADIUM rung a side standing a MODEL needs no pic: rendering one
+  -- anyway would hang a second, flat copy of the same Pokemon on the same
+  -- cell. Asked per side, so a species with no pack -- or a substitute
+  -- doll, or the trainer before the send-out -- still comes through here.
+  local okS, covered = pcall(function()
+    return V.require("Stadium").covers(battle, side)
+  end)
+  if okS and covered then return nil end
   if not sideVisible(battle, side) then return nil end
   local canvas = texCanvasFor(side)
   if not canvas then return nil end
@@ -985,7 +1081,16 @@ function OverworldBattle.textures(battle)
   end
   out.enemy = okE and enemy or nil
   out.player = okP and player or nil
-  if not (out.enemy or out.player) then return nil end
+  -- On the STADIUM rung both sides can legitimately have no pic -- the pair
+  -- of them are models -- and this table must still come back, because it
+  -- carries the HIT FLASH, and because the VR eye pass uses its presence to
+  -- decide there is a staged fight to draw at all.
+  local okStanding, standing = pcall(function()
+    return V.require("Stadium").standing()
+  end)
+  if not (out.enemy or out.player or (okStanding and standing)) then
+    return nil
+  end
   out.flash = OverworldBattle.flashing(battle)
   return out
 end
@@ -1007,6 +1112,12 @@ function OverworldBattle.install()
     end
     OverworldState.dramaticShapeBattleHook = true
   end
+
+  -- the STADIUM rung's own four wraps, which drive the models' animations
+  -- off the fight (see Stadium.install). Idempotent in the same way, and
+  -- installed whichever rung the row is on: the wraps do nothing at all
+  -- while no stadium session is live.
+  pcall(function() V.require("Stadium").install() end)
 
   local BattleState = require("src.battle.BattleState")
   if BattleState.dramaticShapeBattleHook then return end

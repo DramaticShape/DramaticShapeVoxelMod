@@ -1,0 +1,261 @@
+-- STADIUM battles: finding the ROM, and building the models out of it once.
+--
+-- The mod does not ship the Pokemon Stadium models and cannot: they are that
+-- game's data. What it ships is the READER -- StadiumRom, StadiumFragment,
+-- StadiumFx and StadiumBuild -- and the player supplies the cartridge, which
+-- is exactly the arrangement this engine already has for the Game Boy ROM it
+-- is a recompilation of (src/import/RomImporter.lua).
+--
+-- So: drop a Pokemon Stadium (US) ROM in `baseroms/`, and the first time the
+-- game runs with the mod on, the models are built. Once, on a loading screen,
+-- in about ten seconds. After that the packs sit in the save directory and
+-- the mod reads them like any other asset.
+--
+-- ------- where "baseroms/" is
+--
+-- One relative path, and it deliberately covers two different places at once,
+-- because PhysFS searches the save directory AND the game folder under the
+-- same names:
+--
+--   * a folder install, or a checkout -- `baseroms/` next to main.lua, which
+--     is also where the decompilation's own `make init` puts it
+--   * a packaged or fused build, where the game folder is inside an archive
+--     and cannot be written to -- `baseroms/` in the save directory, whose
+--     absolute path this reports on screen so it can be found
+--
+-- Any of `.z64`, `.n64` and `.v64` is accepted; StadiumRom normalises the
+-- byte order on load.
+--
+-- ------- what "installed" means
+--
+-- A marker file next to the packs, holding the format magic, how many species
+-- were written and the md5 of the ROM they came from. All three matter. The
+-- magic catches a format change (the packs are rebuilt rather than read as
+-- garbage), the count catches a build that was interrupted half way, and the
+-- md5 catches the player swapping the ROM for a different revision.
+
+-- the mod namespace (see main.lua): V.require loads a sibling module
+local V = ...
+
+local StadiumPack = V.require("StadiumPack")
+
+local StadiumInstall = {}
+
+-- Where a ROM is looked for, and where the built packs are kept.
+StadiumInstall.ROM_DIR = "baseroms"
+StadiumInstall.DIR = StadiumPack.CACHE_DIR
+StadiumInstall.MARKER = StadiumInstall.DIR .. "/pack.info"
+
+-- Bumped whenever the .dsm format changes, so an old cache is rebuilt rather
+-- than misread. Must track StadiumPack's magic.
+StadiumInstall.FORMAT = "DSM3"
+
+StadiumInstall.COUNT = 151
+
+-- Named ROM files, in the order the decompilation's own pipeline looks for
+-- them, then any ROM at all sitting in the folder.
+local NAMED = {
+  StadiumInstall.ROM_DIR .. "/baserom.z64",
+  StadiumInstall.ROM_DIR .. "/us/baserom.z64",
+  StadiumInstall.ROM_DIR .. "/baserom.n64",
+  StadiumInstall.ROM_DIR .. "/baserom.v64",
+}
+
+local function fs()
+  return love and love.filesystem
+end
+
+local function isFile(path)
+  local f = fs()
+  if not (f and f.getInfo) then return false end
+  local ok, info = pcall(f.getInfo, path, "file")
+  return (ok and info) and true or false
+end
+
+-- The ROM's path on the PhysFS read path, or nil.
+function StadiumInstall.romPath()
+  local f = fs()
+  if not f then return nil end
+  for _, path in ipairs(NAMED) do
+    if isFile(path) then return path end
+  end
+  local ok, items = pcall(f.getDirectoryItems, StadiumInstall.ROM_DIR)
+  if ok and items then
+    table.sort(items)
+    for _, name in ipairs(items) do
+      if name:lower():match("%.[nvz]64$") then
+        local path = StadiumInstall.ROM_DIR .. "/" .. name
+        if isFile(path) then return path end
+      end
+    end
+  end
+  return nil
+end
+
+function StadiumInstall.romPresent()
+  return StadiumInstall.romPath() ~= nil
+end
+
+-- Where to tell the player to put it. The save directory is the answer that
+-- is always writable, and it is the one a packaged build needs.
+function StadiumInstall.romHint()
+  local f = fs()
+  local base = (f and f.getSaveDirectory and select(2, pcall(f.getSaveDirectory)))
+  if type(base) ~= "string" then base = "the game folder" end
+  return base .. "/" .. StadiumInstall.ROM_DIR
+end
+
+-- ------- the marker
+
+local function readMarker()
+  local f = fs()
+  if not (f and isFile(StadiumInstall.MARKER)) then return nil end
+  local ok, text = pcall(f.read, StadiumInstall.MARKER)
+  if not (ok and type(text) == "string") then return nil end
+  local format, count, md5 = text:match("^(%S+)%s+(%d+)%s*(%S*)")
+  if not format then return nil end
+  return { format = format, count = tonumber(count), md5 = md5 }
+end
+
+-- Whether a complete, current set of packs is on disk.
+local readyCache = nil
+
+function StadiumInstall.ready()
+  if readyCache ~= nil then return readyCache end
+  local m = readMarker()
+  readyCache = (m ~= nil and m.format == StadiumInstall.FORMAT
+                and m.count == StadiumInstall.COUNT) and true or false
+  return readyCache
+end
+
+-- Whether a complete set came WITH the mod folder -- a developer checkout
+-- that has run tools/stadium_pack.py. Never true of a released build, which
+-- carries no models at all.
+--
+-- Sampled at both ends of the dex rather than counted. The question being
+-- asked is "did somebody run the packer here", not "is every one of the 151
+-- present"; a genuinely half-written folder is a case for the marker file,
+-- which is what catches an interrupted RUNTIME build.
+local function shipped()
+  local mod = V.mod
+  if not (mod and mod.read) then return false end
+  for _, dex in ipairs({ 1, 151 }) do
+    local ok, bytes = pcall(mod.read, mod,
+                            ("%s/%03d.dsm"):format(StadiumPack.DIR, dex))
+    if not (ok and type(bytes) == "string" and #bytes > 4) then return false end
+  end
+  return true
+end
+
+-- Whether the STADIUM rungs can be offered at all: either the packs have been
+-- built from the player's ROM, or the mod folder already carries a set.
+function StadiumInstall.available()
+  if StadiumInstall.ready() then return true end
+  return shipped()
+end
+
+-- Whether there is work to do: something to build from, and nothing usable
+-- yet.
+--
+-- A checkout that already carries a set is NOT pending. Building anyway would
+-- be correct and would also mean a ten-second loading screen on the first run
+-- of every checkout, to arrive at the files that were already sitting there.
+function StadiumInstall.pending()
+  if StadiumInstall.available() then return false end
+  return StadiumInstall.romPresent()
+end
+
+function StadiumInstall.forget()
+  readyCache = nil
+end
+
+-- ------- building
+
+local job = nil
+local status = { state = "idle", done = 0, total = StadiumInstall.COUNT }
+
+StadiumInstall.status = status
+
+local function writePack(species, bytes)
+  local f = fs()
+  if not f then return false, "no filesystem" end
+  local ok, err = f.write(("%s/%03d.dsm"):format(StadiumInstall.DIR, species),
+                          bytes)
+  if not ok then return false, tostring(err) end
+  return true
+end
+
+-- Open the ROM and start a stepped build. Returns false plus a reason when
+-- there is nothing to build from.
+function StadiumInstall.begin()
+  local f = fs()
+  if not f then return false, "no filesystem" end
+  local path = StadiumInstall.romPath()
+  if not path then return false, "no ROM in " .. StadiumInstall.ROM_DIR end
+
+  local okRead, bytes = pcall(f.read, path)
+  if not (okRead and type(bytes) == "string") then
+    return false, "could not read " .. path
+  end
+
+  local StadiumRom = V.require("StadiumRom")
+  local StadiumBuild = V.require("StadiumBuild")
+  local rom, err = StadiumRom.open(bytes)
+  if not rom then return false, tostring(err) end
+  if not rom:isExpectedUS() then
+    V.mod.log:warn("stadium: %s is md5 %s, not the US 1.0 ROM the model "
+                   .. "offsets are keyed to -- building anyway", path,
+                   tostring(rom:md5()))
+  end
+
+  pcall(f.createDirectory, StadiumInstall.DIR)
+  job = StadiumBuild.job(rom, writePack, StadiumInstall.COUNT)
+  job.md5 = rom:md5()
+  status.state = "building"
+  status.done = 0
+  status.total = job.total
+  status.error = nil
+  return true
+end
+
+-- One species. Returns true while there is more to do.
+function StadiumInstall.step()
+  if not job then return false end
+  local more = job:step()
+  status.done = job.done
+  status.species = job.species
+  if job.error then
+    status.state = "failed"
+    status.error = job.error
+    job = nil
+    return false
+  end
+  if not more then
+    local f = fs()
+    local wrote = #job.failed == 0
+    if wrote and f then
+      pcall(f.write, StadiumInstall.MARKER,
+            ("%s %d %s\n"):format(StadiumInstall.FORMAT, job.total,
+                                  tostring(job.md5 or "")))
+      readyCache = nil
+      StadiumPack.forget()
+    end
+    if not wrote then
+      status.state = "failed"
+      status.error = ("%d of %d models could not be built")
+                     :format(#job.failed, job.total)
+    else
+      status.state = "done"
+    end
+    job = nil
+    return false
+  end
+  return true
+end
+
+function StadiumInstall.cancel()
+  job = nil
+  status.state = "idle"
+end
+
+return StadiumInstall

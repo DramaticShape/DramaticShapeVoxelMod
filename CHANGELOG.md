@@ -1,5 +1,196 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+
+- **STADIUM battles: two new rungs on the 3D-BTL row.** The row that used
+  to read ON / OFF now reads **2D-3D / STADIUM A / STADIUM B / OFF**. 2D-3D
+  is what ON always was -- the fight staged on the map with the Game Boy's
+  own pics stood up on their tiles as quads. Both STADIUM rungs keep the
+  whole staging and replace those quads with the **Pokemon Stadium battle
+  models**: all 151 species, skinned, lit and animated, playing the
+  animation the move being used actually calls for.
+
+  **STADIUM A** stands them on the map, in the world's own light and
+  weather. **STADIUM B** stands them on two discs against the sky and draws
+  no map at all -- the Game Boy's own framing, staged rather than found.
+
+  B exists because the map does not always cooperate. Half of Kanto's
+  interiors are furniture, a cave floor can be nothing but two-cell
+  corridors, and some maps have nowhere a fight can be SEEN from a low
+  camera and are declined outright -- which drops the player back to the
+  flat battle screen with no warning. A carried stage has none of those
+  problems: it works on every map, at every step, and the framing is the
+  same every time. What it gives up is the thing A is for, which is
+  fighting somewhere real.
+
+  It is abstracted from the GROUND, not from the world. The sky behind the
+  discs is the hour's own -- gold at dusk, navy at midnight -- and a fight
+  in a cave or a shop is under that place's void and its own flat light, so
+  walking into Mt. Moon at night and starting a battle looks like Mt. Moon
+  at night.
+
+  The discs themselves are flat: one quad apiece, wearing a painted circle
+  that fades out at its rim, sized to the Pokemon standing on it. The fade
+  is an ordered dither baked into the texture's alpha rather than a smooth
+  ramp -- the scene shader discards under half alpha outright, so a ramp
+  would come out as a hard-edged circle -- which is the same trick the sky's
+  own bands use and reads as intended on a mode built out of visible texels.
+
+  Nothing else about the fight moves. The arena is picked the same way, the
+  camera is solved the same way, and the HUDs, the frosted text box, the
+  move animations and the depth of field are all exactly what 2D-3D draws
+  -- because every one of those is hung off the arena's CELLS rather than
+  off the pics. Swapping what stands on a cell changes nothing about where
+  the cell projects to, which is why this is a rung on the mode rather than
+  a second mode.
+
+  The animations are driven from the fight itself, at four seams: a move
+  plays the animation that species' own battle table names for that move
+  (the Stadium ROM's per-species move table, packed into the assets, keyed
+  by the same Gen 1 move id the engine's move defs already carry -- so DIG
+  really does put Diglett into the ground), damage plays the hit reaction,
+  fainting plays the faint and holds on its last frame, and a send-out
+  plays the entrance while the engine's own grow-out-of-the-ball scale
+  runs. Between all of that, the standby loop. The eyes blink and go
+  dizzy on their own counter, which is a texture animation glTF has no
+  channel for and the pack carries anyway. Charmander's tail flame and
+  Weezing's gas are there too, drawn additively over the body.
+
+  The models go through the mod's OWN vertex format and shader rather than
+  a path of their own, which is what earns them everything the rest of the
+  diorama has: the depth buffer decides what is in front of what, the sun
+  pass throws a shadow of the actual pose, the hour's tint lands on them,
+  the hit flash flattens them and the tilt-shift and depth of field see
+  them as part of the picture. Skinning is done on the CPU -- these are
+  674-vertex models and exactly two are ever on screen -- and once per
+  frame, so the sun, the camera and both VR eyes draw the same posed mesh.
+
+  It declines per POKEMON rather than per battle: a species whose pack is
+  missing, a substitute doll, or the trainer's own pic before the send-out
+  all fall back to the flat card, on that side alone, with the other side
+  keeping its model.
+
+  Stored as new values on the same key, with 2D-3D still first -- so a save
+  written before this update reads back as exactly the mode it was written
+  for.
+
+- **The models are built on your machine, from your own cartridge.** The
+  mod ships no Pokemon Stadium data and cannot: it is that game's. What it
+  ships is the READER.
+
+  Drop a Pokemon Stadium (US) ROM -- `.z64`, `.n64` or `.v64`, the byte
+  order is detected -- into a `baseroms/` folder beside the game, and the
+  first time it runs the 151 battle models are built out of it on a loading
+  screen, in about ten seconds, one species a frame. After that they sit in
+  the save directory and are read like any other asset. Until then the two
+  STADIUM rungs simply are not on the row: they are skipped rather than
+  shown and refused, because a setting that can be selected and then does
+  nothing is indistinguishable from a broken mod.
+
+  This is the same arrangement the engine already has for the Game Boy ROM
+  it is a recompilation of, and it is why nothing ROM-derived is in this
+  repository.
+
+  Doing it needed the whole extraction pipeline in Lua: the archive and its
+  Yay0 streams (`StadiumRom`), a geo-layout walk and an F3DEX2 interpreter
+  with six texture codecs and a bit-packed animation sampler
+  (`StadiumFragment`), the generated flame and gas stand-ins (`StadiumFx`),
+  and the bind-pose measurement and packer (`StadiumBuild`).
+
+  **Pure Lua, and deliberately so: it runs anywhere LOVE does, phones
+  included.** No FFI, no native helper, no second process, nothing outside
+  the standard library and stock LOVE calls. On desktop it is about seven
+  seconds and peaks at 68 MB of Lua heap, 32 MB of which is the cartridge
+  itself; the working set does not grow across the run.
+  `tests/stadium_budget_test.lua` measures both and fails if either stops
+  being bounded, because a transient peak a desktop shrugs off is what gets
+  a process killed on a phone. On Android the save directory is the app's
+  external-files folder, so `baseroms/` there is reachable over USB or a
+  file manager without root.
+
+- `tools/stadium_pack.py` now reads the ROM directly rather than a
+  pre-extracted tree, which makes it the ORACLE the Lua port is verified
+  against: `tests/stadium_extract_test.lua` runs both over the same
+  cartridge and requires all 151 packed files to come out **byte for byte
+  identical**. That is the only honest test of a port of that much numeric
+  code -- every rounding mode, iteration order and off-by-one shows up as a
+  differing byte, and there are thirty-four megabytes of them.
+
+- `ModSetting:setValue`, which sets a setting by its stored value rather
+  than by its place on the ladder, and `ModSetting:setGate`, which lets a
+  rung exist only when there is something behind it. 3D-BTL grew two rungs
+  in the middle of itself, and every caller that had counted to two would
+  otherwise have quietly meant something else afterwards.
+
+- `tests/stadium_shots.lua`, a shot driver for both rungs, with a control
+  mode and a pinned clock so two runs of it can be compared.
+
+### Fixed
+
+- **The eyes blinked several times a second.** A texture animation was
+  running on a clock of its own and wrapping on its own stream's length.
+  Rattata's standby loop is forty frames and its blink is five -- `6 8 7 8
+  6`, open through shut and back -- so that played it six times a second,
+  and every species with a short blink twitched the same way.
+
+  Two things were wrong, and the data says so plainly: 507 of the 691
+  animation/texture-animation pairs in the set are exactly the same length
+  as each other, which is what one shared frame counter looks like from the
+  outside. So the texture animation now rides the SKELETAL animation's own
+  frame, and it HOLDS its last entry past the end of its stream rather than
+  looping -- which is what the game's own sampler does (`func_80017540`).
+  Rattata now blinks once at the top of each idle loop and keeps its eyes
+  open for the other thirty-five frames.
+
+  The frame is not recomputed for the textures; `pose` stashes the one it
+  resolved and `textures` reads it, so the two cannot drift apart.
+
+- **The faint animation no longer plays while the HP bar is still
+  draining.** `onFaint` runs the instant HP reaches zero, but the engine
+  queues the visible collapse behind the move animation and the bar drain
+  -- and that drain takes real time, some two and a half seconds on a
+  full-health Pokemon. The model was therefore lying down while its own
+  health went on emptying above it.
+
+  The request is now recorded when HP hits zero and played when the bar
+  reaches zero, off the engine's own `shownHP` -- the same number the bar is
+  drawn from, so the two cannot drift. A faint that stops being owed in the
+  meantime (a revive, a battler replaced under us) is dropped rather than
+  fired late at whoever is standing there. Measured rather than eyeballed:
+  the shot driver's `DS_FAINT` case prints the frame the bar empties against
+  the frame the animation starts, and they are the same frame.
+
+- Two ordering bugs in the extraction pipeline that made its output
+  **non-reproducible**. The generated flame nodes were deduplicated through
+  a Python `set` of tuples containing strings, so their order moved with
+  `PYTHONHASHSEED` and Ponyta, Rapidash and Moltres got differently-seeded
+  flames on different runs of the same build; and texture registration
+  order came from iterating a `set` of ints, which is stable across runs
+  but is a CPython implementation detail rather than a fact about the data.
+  Both now go in order of appearance, which is the game's own order and the
+  one a Lua port can reproduce.
+
+### Changed
+
+- The packed format is now **DSM3**: textures are stored as raw RGBA rather
+  than PNG. An ImageData over those bytes costs nothing where a PNG costs a
+  decode on the frame a battle starts -- but the reason it was done is that
+  PNG means zlib, and Python's deflate and LOVE's need not agree byte for
+  byte, which would have made the extractor impossible to check against the
+  packer. Uncompressed pixels are the same pixels whoever wrote them. The
+  set is 34 MB rather than 24 MB, and it is generated locally rather than
+  shipped, so that is a trade worth making.
+
+### Known
+
+- Three species -- Exeggutor, Tangela and Magmar -- have standby loops that
+  are corrupt in the source extraction, throwing bones hundreds of units
+  off the body. The packer measures each species' loop against its own bind
+  pose and marks those three to hold the bind pose instead, so they stand
+  still and look like themselves rather than coming apart.
+
 ## 1.5.5
 
 ### Added

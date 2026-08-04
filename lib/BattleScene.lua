@@ -315,11 +315,23 @@ end
 
 local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
                            atlasFor, cards, token, host, neighbors,
-                           water, nbWater)
+                           water, nbWater, groundY)
   if not ShadowMap.available() then return end
   local sig = shadowSignature(state, arena, terrain, nbMesh, token)
   if not ShadowMap.stale(sig) then return end
   if not ShadowMap.begin(cx, cy, vw, vh) then return end
+
+  -- STADIUM B: the two discs are the only ground there is, so they are the
+  -- only thing the sun has to see besides the Pokemon themselves. Everything
+  -- below this is a map that is not in the shot.
+  if arena.discs then
+    pcall(function()
+      V.require("StadiumStage").cast(ShadowMap, arena, groundY or 0)
+    end)
+    pcall(function() V.require("Stadium").cast(ShadowMap) end)
+    ShadowMap.finish(sig)
+    return
+  end
 
   ShadowMap.draw(terrain, atlasFor(host), nil)
   for i, nb in ipairs(neighbors) do
@@ -354,6 +366,13 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
                    ShadowMap.snug(card.model))
   end
   ShadowMap.sprites(false)
+  -- and the STADIUM models, when that rung is the one running. NOT marked
+  -- as sprites: that flag exists so a flat card's cut-out is kept off the
+  -- water (see ShadowMap.sprites), and these are real geometry standing in
+  -- the world -- a Gyarados at the water's edge should put a Gyarados on
+  -- the water. Un-snugged for the same reason: snug is a bias for a card
+  -- rooted to the ground plane, and a model has thickness of its own.
+  pcall(function() V.require("Stadium").cast(ShadowMap) end)
 
   ShadowMap.finish(sig)
 end
@@ -363,6 +382,11 @@ end
 -- the one nearer the camera and therefore the one a mismatch would show up
 -- against.
 function BattleScene.groundY(map, arena)
+  -- STADIUM B's discs are carried, not found: their tops ARE the ground
+  -- plane, so there is no terrain height to read and reading one would put
+  -- the stage at whatever elevation the map happens to have at a spot the
+  -- fight is not actually happening on
+  if arena and arena.discs then return 0 end
   local ok, h = pcall(VoxelScene.groundAt, map,
                       arena.playerCell[1], arena.playerCell[2])
   return (ok and h) or 0
@@ -452,10 +476,25 @@ function BattleScene.render(state, arena, textures, token)
   -- moving, and a shimmer on background windows would fight the mons
   Voxel3D.glassGlint = 0
 
+  -- STADIUM B stands the fight on two carried discs against the sky, with no
+  -- map in the shot at all (see StadiumStage). Everything below still runs --
+  -- the letterbox, the camera solve, the sun, the pins, the tint, the depth
+  -- of field -- because none of it is about the terrain; what changes is
+  -- which geometry the two passes draw.
+  local discs = arena.discs and true or false
+
   -- shares the free-roam mode's request/evict bookkeeping, so a battle warms
   -- exactly the meshes walking around would have and nothing extra
-  local terrain, nbMesh, water, nbWater = prefetchArena(state, host)
-  if not terrain then return nil end
+  local terrain, nbMesh, water, nbWater
+  if discs then
+    -- and nothing is meshed for a disc fight, which is the other half of why
+    -- the rung works everywhere: there is no waiting for a chunk to build, so
+    -- the first frame of the first battle on a cold map is the finished shot
+    nbMesh, water, nbWater = {}, nil, {}
+  else
+    terrain, nbMesh, water, nbWater = prefetchArena(state, host)
+    if not terrain then return nil end
+  end
 
   local lx, ly, s, pw, ph = BattleScene.letterbox()
   if not (pw > 0 and ph > 0 and s > 0) then return nil end
@@ -487,7 +526,7 @@ function BattleScene.render(state, arena, textures, token)
   local cards = monCards(arena, groundY, textures)
   Voxel3D.camera = nil
   castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh, atlasFor,
-              cards, token, host, neighbors, water, nbWater)
+              cards, token, host, neighbors, water, nbWater, groundY)
 
   -- An opaque void either way. Outdoors the camera is low enough that the
   -- horizon is genuinely in frame, so it is sky; indoors it is the dark end
@@ -496,6 +535,18 @@ function BattleScene.render(state, arena, textures, token)
   -- geometry stops.
   local sky = VoxelScene.skyColor(host, 1)
              or VoxelScene.skyShade(INDOOR_SHADE, 1)
+  -- On STADIUM B the void is not a backdrop behind the scenery -- it IS the
+  -- scenery, because the map is not drawn. So outdoors it gets the full
+  -- treatment the free-roam camera gets: the banded gradient and the hour's
+  -- own sun or moon hanging in it (Voxel3D.beginScene paints those when the
+  -- sky it is handed carries bands). Indoors there is nothing to dress: a
+  -- room's void is one flat shade, which is what a room looks like past the
+  -- wall, and the disc fight in a cave is lit and coloured as that cave.
+  if discs and VoxelScene.skyColor(host, 1) then
+    local Sky = V.require("Sky")
+    local okDress, dressed = pcall(Sky.dress, sky)
+    if okDress and dressed then sky = dressed end
+  end
 
   Voxel3D.camera = cam
   -- the sun is turned up for the arena and put back afterwards, so the
@@ -528,6 +579,13 @@ function BattleScene.render(state, arena, textures, token)
     if not Voxel3D.beginScene(rw, rh, cx, cy, vw, vh, sky, "battle") then
       return
     end
+    if discs then
+      -- STADIUM B: the two platforms, and nothing else. No terrain, no
+      -- neighbouring maps, no water, no grass and no flowers -- see the
+      -- matching skips further down. What is behind them is the sky the
+      -- clear painted.
+      V.require("StadiumStage").draw(arena, groundY)
+    else
     Voxel3D.draw(terrain, atlasFor(host), nil)
     for i, nb in ipairs(neighbors) do
       Voxel3D.draw(nbMesh[i], atlasFor(nb.map),
@@ -548,6 +606,7 @@ function BattleScene.render(state, arena, textures, token)
         Voxel3D.draw(nbWater[i], atlasFor(nb.map),
                      Mat4.translate(nb.ox, 0, nb.oy))
       end
+    end
     end
     -- The mons, standing on their tiles. Depth-tested like everything else,
     -- so a ledge or a tree between the camera and a Pokemon really is in
@@ -579,24 +638,35 @@ function BattleScene.render(state, arena, textures, token)
     end
     Voxel3D.glass(true)
     Voxel3D.seams(true)
+    -- and the STADIUM models, inside the same flash window and with the
+    -- same camera-ward pull, so a Pokemon standing on its tile still wins
+    -- the depth test against the tile. They manage the wireframe and the
+    -- glass mask around their own draws (StadiumRig), which is why this
+    -- sits outside the pair above rather than inside it.
+    local okStadium, stadiumErr = pcall(function()
+      V.require("Stadium").draw(BattleBillboard.PULL)
+    end)
+    if not okStadium then V.require("Stadium").report(stadiumErr) end
     if flashing then Voxel3D.flatten(nil) end
     -- grass and flowers ride the same camera-ward pull the free-roam pass
     -- gives them, measured against THIS camera's pitch rather than the
     -- orbit's -- there is no character here for them to overdraw, but the
     -- pull is also what keeps a tuft from z-fighting the floor it stands on
     local pull = VoxelScene.pull(math.max(pitch, 0.05))
-    Voxel3D.draw(ChunkMesher.grass(host), atlasFor(host), nil, pull)
-    for _, nb in ipairs(neighbors) do
-      Voxel3D.draw(ChunkMesher.grass(nb.map), atlasFor(nb.map),
-                   Mat4.translate(nb.ox, 0, nb.oy), pull)
-    end
-    local fpull = math.max(0, pull - 8 * math.sin(math.max(pitch, 0.05)))
-    Voxel3D.draw(ChunkMesher.flowers(host), atlasFor(host), nil, fpull,
-                 ShadowMap.snug(nil))
-    for _, nb in ipairs(neighbors) do
-      Voxel3D.draw(ChunkMesher.flowers(nb.map), atlasFor(nb.map),
-                   Mat4.translate(nb.ox, 0, nb.oy), fpull,
-                   ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
+    if not discs then
+      Voxel3D.draw(ChunkMesher.grass(host), atlasFor(host), nil, pull)
+      for _, nb in ipairs(neighbors) do
+        Voxel3D.draw(ChunkMesher.grass(nb.map), atlasFor(nb.map),
+                     Mat4.translate(nb.ox, 0, nb.oy), pull)
+      end
+      local fpull = math.max(0, pull - 8 * math.sin(math.max(pitch, 0.05)))
+      Voxel3D.draw(ChunkMesher.flowers(host), atlasFor(host), nil, fpull,
+                   ShadowMap.snug(nil))
+      for _, nb in ipairs(neighbors) do
+        Voxel3D.draw(ChunkMesher.flowers(nb.map), atlasFor(nb.map),
+                     Mat4.translate(nb.ox, 0, nb.oy), fpull,
+                     ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
+      end
     end
     local canvas = AntiAlias.resolve(Voxel3D.endScene(), pw, ph, "battle")
     if not canvas then return end

@@ -200,6 +200,14 @@ mod.content.render_pipelines:register("voxel", {
     -- and the whole battle. Ahead of the active() gate below, because a 3D
     -- battle does not require the free-roam mode to be switched on.
     OverworldBattle.update(dt)
+    -- The one-time build of the Pokemon Stadium battle models out of the
+    -- player's own ROM, if there is one to build from and it has not been
+    -- done (see StadiumInstall). Rides this hook for the same reason the
+    -- battle does -- it is the tick that runs whatever is on the stack -- and
+    -- asks exactly once, on the first frame the player is actually in the
+    -- world, so it is never fighting the engine's own launcher for the
+    -- screen.
+    pcall(function() V.require("StadiumScreen").maybePush() end)
     -- The horde, on the same always-running tick and for the same reason:
     -- it owns no pass of the frame, it is a MODE over the overworld, and
     -- it has to keep thinking while a warp's wipe covers the screen (the
@@ -422,7 +430,15 @@ local SETTINGS = {
   -- decide nothing there and a dead switch on the menu reads as broken.
   { OverworldBattle.setting,
     "Fight on the map: the battle draws over the nearest clear ground, "
-    .. "shot over the shoulder with a slow parallax drift.",
+    .. "shot over the shoulder with a slow parallax drift. 2D-3D stands "
+    .. "the game's own pics up on their tiles. STADIUM A replaces them with "
+    .. "the Pokemon Stadium battle models, animated, playing the animation "
+    .. "the move being used actually calls for. STADIUM B stands those same "
+    .. "models on two discs against the sky instead of on the map, which "
+    .. "works everywhere -- including the caves and shop floors that have "
+    .. "nowhere to stage a fight. The STADIUM rungs only appear once the "
+    .. "models have been built: drop a Pokemon Stadium (US) ROM in the "
+    .. "baseroms folder and restart.",
     when = function() return not VR.enabled() end, full = true },
   -- Only offered while a fight can actually be staged on the map: with 3D-BTL
   -- off the engine draws the classic screen, which is this row's ON already,
@@ -496,7 +512,7 @@ mod.options:define(schema)
 --   5  V-GRID   toggle the wireframe         (new)
 --   6  T-SHIFT  cycle the blur ladder        (was 9)
 --   7  V-CURVE  cycle the horizon bend       (new)
---   8  3D-BTL   toggle overworld battles     (new)
+--   8  3D-BTL   cycle overworld battles      (new)
 --   9  WATER    cycle the water reflections  (new; 9 was T-SHIFT's old key)
 --
 -- Only 6 arrives by the documented route. Game:keypressed answers the

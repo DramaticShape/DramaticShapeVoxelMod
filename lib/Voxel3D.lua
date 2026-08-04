@@ -1159,6 +1159,30 @@ function Voxel3D.seams(on)
         on and VoxelGrid.DARK or 0)
 end
 
+-- ADDITIVE for the length of a draw, or nil to put the pass back the way
+-- it was found.
+--
+-- Exactly one thing asks for this: the flame and gas primitives on a
+-- STADIUM battle model (Charmander's tail, Weezing's cloud -- see
+-- StadiumRig). Those are light, not surface: they are drawn over a body
+-- that is already in the depth buffer and they must ADD to it rather than
+-- replace it, or the flame comes out as an opaque orange sticker.
+--
+-- Depth WRITES go off with the blend, and for the usual reason -- a
+-- translucent thing that wrote depth would punch whatever comes after it
+-- out of the frame. The test stays on, so a flame behind a tree is still
+-- behind the tree.
+function Voxel3D.blend(mode)
+  if not active then return end
+  if mode == "add" then
+    pcall(love.graphics.setBlendMode, "add", "alphamultiply")
+    pcall(love.graphics.setDepthMode, "lequal", false)
+  else
+    pcall(love.graphics.setBlendMode, "alpha", "alphamultiply")
+    pcall(love.graphics.setDepthMode, "lequal", true)
+  end
+end
+
 -- Whether what is drawn next may consult the glass mask. false for the
 -- length of a sprite-sheet pass, true to put it back.
 --

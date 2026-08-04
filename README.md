@@ -80,6 +80,67 @@ on the menu while the foe stands out on the map, and no angle holds a
 composition that is half frame and half world — so with it on, the shot holds
 the one the rig was solved for.
 
+## STADIUM battles
+
+The **3D-BTL** row has four rungs:
+
+| rung | the fight |
+| --- | --- |
+| **2D-3D** | staged on the map, with the Game Boy's own pics stood up on their tiles |
+| **STADIUM A** | staged on the map, with the Pokémon Stadium battle models |
+| **STADIUM B** | the same models on two discs against the sky, with no map drawn |
+| **OFF** | the engine's own battle screen |
+
+All 151 species, skinned and animated, playing the animation the move being
+used actually calls for — the Stadium ROM's own per-species move table, so
+**DIG** really does put Diglett into the ground. Damage plays the hit
+reaction, fainting plays the faint and holds there, a send-out plays the
+entrance, and between all of that the standby loop runs. Eyes blink and go
+dizzy; Charmander's tail flame and Weezing's gas are drawn over the body.
+
+**B is for the maps that cannot host a fight.** Half of Kanto's interiors are
+furniture, a cave floor can be nothing but corridors, and a map where neither
+Pokémon can be *seen* from a low camera is declined outright — which drops you
+back to the flat battle screen. B carries its stage, so it works everywhere
+and looks the same every time. It is abstracted from the ground, not from the
+world: the sky behind the discs is the hour's own, and a fight in a cave is
+under that cave's void and its own flat light.
+
+### Getting the models
+
+**They are not in this mod, and they cannot be** — they are Pokémon Stadium's
+data. What ships is the reader; you supply the cartridge, exactly as this
+engine already asks you to supply the Game Boy ROM it is a recompilation of.
+
+1. Put a **Pokémon Stadium (US)** ROM in a `baseroms/` folder beside the game.
+   `.z64`, `.n64` and `.v64` all work — the byte order is detected.
+   In a packaged build, `baseroms/` goes in the save directory; the mod logs
+   the exact path on startup when it cannot find one.
+2. Start the game. The 151 models are built out of the ROM on a loading
+   screen, in about ten seconds.
+3. The two STADIUM rungs appear on the 3D-BTL row.
+
+The built models live in the save directory, not in the mod folder, and are
+rebuilt automatically if the format changes or the ROM does. Until they exist
+the STADIUM rungs are simply not on the row — skipped rather than shown and
+refused, because a setting you can select that then does nothing is worse than
+one that is not there.
+
+**This works on mobile.** The extraction is pure Lua — no FFI, no native
+helper, no second process — so it runs anywhere LÖVE does. It peaks at about
+68 MB of Lua heap (32 MB of that the cartridge itself) with a working set that
+does not grow across the run, and `tests/stadium_budget_test.lua` fails if
+either stops being true. On Android the save directory is the app's
+external-files folder, so `baseroms/` there is reachable over USB or a file
+manager without root; the build is slower than a desktop's ~7 s but runs one
+species a frame behind the progress bar either way.
+
+Developers can pre-build them with `tools/stadium_pack.py`, which reads the
+same ROM through `model_extract/pipeline`. That path is also the *oracle*:
+`tests/stadium_extract_test.lua` runs it and the in-game Lua extractor over
+the same cartridge and requires all 151 packed files to come out byte for byte
+identical.
+
 ## VR
 
 The **VR** options row (OFF / ON, off by default) drives a PCVR headset
