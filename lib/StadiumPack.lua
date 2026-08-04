@@ -81,8 +81,13 @@ end
 -- writes them -- slot 165 upward (see model_extract/manifest.json's
 -- animationSlots). Indexed by POSITION, so this list is the format's
 -- contract and the packer's CONTEXTS must stay identical to it.
+-- Position 2 was called "hit" until the move table was read against it: it
+-- is the animation most of a species' MOVES play, which makes it the default
+-- attack and not a damage reaction (see StadiumMon's STATES). The name is a
+-- label on a position -- the format is the ORDER -- so renaming it changes no
+-- bytes, but it has to match tools/stadium_pack.py's CONTEXTS.
 StadiumPack.CONTEXT = {
-  "idle", "hit", "faint", "entrance", "reaction_169", "reaction_170",
+  "idle", "attack_default", "faint", "entrance", "reaction_169", "reaction_170",
   "reaction_171", "reaction_172", "reaction_173", "reaction_174",
   "struggle", "idle_alt", "faint_alt", "flinch", "reaction_179",
   "reaction_180", "reaction_181", "reaction_182", "entrance_alt",

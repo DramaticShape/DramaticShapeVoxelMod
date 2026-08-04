@@ -92,7 +92,7 @@ import rom as rom_mod  # noqa: E402
 # manifest.json's own (animationSlots); the mod indexes this list by position,
 # so the ORDER is the contract and must match lib/StadiumPack.lua's CONTEXT.
 CONTEXTS = [
-    'idle', 'hit', 'faint', 'entrance', 'reaction_169', 'reaction_170',
+    'idle', 'attack_default', 'faint', 'entrance', 'reaction_169', 'reaction_170',
     'reaction_171', 'reaction_172', 'reaction_173', 'reaction_174',
     'struggle', 'idle_alt', 'faint_alt', 'flinch', 'reaction_179',
     'reaction_180', 'reaction_181', 'reaction_182', 'entrance_alt',

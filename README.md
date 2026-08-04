@@ -100,10 +100,15 @@ floors that have nowhere to put a fight. Only the STADIUM rungs need a ROM;
 
 Skinned and animated, playing the animation the move being used actually
 calls for — the Stadium ROM's own per-species move table, so **DIG** really
-does put Diglett into the ground. Damage plays the hit reaction, fainting
-plays the faint and holds there, a send-out plays the entrance, and between
-all of that the standby loop runs. Eyes blink and go dizzy; Charmander's tail
-flame and Weezing's gas are drawn over the body.
+does put Diglett into the ground. Fainting plays the faint and holds there, a
+send-out grows the Pokémon out of the ball as it opens and plays the entrance,
+and between all of that the standby loop runs. Eyes blink and go dizzy;
+Charmander's tail flame and Weezing's gas are drawn over the body.
+
+Taking damage plays nothing, because the set has no damage reaction in it —
+the slot that looked like one is each species' default attack, which is why
+being hit used to look like swinging. The engine's own screen flash, pic blink
+and HP drain are what say "that hurt".
 
 148 of the 151 have models. Exeggutor, Tangela and Magmar come out of the ROM
 with corrupt standby loops and stand as their Game Boy battle sprites
@@ -124,9 +129,19 @@ under that cave's void and its own flat light.
 data. What ships is the reader; you supply the cartridge, exactly as this
 engine already asks you to supply the Game Boy ROM it is a recompilation of.
 
+> **You must supply a Pokémon Stadium (US) 1.0 ROM.** Not Stadium 2, not
+> another region, not a later revision. Every offset in the reader was
+> measured against that one cartridge, and nothing else is promised: a
+> different file is either refused outright or builds models that are subtly
+> wrong. The mod checks, and says so — on the console, and on the loading
+> screen itself if it built from something unexpected.
+>
+> The reference dump is **md5 `ed1378bc12115f71209a77844965ba50`**, 32 MB.
+> The mod does not tell you where to get one, and none ships with it.
+
 1. Open **OPTIONS** and press the **STADIUM ROM** row. It opens your system's
-   file picker; choose a **Pokémon Stadium (US)** ROM. `.z64`, `.n64` and
-   `.v64` all work — the byte order is detected, and the wrong file is
+   file picker; choose your **Pokémon Stadium (US) 1.0** ROM. `.z64`, `.n64`
+   and `.v64` all work — the byte order is detected, and the wrong file is
    refused with a reason rather than half-built.
 2. The 151 models are built on a loading screen that says so and shows a
    progress bar, in about ten seconds. The row then reads **READY**.
@@ -138,8 +153,8 @@ produced. Press the row again any time to import a different one.
 There is no picker on Android, or on a Linux install with neither `zenity`
 nor `kdialog`. Those keep the original route, which still works everywhere:
 
-- Put the ROM in a `baseroms/` folder beside the game — straight in it, not
-  in a subfolder — and start the game.
+- Put the **US 1.0** ROM in a `baseroms/` folder beside the game — straight
+  in it, not in a subfolder — and start the game.
 - In a packaged build (and on Android) `baseroms/` goes in the save
   directory; the mod logs the exact path on startup when it cannot find one.
   On Android that is the app's external-files folder, reachable over USB or
@@ -217,3 +232,35 @@ the original game, as documented by the
 [pret/pokered](https://github.com/pret/pokered) disassembly. No ROM
 data, artwork or audio is included; the mod reads the assets the host
 game already has.
+
+### Acknowledgements — pret/pokestadium
+
+The STADIUM battle models are read out of the player's own Pokémon Stadium
+(US) 1.0 cartridge by original code in [`lib/`](lib) and
+[`model_extract/`](model_extract). **That code exists because of
+[pret/pokestadium](https://github.com/pret/pokestadium)**, the community
+decompilation of that game, which is the reference this mod's reader was
+written against. Specifically, it is where the following came from:
+
+- the bone matrix chain, and the fact that scale is kept *out* of it and
+  applied only at draw time (`func_800143C0`) — the single most important
+  thing to get right in the whole rig, and not guessable from the data
+- the rotation basis and its row-vector `Rx·Ry·Rz` order
+  (`func_8000F730`, `src/F420.c`)
+- the animation player's frame counter and loop-start behaviour
+  (`func_80016FBC`), and the texture-animation sampler that *clamps* past
+  the end of its stream rather than wrapping (`func_80017540`) — which is
+  the difference between a Pokémon blinking and twitching
+- the battle system's per-species animation context slots and the routines
+  that select them (`func_8432B0A4`, `func_8430506C`, `func_84305A74`)
+- the move-id constants the per-species move table is keyed by
+
+**No code, data or asset from that project is included in or redistributed
+by this mod**, and none is needed to build or run it. What was taken is an
+understanding of the file formats, re-expressed in this mod's own Lua and
+Python. If you want to reuse anything from the decompilation itself, get it
+from upstream and follow that project's own terms.
+
+No Pokémon Stadium ROM data ships here either. The models are built on the
+player's own machine, from a cartridge they supply, into their own save
+directory — see [Getting the models](#getting-the-models).

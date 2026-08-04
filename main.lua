@@ -437,8 +437,10 @@ local SETTINGS = {
     .. "place's own weather and light; B stands it on two discs against the "
     .. "sky instead, which works everywhere, including the caves and shop "
     .. "floors that have nowhere to stage a fight. The STADIUM rungs only "
-    .. "appear once the models have been built: drop a Pokemon Stadium (US) "
-    .. "ROM in the baseroms folder and restart.",
+    .. "appear once the models have been built, and building them needs a "
+    .. "Pokemon Stadium (US) 1.0 ROM of your own -- import it from the "
+    .. "STADIUM ROM row, or drop it in the baseroms folder and restart. No "
+    .. "other version works: the reader is keyed to that one cartridge.",
     when = function() return not VR.enabled() end, full = true },
   -- Only offered while a fight can actually be staged on the map: with 3D-BTL
   -- off the engine draws the classic screen, which is this row's ON already,

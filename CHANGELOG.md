@@ -62,14 +62,13 @@
   the cell projects to, which is why this is a rung on the mode rather than
   a second mode.
 
-  The animations are driven from the fight itself, at four seams: a move
-  plays the animation that species' own battle table names for that move
-  (the Stadium ROM's per-species move table, packed into the assets, keyed
-  by the same Gen 1 move id the engine's move defs already carry -- so DIG
-  really does put Diglett into the ground), damage plays the hit reaction,
-  fainting plays the faint and holds on its last frame, and a send-out
-  plays the entrance while the engine's own grow-out-of-the-ball scale
-  runs. Between all of that, the standby loop. The eyes blink and go
+  The animations are driven from the fight itself: a move plays the animation
+  that species' own battle table names for that move (the Stadium ROM's
+  per-species move table, packed into the assets, keyed by the same Gen 1
+  move id the engine's move defs already carry -- so DIG really does put
+  Diglett into the ground), fainting plays the faint and holds on its last
+  frame, and a send-out grows the Pokemon out of the ball as it opens and
+  plays the entrance with it. Between all of that, the standby loop. The eyes blink and go
   dizzy on their own counter, which is a texture animation glTF has no
   channel for and the pack carries anyway. Charmander's tail flame and
   Weezing's gas are there too, drawn additively over the body.
@@ -151,6 +150,15 @@
   a process killed on a phone. On Android the save directory is the app's
   external-files folder, so `baseroms/` there is reachable over USB or a
   file manager without root.
+
+- **Acknowledgement for [pret/pokestadium](https://github.com/pret/pokestadium)**,
+  in README.md, model_extract/README.md and mod.card. The STADIUM extractor is
+  original code, but the decompilation is what it was written against -- the
+  bone matrix chain and the fact that scale is kept out of it, the rotation
+  basis, the animation and texture-animation samplers, the battle context
+  slots and the move-id constants all came from reading that project. None of
+  its code or data is vendored here or needed to run this, and the credit says
+  so as plainly as it says what was owed.
 
 - `tools/stadium_pack.py` now reads the ROM directly rather than a
   pre-extracted tree, which makes it the ORACLE the Lua port is verified
@@ -285,6 +293,75 @@
   fired late at whoever is standing there. Measured rather than eyeballed:
   the shot driver's `DS_FAINT` case prints the frame the bar empties against
   the frame the animation starts, and they are the same frame.
+
+- **Being hit played the ATTACK animation.** The context slot the mod called
+  `hit` is not a damage reaction: read against the move table, Bulbasaur's is a
+  95-frame animation that 66 of its moves play, and Pidgey's is 138 frames --
+  four and a half seconds -- shared by 111 of its moves. That is the species'
+  DEFAULT ATTACK, which is why taking damage looked exactly like swinging: it
+  was the swing. Slots 173, 178, 179, 180 and 181 all point at the same one.
+
+  Nor is a reaction hiding elsewhere. Exactly one animation per species is
+  claimed by no slot and no move, and it is the same length as that species'
+  idle for essentially all of them -- 48/48, 56/56, 60/60, 84/84 -- so it is a
+  second standby loop, not a recoil. **This set has no damage reaction in it.**
+
+  So damage now plays nothing and the Pokemon carries on with what it was
+  doing, which is what the engine already communicates through its own screen
+  flash, pic blink and HP drain. The slot is renamed `attack_default`
+  throughout (a label on a position -- the file format is the ORDER, so no
+  bytes changed), and the generic swing a move with no table entry falls back
+  to now uses it rather than resolving to the standby loop.
+
+- **The battle menu no longer changes colour with the scenery.** There was a
+  pass that measured each frosted panel's average brightness and flipped the
+  glyphs to white over a dark one, with hysteresis so a drifting camera could
+  not strobe them. It worked, and it was still wrong: the battle menu is the
+  part of the frame the player reads constantly, and having its colour depend
+  on where the camera happens to point makes it unreliable furniture. Gen 1's
+  battle ink is black, so it is black -- on a cave floor as much as on a
+  meadow -- and the panel's tint, which always pushes toward white, is what
+  earns it its contrast. Removing it also took out a one-pixel GPU readback
+  that ran several times a second to answer a question nothing asks any more.
+
+- **The required ROM is now named everywhere: Pokemon Stadium (US) 1.0.** It
+  always was the only one that works -- every offset in the reader was
+  measured against that cartridge -- but the docs and the file picker just
+  said "Pokemon Stadium (US)", which is three different ROMs. The picker's
+  title, the OPTIONS help, the README, mod.card and the manifest all name the
+  revision now, the README carries the reference md5
+  (`ed1378bc12115f71209a77844965ba50`) so a player can check their own file,
+  and a build from anything else says so on the loading screen as well as the
+  console rather than quietly producing wrong models.
+
+- **The extraction screen just says STADIUM EXTRACTION now**, with the
+  progress bar and the species name under it; the "this runs once" line is
+  gone.
+
+- **Pokemon now grow out of the ball, instead of appearing beside it.**
+  Measured, the send-out is: the ball is thrown, the POOF animation runs for
+  27 frames, and `startGrowIn` fires on the frame AFTER it ends. So the model
+  did not begin to exist until the ball had finished opening -- the ball came
+  apart, and then a Pokemon was switched on next to it.
+
+  The engine's own ramp is the Game Boy's three steps (0, 3/7, 5/7, full)
+  across the twelve frames after that, which on a 56-pixel sprite is a chunky
+  pop and on a smooth 3D model is just a pop.
+
+  The model now runs its own ramp, started when the POOF BEGINS and
+  continuous: it grows out of nothing while the ball is coming apart and
+  reaches full size exactly as the engine's own grow finishes -- 39 frames
+  end to end, which is the poof's 27 plus the engine's 12. Smoothstep rather
+  than linear or ease-out, because the ball is still opening through the first
+  half and a curve that was already near full size by then would have the
+  Pokemon standing about waiting for it. The entrance animation starts with
+  the grow, so the arrival is one performance rather than a grow followed by
+  a flourish.
+
+  Its own ramp OWNS the arrival once it starts: falling back to the engine's
+  afterwards shrank the Pokemon from 0.96 back to 0.71 and then snapped it to
+  full, because the two finish a few frames apart -- a visible hitch at the
+  end of the one animation that exists to not have one.
 
 - **The first Pokemon of a battle arrived, left, and arrived again.** Every
   guard deciding whether the player's Pokemon is on the field is a field the

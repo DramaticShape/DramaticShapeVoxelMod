@@ -41,7 +41,7 @@ local roundHalfEven = StadiumFragment.roundHalfEven
 -- indexes this list by POSITION, so the ORDER is the format's contract and
 -- has to stay identical to StadiumPack.CONTEXT and to the packer's CONTEXTS.
 StadiumBuild.CONTEXTS = {
-  "idle", "hit", "faint", "entrance", "reaction_169", "reaction_170",
+  "idle", "attack_default", "faint", "entrance", "reaction_169", "reaction_170",
   "reaction_171", "reaction_172", "reaction_173", "reaction_174",
   "struggle", "idle_alt", "faint_alt", "flinch", "reaction_179",
   "reaction_180", "reaction_181", "reaction_182", "entrance_alt",
@@ -49,7 +49,8 @@ StadiumBuild.CONTEXTS = {
 }
 
 -- Which context name wins when several claim the same animation.
-local NAME_PREF = { "idle", "hit", "faint", "entrance", "struggle", "flinch" }
+local NAME_PREF = { "idle", "attack_default", "faint", "entrance",
+                    "struggle", "flinch" }
 
 local N_MOVES = StadiumRom.N_MOVES
 local CTX_BASE = 165

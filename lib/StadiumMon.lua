@@ -106,6 +106,26 @@ StadiumMon.HOVER_CAP = 0.5
 -- same rate.
 StadiumMon.FPS = StadiumPack.FPS
 
+-- ------- coming out of the ball
+--
+-- The engine grows its flat pic in the Game Boy's own three steps -- 0, then
+-- 3/7, then 5/7, then full -- across the twelve frames after the ball opens
+-- (BattleState.growInScale). Two things about that do not carry to a model.
+--
+-- It is three steps, which on a 56-pixel sprite is a chunky pop and on a
+-- smooth 3D model is just a pop. And it starts AFTER the ball: measured, the
+-- poof animation runs for 27 frames and `startGrowIn` fires on the frame
+-- after it ends, so the Pokemon does not begin to exist until the ball has
+-- finished opening -- which reads as the ball opening and then a Pokemon
+-- being switched on beside it.
+--
+-- So the model runs its own ramp, started when the POOF begins rather than
+-- when it ends, and continuous rather than stepped: it grows out of nothing
+-- while the ball is opening and reaches full size as the engine's own grow
+-- finishes. GROW_TIME is measured off that -- 27 frames of poof plus the
+-- engine's 12 of grow is 39, which is this.
+StadiumMon.GROW_TIME = 0.65
+
 -- How far an animation may carry the Pokemon off its tile, in the Pokemon's
 -- own body-heights, before the excess is taken back out (StadiumRig.anchor).
 --
@@ -122,15 +142,37 @@ StadiumMon.TRAVEL = 0.75
 --
 -- Each entry says which context slot to look up, whether it loops, and
 -- what it falls back to when the species has no animation in that slot.
+-- ------- there is no hit reaction, and there never was
+--
+-- This used to carry `hit` and `flinch` states, played when damage landed,
+-- resolving through context slots 166 and 178. Both were wrong, and the data
+-- says so plainly once the move table is read alongside them:
+--
+--   Bulbasaur's slot 166 is a 95-frame animation that 66 of its moves play.
+--   Pidgey's is 138 frames -- four and a half seconds -- and 111 of its moves
+--   play it. Slot 178, and 173, 179, 180 and 181, all point at the same one.
+--
+-- A four-and-a-half-second animation that most of the move table uses is the
+-- species' DEFAULT ATTACK, not a flinch, which is why being hit looked like
+-- swinging: it literally was the swing.
+--
+-- Nor is the reaction hiding elsewhere. Exactly one animation per species is
+-- claimed by no slot and no move, and it is the same length as the idle for
+-- essentially every one of them -- 48/48, 56/56, 60/60, 84/84 -- so it is a
+-- second standby loop, not a recoil. The set has no damage reaction in it.
+--
+-- So damage plays nothing, and the Pokemon carries on with what it was doing.
+-- That is not a gap: the engine flashes the screen, blinks the pic and drains
+-- the bar, which is how Gen 1 says "that hurt" and is already in the frame.
 local STATES = {
   idle = { slot = "idle", loop = true },
   entrance = { slot = "entrance", loop = false, next = "idle" },
-  hit = { slot = "hit", loop = false, next = "idle" },
-  flinch = { slot = "flinch", loop = false, next = "idle", fallback = "hit" },
   faint = { slot = "faint", loop = false, hold = true },
-  -- an attack names its animation outright (the move table decides), so it
-  -- has no slot of its own
-  attack = { loop = false, next = "idle" },
+  -- A move names its own animation out of the move table. `attack_default`
+  -- is the fallback for one the table has nothing for -- which is what slot
+  -- 166 actually is, so the generic swing is now a real swing rather than
+  -- the standby loop it used to resolve to.
+  attack = { slot = "attack_default", loop = false, next = "idle" },
 }
 
 function StadiumMon.new(side)
@@ -193,6 +235,7 @@ function StadiumMon:setSpecies(dex)
   if dex == self.species then return self.rig ~= nil end
   if self.rig then self.rig:release() end
   self.rig, self.model, self.species = nil, nil, dex
+  self.grow, self.grewOwn = nil, nil
   if not dex then return false end
   local model = StadiumPack.load(dex)
   if not model then return false end
@@ -250,19 +293,17 @@ function StadiumMon:play(state, animIndex, auxIndex)
 end
 
 -- Ask for a state, but never interrupt one that outranks it. A faint is
--- final, and a hit reaction landing on top of an attack the Pokemon is
--- halfway through reads as the attack being cancelled -- which, on the
--- receiving end of a two-hit turn, it is not.
-local RANK = { idle = 0, entrance = 1, attack = 2, hit = 3, flinch = 3,
-               faint = 4 }
+-- final, and an entrance cannot be cut short by the standby loop it hands
+-- on to.
+local RANK = { idle = 0, entrance = 1, attack = 2, faint = 3 }
 
 function StadiumMon:request(state, animIndex, auxIndex)
   if not self.model then return false end
   local now = RANK[self.state] or 0
   local want = RANK[state] or 0
   if self.state == "faint" then return false end
-  -- an equal-ranked request RESTARTS: a second hit in a turn should play
-  -- the flinch again rather than be swallowed by the first
+  -- an equal-ranked request RESTARTS: the second move of a two-hit turn
+  -- should swing again rather than be swallowed by the first
   if want < now then return false end
   return self:play(state, animIndex, auxIndex)
 end
@@ -291,6 +332,12 @@ function StadiumMon:update(dt)
   -- advance the anchor's filter (StadiumRig.anchor). Stashed before the
   -- early-outs below, so a species with nothing to play still has one.
   self.dt = dt or 0
+  -- the ball-to-full-size ramp, which runs whether or not there is an
+  -- animation to play alongside it
+  if self.grow then
+    self.grow = self.grow + (dt or 0) / StadiumMon.GROW_TIME
+    if self.grow >= 1 then self.grow = nil end
+  end
   local model = self.model
   if not (model and self.anim) then return end
   local anim = model.anims[self.anim]
@@ -312,6 +359,39 @@ function StadiumMon:update(dt)
       self:play(nextState)
     end
   end
+end
+
+-- ------- the grow
+--
+-- Begin coming out of the ball. Answers whether it actually started, so the
+-- caller can play the entrance alongside it and the engine's own send-out
+-- seam a moment later does not restart what is already running.
+function StadiumMon:beginGrow()
+  if self.grow or not self.model then return false end
+  self.grow = 0
+  -- and remember that THIS arrival was ours to size, so the engine's own
+  -- three-step ramp is not consulted again for it. Ours starts earlier and
+  -- finishes a few frames sooner, and in that gap the engine's ramp still
+  -- reads 5/7 -- so falling back to it shrank the Pokemon from 0.96 back to
+  -- 0.71 and then snapped it to full, a visible hitch at the end of an
+  -- animation that exists to not have one.
+  self.grewOwn = true
+  return true
+end
+
+-- How big this Pokemon is drawn this frame, as a fraction of its real size.
+--
+-- Smoothstep rather than a straight ramp or an ease-out: the ball is opening
+-- for the first half of this, so a curve that is already near full size by
+-- then would have the Pokemon standing there while the ball is still coming
+-- apart. Slow, then quick through the middle, then settling exactly as the
+-- engine's own grow ends.
+function StadiumMon:growScale()
+  local t = self.grow
+  if not t then return 1 end
+  if t <= 0 then return 0 end
+  if t >= 1 then return 1 end
+  return t * t * (3 - 2 * t)
 end
 
 -- Whether a HELD animation -- which in practice means a faint -- has played

@@ -202,10 +202,18 @@ end
 local function onField(battle, side, mon)
   local battler = side == "player" and battle.player or battle.enemy
   if not (battler and battler.sprite) then return false end
+  -- A model that is GROWING out of its ball is on the field by definition --
+  -- that is what the grow is -- even though the engine still calls the side
+  -- "sending out", because the flat pic it wrote that flag for does not
+  -- appear until the ball has finished opening and this one comes out with
+  -- it (see StadiumMon.GROW_TIME).
+  local growing = (mon and mon.grow) and true or false
   if side == "enemy" then
-    if battle.enemyHidden or battle.enemySendingOut then return false end
+    if battle.enemyHidden then return false end
+    if battle.enemySendingOut and not growing then return false end
   else
-    if battle.safari or battle.demo or battle.sendingOut then return false end
+    if battle.safari or battle.demo then return false end
+    if battle.sendingOut and not growing then return false end
     -- ------- and not before the battle has even opened
     --
     -- The player's Pokemon is not out during the INTRO. Every other guard
@@ -359,6 +367,8 @@ function Stadium.update(dt, battle, groundY)
     -- a send-out and a new battle alike.
     if session.at[side] ~= battler then
       session.at[side] = battler
+      -- a fresh arrival: this Pokemon has not grown out of its ball yet
+      if mon then mon.grow, mon.grewOwn = nil, nil end
       if mon and mon.rig and mon.state == "faint" then mon:play("idle") end
     end
     -- the collapse this side is owed, once its bar has finished emptying
@@ -386,10 +396,35 @@ function Stadium.update(dt, battle, groundY)
     mon.model_matrix = nil
 
     if mon.rig then
-      -- the send-out grow, borrowed whole from the engine: the pic scales
-      -- up out of the ball in three steps and so does the model
-      local okG, grow = pcall(battle.growInScale, battle, battler)
-      mon.scale = (okG and grow) or 1
+      -- ------- the ball is opening: start growing out of it
+      --
+      -- The POOF is the ball coming apart, and it is where a Pokemon should
+      -- begin to exist -- not 27 frames later when the engine starts scaling
+      -- up the flat pic it was written for. Only for a side the battle says
+      -- is actually sending out, so the same animation played at a thrown
+      -- Poke Ball (a capture attempt, which aims it at the FOE) cannot start
+      -- the wrong Pokemon growing.
+      local poof = (battle.animPlaying
+                    and battle.animName == "POOF_ANIM") and true or false
+      local sending = (side == "player") and battle.sendingOut
+                      or battle.enemySendingOut
+      if poof and sending and mon:beginGrow() then
+        -- and the arrival animation with it, so the whole thing is one
+        -- performance rather than a grow followed by a flourish
+        mon:request("entrance")
+      end
+
+      -- how big it is drawn. Its own ramp while it is growing (see
+      -- StadiumMon.growScale); the engine's three-step one otherwise, which
+      -- still covers a send-out that never showed a poof.
+      if mon.grow then
+        mon.scale = mon:growScale()
+      elseif mon.grewOwn then
+        mon.scale = 1
+      else
+        local okG, grow = pcall(battle.growInScale, battle, battler)
+        mon.scale = (okG and grow) or 1
+      end
       mon:update(dt or 0)
       if mon.visible and arena then
         local cell = arena[side]
@@ -501,6 +536,15 @@ function Stadium.showing(side)
   return (mon and mon.visible) and true or false
 end
 
+-- How big this side's model is being drawn this frame, 0..1 -- the send-out
+-- grow. Named for the shot drivers: a ramp is a curve over time and a
+-- screenshot has one point of it.
+function Stadium.scaleOf(side)
+  if not session then return nil end
+  local mon = session[side]
+  return mon and mon.scale or nil
+end
+
 -- How wide the Pokemon on `side` stands, in world pixels, or nil when there
 -- is not one. What STADIUM B sizes that side's platform to (StadiumStage).
 function Stadium.footprint(side)
@@ -565,19 +609,11 @@ function Stadium.install()
     return innerMove(self, user, target, moveInst, isCalled)
   end
 
-  -- THE HIT. applyDamage is where HP actually comes off, which is the
-  -- moment the reaction belongs to -- ahead of the bar drain and the
-  -- message, both of which take frames.
-  local innerDamage = BattleState.applyDamage
-  function BattleState:applyDamage(target, dmg)
-    local dealt = innerDamage(self, target, dmg)
-    -- a substitute soaking the hit means the Pokemon behind it did not
-    -- flinch, and its model is not the thing on screen anyway
-    if session and (dealt or 0) > 0 and not (target and target.substituteHP) then
-      ask(self, target, "hit")
-    end
-    return dealt
-  end
+  -- THE HIT is deliberately NOT hooked. There is no damage reaction in this
+  -- set to play -- what looked like one is the species' default attack (see
+  -- StadiumMon's STATES), which is why being hit used to look like swinging.
+  -- The engine's own flash, pic blink and bar drain are what say "that hurt",
+  -- and they are already in the frame.
 
   -- THE FAINT. Held on its last frame rather than looped (see StadiumMon's
   -- STATES), because a Pokemon that collapses and then stands back up
@@ -604,7 +640,14 @@ function Stadium.install()
   -- battle system's own entrance slot names.
   local innerGrow = BattleState.startGrowIn
   function BattleState:startGrowIn(battler)
-    if session then ask(self, battler, "entrance") end
+    if session then
+      -- unless the model is already on its way out of the ball, in which
+      -- case the entrance started with the POOF (see update) and asking
+      -- again here would restart it a third of a second in
+      local side = sideOf(self, battler)
+      local mon = side and session[side]
+      if not (mon and mon.grow) then ask(self, battler, "entrance") end
+    end
     return innerGrow(self, battler)
   end
 

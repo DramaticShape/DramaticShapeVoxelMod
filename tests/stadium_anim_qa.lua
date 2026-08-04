@@ -440,7 +440,7 @@ local function sweepSpecies(dex)
   mon.rig, mon.model, mon.species = rig, model, dex
   mon.state, mon.anim, mon.time = nil, nil, 0
 
-  for _, state in ipairs({ "idle", "entrance", "hit", "flinch", "faint" }) do
+  for _, state in ipairs({ "idle", "entrance", "attack", "faint" }) do
     local ok, err = pcall(function()
       mon:play(state)
       -- a whole second of it at 60 Hz, which is what the fight does

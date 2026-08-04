@@ -1272,18 +1272,14 @@ function OverworldBattle.install()
   end
 
   -- The battle's text box and its menus, over the frosted glass laid down for
-  -- them rather than over their own white paper -- and their ink flipped with
-  -- the HUD's when the ground under the frame is dark, by the same rule and
-  -- off the same verdict.
+  -- them rather than over their own white paper. The INK is Gen 1's own black
+  -- and stays that way whatever is behind the glass -- the panel's tint is
+  -- what earns it its contrast (see BattleHud).
   local innerText = BattleState.drawTextArea
   function BattleState:drawTextArea()
     if not self.dramaticShapeShot then return innerText(self) end
     if isIOS() then return innerText(self) end
-    local battle = self
-    if not self.dramaticShapeDark then return withoutBoxFill(battle, innerText) end
-    BattleHud.flipGlyphs(BattleScene.GB_W, BattleScene.GB_H, function()
-      withoutBoxFill(battle, innerText)
-    end)
+    return withoutBoxFill(self, innerText)
   end
 
   -- Move animations are authored against the pics' fixed slots, and a single
@@ -1376,28 +1372,13 @@ function OverworldBattle.install()
     if not ok then error(err, 0) end
   end
 
-  -- Black glyphs on grass are not readable; over a frosted panel measured
-  -- dark they are not readable either, so they go white. Mapped rather than
-  -- rewritten: the HUD sets pure black for its text and nothing else, and in
-  -- the colorized pipeline this lands in the grayscale BG canvas, where
-  -- white IS shade 0 and the zone pass then colours it like every other
-  -- lightest-shade surface. One rule, both pipelines.
-  --
-  -- The HP bar is untouched: it is drawn in its own greens and reds, and
-  -- only an exactly-black set is remapped.
   innerHUDs = BattleState.drawHUDs
   function BattleState:drawHUDs(slide)
     -- Normally the HUDs have already been drawn this frame, snapped out to the
     -- window's edges and composited into the world image (snapHUDs). Drawing
     -- them here as well would show each block twice, once in each place.
     if self.dramaticShapeShot and snapped() then return end
-    if not (self.dramaticShapeShot and self.dramaticShapeDark) then
-      return innerHUDs(self, slide)
-    end
-    local battle = self
-    BattleHud.flipGlyphs(BattleScene.GB_W, BattleScene.GB_H, function()
-      innerHUDs(battle, slide)
-    end)
+    return innerHUDs(self, slide)
   end
 
   BattleState.dramaticShapeBattleHook = true
@@ -1429,18 +1410,17 @@ end
 -- outside the frame that pass covers. In the colorized pipeline drawHUDs leaves
 -- the HP bar's fill as DMG gray for the zone pass to colour by region (#229);
 -- answered false, it tints its own greens and reds instead, exactly as it does
--- on the flat path. The glyphs are pure black either way, which is what the
--- flip in BattleHud.layerTexture is measured against.
+-- on the flat path.
 --
 -- Shadowed on the instance for this call only, the way drawZonePass shadows
 -- activeBgp: putting the field back to whatever it was (normally nil) lets the
 -- class method be found again.
-function OverworldBattle.hudTexture(battle, slide, dark)
+function OverworldBattle.hudTexture(battle, slide)
   if not (innerHUDs and battle) then return nil end
   local had = rawget(battle, "colorMode")
   battle.colorMode = function() return false end
   local ok, layer = pcall(BattleHud.layerTexture,
-                          BattleScene.GB_W, BattleScene.GB_H, dark,
+                          BattleScene.GB_W, BattleScene.GB_H,
                           function() innerHUDs(battle, slide) end)
   battle.colorMode = had
   return ok and layer or nil
@@ -1479,16 +1459,7 @@ function OverworldBattle.snapHUDs(battle, shot)
   for key, rect in pairs(OverworldBattle.textRects(battle)) do
     live[key] = toWorld(rect, shot)
   end
-  -- measured under the SNAPPED rects: the panels are over whatever the world
-  -- shows at the window's edges now, which is not what was behind them in the
-  -- middle of the frame. ONE verdict over all of them, HUDs and box together,
-  -- for the reason BattleHud.verdict gives: a frame with white glyphs in the
-  -- corner and black ones on the menu reads as a bug rather than as adaptation.
-  local dark = BattleHud.verdict(live, shot, true)
-  -- the box's own ink is flipped where the engine draws it, in the GB frame,
-  -- so the answer has to outlive this function (see drawHudPanels)
-  if session then session.dark = dark end
-  local layer = OverworldBattle.hudTexture(battle, slide, dark)
+  local layer = OverworldBattle.hudTexture(battle, slide)
   if not layer then return false end
 
   local g = love.graphics
@@ -1497,7 +1468,7 @@ function OverworldBattle.snapHUDs(battle, shot)
   local ok, err = pcall(function()
     g.setCanvas(shot.canvas)
     g.setBlendMode("alpha")
-    for _, rect in pairs(live) do BattleHud.panel(rect, shot, dark, true) end
+    for _, rect in pairs(live) do BattleHud.panel(rect, shot, true) end
     g.setColor(1, 1, 1, 1)
     for side, band in pairs(OverworldBattle.HUD_BAND) do
       local quad = g.newQuad(band[1], band[2], band[3], band[4],
@@ -1522,7 +1493,6 @@ end
 -- drawn here, in the GB frame, whichever path laid the glass under it.
 function OverworldBattle.drawHudPanels(battle)
   local shot = battle.dramaticShapeShot
-  battle.dramaticShapeDark = nil
   if not shot then return end
   if isIOS() then
     local slide = (battle.introSlide or 0) * 4
@@ -1532,11 +1502,9 @@ function OverworldBattle.drawHudPanels(battle)
     if enemy then love.graphics.rectangle("fill", rect.enemy[1], rect.enemy[2], rect.enemy[3], rect.enemy[4]) end
     if player then love.graphics.rectangle("fill", rect.player[1], rect.player[2], rect.player[3], rect.player[4]) end
     love.graphics.setColor(1, 1, 1, 1)
-    battle.dramaticShapeDark = nil
-    return
+      return
   end
   if snapped() then
-    battle.dramaticShapeDark = session and session.dark or nil
     return
   end
   local slide = (battle.introSlide or 0) * 4
@@ -1547,9 +1515,7 @@ function OverworldBattle.drawHudPanels(battle)
   if player then live.player = rect.player end
   for key, r in pairs(OverworldBattle.textRects(battle)) do live[key] = r end
   if not next(live) then return end
-  local dark = BattleHud.verdict(live, shot)
-  battle.dramaticShapeDark = dark
-  for _, r in pairs(live) do BattleHud.panel(r, shot, dark) end
+  for _, r in pairs(live) do BattleHud.panel(r, shot) end
 end
 
 return OverworldBattle

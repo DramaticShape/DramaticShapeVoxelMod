@@ -18,10 +18,7 @@
 -- Three things, and each of them is answering a question the player would
 -- otherwise have to guess at while the game sits there:
 --
---   WHAT is happening -- "ONE-TIME EXTRACTION OF STADIUM ASSETS", in those
---   words, because the two facts that matter to somebody who has just
---   installed a mod and been handed a loading screen are that this is the
---   mod's own asset build and that it is not going to happen again.
+--   WHAT is happening -- "STADIUM EXTRACTION", which is what it is.
 --
 --   HOW FAR through it is -- a bar, filled by species written rather than by
 --   elapsed time, so it cannot lie about the remaining work.
@@ -157,8 +154,13 @@ function StadiumScreen:update()
   end
   self.hold = self.hold + 1 / 60
   -- a failure stays up longer, because it is the one the player has to read
-  local wait = (status.state == "failed") and StadiumScreen.HOLD * 4
-               or StadiumScreen.HOLD
+  local wait = StadiumScreen.HOLD
+  if status.state == "failed" then
+    wait = StadiumScreen.HOLD * 4
+  elseif status.wrongVersion then
+    -- a warning nobody can read is not a warning
+    wait = StadiumScreen.HOLD * 3
+  end
   if self.hold >= wait then
     if self.game and self.game.stack and self.game.stack:top() == self then
       self.game.stack:pop()
@@ -186,11 +188,9 @@ function StadiumScreen:draw()
   love.graphics.setColor(0.93, 0.94, 0.90, 1)
   love.graphics.rectangle("fill", 0, 0, W, H)
 
-  centred("POKEMON STADIUM", 16)
-  -- the headline, in two lines because the frame is 160 pixels wide and the
-  -- font is a fixed eight: the longer of these is nineteen glyphs
-  centred("ONE-TIME EXTRACTION", 36)
-  centred("OF STADIUM ASSETS", 46)
+  -- One line, and it is the whole heading: eighteen glyphs at the font's
+  -- fixed eight pixels is 144 of the frame's 160.
+  centred("STADIUM EXTRACTION", 34)
 
   if status.state == "failed" then
     centred("COULD NOT BUILD", 68)
@@ -226,13 +226,17 @@ function StadiumScreen:draw()
 
   if status.state == "done" then
     centred("READY", 86)
+    -- and say so if it was built from something other than the revision every
+    -- offset in the reader was measured against: it may look fine, it may be
+    -- subtly wrong, and the player is the only one who can swap the file
+    if status.wrongVersion then
+      centred("NOT US 1.0 --", 104)
+      centred("MODELS MAY BE WRONG", 114)
+    end
   else
     local name = speciesName(status.species)
     centred(("%d/%d"):format(done, total), 86)
     if name then centred(name, 98) end
-    -- last, and lowest: the reassurance is worth saying and is the least
-    -- urgent thing on the plate
-    centred("THIS RUNS ONCE", 122)
   end
   love.graphics.setColor(1, 1, 1, 1)
 end

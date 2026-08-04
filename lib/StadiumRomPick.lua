@@ -56,7 +56,9 @@ local StadiumRomPick = {}
 StadiumRomPick.LABEL = "STADIUM ROM"
 StadiumRomPick.ID = "DRAMATIC_SHAPE:stadiumRom"
 
-local PROMPT = "Choose your Pokemon Stadium ROM"
+-- Names the REVISION, because that is the thing a player gets wrong: the
+-- model offsets are keyed to US 1.0 and nothing else is going to work.
+local PROMPT = "Choose your Pokemon Stadium (US) 1.0 ROM"
 
 -- ------- the host, at arm's length
 --

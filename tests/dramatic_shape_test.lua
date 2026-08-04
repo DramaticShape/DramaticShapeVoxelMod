@@ -1361,6 +1361,58 @@ end)()
     "and a whole frame is that frame exactly, with nothing blended into it")
 end)()
 
+-- ------- growing out of the ball
+--
+-- The engine sizes its flat pic in the Game Boy's three steps across the
+-- twelve frames AFTER the ball has finished opening. The model runs its own
+-- ramp instead, started when the poof begins: continuous, and overlapping the
+-- ball rather than following it.
+;(function()
+  if not HAVE_STADIUM_PACKS then return end
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local Mon = lib.require("StadiumMon")
+
+  local mon = Mon.new("player")
+  T.eq(mon:growScale(), 1, "a Pokemon that is not arriving is full size")
+  T.eq(mon:beginGrow(), false,
+    "and one with no model cannot start growing -- there is nothing to size")
+
+  mon.model = { height = 10, rootScale = 1 }
+  T.eq(mon:beginGrow(), true, "with a model, the arrival starts")
+  T.eq(mon:growScale(), 0, "from nothing at all")
+  T.eq(mon:beginGrow(), false,
+    "and starting again is refused -- the engine's own send-out seam fires a "
+    .. "third of a second later and must not restart the ramp")
+
+  -- the curve: slow, then quick through the middle, then settling
+  local last, monotonic = -1, true
+  for i = 0, 10 do
+    mon.grow = i / 10
+    local s = mon:growScale()
+    if s < last then monotonic = false end
+    last = s
+  end
+  T.check(monotonic, "the ramp never goes backwards")
+  mon.grow = 0.5
+  T.eq(mon:growScale(), 0.5, "and is half size exactly half way through")
+  mon.grow = 0.25
+  T.check(mon:growScale() < 0.25,
+    "slower than linear early, so the Pokemon is still small while the ball "
+    .. "is coming apart")
+
+  -- and it ends, rather than sticking at 0.99
+  mon.grow = nil
+  mon.dt = 0
+  mon:beginGrow()
+  for _ = 1, 200 do mon:update(1 / 60) end
+  T.eq(mon.grow, nil, "the ramp finishes")
+  T.eq(mon:growScale(), 1, "at exactly full size")
+  T.eq(mon.grewOwn, true,
+    "and remembers it owned this arrival, so the engine's three-step ramp is "
+    .. "not consulted for it afterwards -- it reads 5/7 in the gap and shrank "
+    .. "the Pokemon back down at the very end of the grow")
+end)()
+
 -- ------- the pack cache must not evict a Pokemon that is standing there
 --
 -- The eviction order is keyed on LOADS, and a side only loads when its

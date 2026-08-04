@@ -6,7 +6,8 @@
 -- is exactly the arrangement this engine already has for the Game Boy ROM it
 -- is a recompilation of (src/import/RomImporter.lua).
 --
--- So: drop a Pokemon Stadium (US) ROM in `baseroms/`, and the first time the
+-- So: supply a Pokemon Stadium (US) 1.0 ROM -- the OPTIONS row opens a file
+-- picker for one, or drop it in `baseroms/` -- and the first time the
 -- game runs with the mod on, the models are built. Once, on a loading screen,
 -- in about ten seconds. After that the packs sit in the save directory and
 -- the mod reads them like any other asset.
@@ -230,10 +231,20 @@ function StadiumInstall.beginFrom(bytes, label)
   local StadiumBuild = V.require("StadiumBuild")
   local rom, err = StadiumRom.open(bytes)
   if not rom then return false, tostring(err) end
+  status.wrongVersion = false
   if not rom:isExpectedUS() then
-    V.mod.log:warn("stadium: %s is md5 %s, not the US 1.0 ROM the model "
-                   .. "offsets are keyed to -- building anyway",
-                   tostring(label or "the ROM"), tostring(rom:md5()))
+    -- Built anyway rather than refused: a dump can differ from the reference
+    -- for reasons that do not move a single model offset (a byte-order
+    -- variant already normalised on load, a trimmed overdump). But every
+    -- offset in this reader was measured against US 1.0 and nothing else is
+    -- promised, so it is said loudly, with the md5 that IS expected so the
+    -- player can check their own file against it.
+    status.wrongVersion = true
+    V.mod.log:warn("stadium: %s is md5 %s -- the model offsets are keyed to "
+                   .. "Pokemon Stadium (US) 1.0, which is md5 %s. Building "
+                   .. "anyway, but the models may be wrong or fail to build.",
+                   tostring(label or "the ROM"), tostring(rom:md5()),
+                   tostring(StadiumRom.US_MD5))
   end
 
   -- ------- refuse a ROM with no models in it, BEFORE anything is written
@@ -255,7 +266,7 @@ function StadiumInstall.beginFrom(bytes, label)
   -- possibly produce a build.
   local models = rom:modelCount()
   if not (models and models >= StadiumInstall.COUNT) then
-    return false, "that is not a Pokemon Stadium ROM"
+    return false, "needs Pokemon Stadium US 1.0"
   end
 
   pcall(f.createDirectory, StadiumInstall.DIR)
@@ -304,7 +315,7 @@ function StadiumInstall.step()
       -- on a few. Worth telling apart, because "0 of 151 models were built"
       -- reads as a broken mod and this reads as a wrong click.
       if #job.failed >= job.total then
-        status.error = "that is not a Pokemon Stadium ROM"
+        status.error = "needs Pokemon Stadium US 1.0"
       else
         status.error = ("%d of %d models could not be built")
                        :format(#job.failed, job.total)

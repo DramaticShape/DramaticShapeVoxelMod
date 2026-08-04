@@ -1,5 +1,18 @@
 # Pokemon Stadium (US) — battle model export
 
+> **Built on [pret/pokestadium](https://github.com/pret/pokestadium).** This
+> pipeline is original code, but it could not have been written without that
+> project's decompilation: the bone matrix chain and the fact that scale is
+> kept out of it (`func_800143C0`), the rotation basis (`func_8000F730`), the
+> animation and texture-animation samplers (`func_80016FBC`, `func_80017540`),
+> the battle context slots, and the move-id constants all came from reading
+> it. **No code or data from that project is vendored here or required to run
+> this** — see the mod's [README](../README.md#acknowledgements--pretpokestadium),
+> and get anything you want to reuse from upstream under its own terms.
+>
+> No ROM data is committed either: everything below is generated from a
+> cartridge you supply.
+
 All 151 battle Pokemon plus 64 other models from the same segment, in standard
 formats. Regenerate straight from the ROM — stdlib only, no `make init`, no
 splat, no crunch64:
