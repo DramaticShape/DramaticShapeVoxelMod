@@ -795,6 +795,15 @@ mod.hooks:wrap("ui.options.rows", function(next, game, rows)
                     and (not entry.when or entry.when())
     if offered then extra[#extra + 1] = entry[1]:row() end
   end
+  -- and the ROM import, which is an ACTION and not a setting: there is no
+  -- rung to store, nothing for the mod manager's page to persist and nothing
+  -- to restore on the next boot, so it is appended here rather than living in
+  -- SETTINGS. nil on a platform with no file dialog, which takes it off the
+  -- menu rather than offering a button that cannot do anything.
+  local okPick, importRow = pcall(function()
+    return V.require("StadiumRomPick").row()
+  end)
+  if okPick and importRow then extra[#extra + 1] = importRow end
   return insertGrouped(out, extra)
 end)
 

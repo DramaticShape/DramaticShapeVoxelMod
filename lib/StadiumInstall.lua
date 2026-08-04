@@ -196,8 +196,8 @@ local function writePack(species, bytes)
   return true
 end
 
--- Open the ROM and start a stepped build. Returns false plus a reason when
--- there is nothing to build from.
+-- Open the ROM found in `baseroms/` and start a stepped build. Returns false
+-- plus a reason when there is nothing to build from.
 function StadiumInstall.begin()
   local f = fs()
   if not f then return false, "no filesystem" end
@@ -208,6 +208,23 @@ function StadiumInstall.begin()
   if not (okRead and type(bytes) == "string") then
     return false, "could not read " .. path
   end
+  return StadiumInstall.beginFrom(bytes, path)
+end
+
+-- The same, from bytes somebody else has already got hold of -- which is the
+-- IMPORTED path (StadiumRomPick), where the file is at an absolute location
+-- love.filesystem cannot see and was read with io.open.
+--
+-- The two entry points share everything from here down on purpose: an
+-- imported cartridge and a dropped one produce the same 151 files, the same
+-- marker and the same md5, so there is exactly one build in this mod and no
+-- second one to keep in step.
+--
+-- `label` is only ever used to say WHICH file a complaint is about.
+function StadiumInstall.beginFrom(bytes, label)
+  local f = fs()
+  if not f then return false, "no filesystem" end
+  if type(bytes) ~= "string" or #bytes == 0 then return false, "empty file" end
 
   local StadiumRom = V.require("StadiumRom")
   local StadiumBuild = V.require("StadiumBuild")
@@ -215,8 +232,30 @@ function StadiumInstall.begin()
   if not rom then return false, tostring(err) end
   if not rom:isExpectedUS() then
     V.mod.log:warn("stadium: %s is md5 %s, not the US 1.0 ROM the model "
-                   .. "offsets are keyed to -- building anyway", path,
-                   tostring(rom:md5()))
+                   .. "offsets are keyed to -- building anyway",
+                   tostring(label or "the ROM"), tostring(rom:md5()))
+  end
+
+  -- ------- refuse a ROM with no models in it, BEFORE anything is written
+  --
+  -- A file picker invites the wrong file -- most obviously the Game Boy
+  -- cartridge the player already imported once -- and the reader's answer to
+  -- one is a model count of zero. That has to be caught HERE rather than
+  -- allowed to become an empty build, because an empty build is
+  -- indistinguishable from a finished one further down: `job.total` is
+  -- clamped to the count, `step` completes on the first call with nothing
+  -- attempted and therefore nothing FAILED, and the marker gets written
+  -- saying `DSM3 0`.
+  --
+  -- On a fresh machine that is merely a lie on the loading screen -- READY,
+  -- with no models. On one that already HAD them it is worse: the marker is
+  -- the only thing that makes 151 files on disk count as installed, so
+  -- overwriting it with a zero uninstalls a good set and the STADIUM rungs
+  -- vanish off the row. Nothing below this line runs for a file that cannot
+  -- possibly produce a build.
+  local models = rom:modelCount()
+  if not (models and models >= StadiumInstall.COUNT) then
+    return false, "that is not a Pokemon Stadium ROM"
   end
 
   pcall(f.createDirectory, StadiumInstall.DIR)
@@ -243,7 +282,12 @@ function StadiumInstall.step()
   end
   if not more then
     local f = fs()
-    local wrote = #job.failed == 0
+    -- `job.total > 0` as well as "nothing failed", because a job with nothing
+    -- IN it satisfies the second on its own -- and the marker this writes is
+    -- what makes a set count as installed, so it must never be written for a
+    -- build that did not happen. beginFrom refuses such a ROM outright; this
+    -- is the same rule stated where the consequence is.
+    local wrote = #job.failed == 0 and job.total > 0
     if wrote and f then
       pcall(f.write, StadiumInstall.MARKER,
             ("%s %d %s\n"):format(StadiumInstall.FORMAT, job.total,
@@ -253,8 +297,18 @@ function StadiumInstall.step()
     end
     if not wrote then
       status.state = "failed"
-      status.error = ("%d of %d models could not be built")
-                     :format(#job.failed, job.total)
+      -- EVERY species failing is not a bad build, it is the wrong file: the
+      -- offsets the reader walks are Pokemon Stadium's, so a different game
+      -- -- or the Game Boy cartridge the player already imported once, which
+      -- is the mistake a file picker invites -- misses on all 151 rather than
+      -- on a few. Worth telling apart, because "0 of 151 models were built"
+      -- reads as a broken mod and this reads as a wrong click.
+      if #job.failed >= job.total then
+        status.error = "that is not a Pokemon Stadium ROM"
+      else
+        status.error = ("%d of %d models could not be built")
+                       :format(#job.failed, job.total)
+      end
     else
       status.state = "done"
     end

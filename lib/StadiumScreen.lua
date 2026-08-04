@@ -68,6 +68,34 @@ local function centred(str, y)
   text(str, (W - F.width(str)) / 2, y)
 end
 
+-- How many glyphs fit across the frame. The font is a fixed eight pixels, so
+-- twenty is the line -- and a centred string longer than that does not
+-- overflow tidily off one side, it clips off BOTH and loses its first word as
+-- well as its last ("that is not a Pokemon Stadium ROM" came out as "at is
+-- not a Pokemon").
+local COLS = 20
+
+-- Break a reason into lines that fit, on word boundaries, and never more than
+-- `limit` of them -- the plate has room for two and a message nobody can read
+-- the end of is not improved by adding a third.
+local function wrapped(str, limit)
+  local lines, line = {}, nil
+  for word in tostring(str):gmatch("%S+") do
+    local try = line and (line .. " " .. word) or word
+    if #try <= COLS then
+      line = try
+    else
+      if line then lines[#lines + 1] = line end
+      -- a single word too long to fit is cut rather than dropped: it is
+      -- usually a filename, and its first twenty characters still identify it
+      line = (#word <= COLS) and word or word:sub(1, COLS)
+    end
+    if #lines >= (limit or 2) then break end
+  end
+  if line and #lines < (limit or 2) then lines[#lines + 1] = line end
+  return lines
+end
+
 -- ------- dex number -> the engine's own species key
 --
 -- Built once, from the loaded data rather than from a list of names carried
@@ -91,8 +119,16 @@ local function speciesName(dex)
   return dexNames[dex]
 end
 
-function StadiumScreen.new(game)
-  return setmetatable({ game = game, hold = 0, started = false }, StadiumScreen)
+-- `adopt` means the caller has ALREADY started the build, or already decided
+-- it cannot start -- which is the imported path (StadiumRomPick opens the
+-- picked file itself, because love.filesystem cannot read an absolute path).
+-- Without it this screen would call begin() on the way in and throw away the
+-- job it was pushed to display, or overwrite the failure it was pushed to
+-- explain with a fresh "no ROM in baseroms" -- which would be true, and would
+-- have nothing to do with what just went wrong.
+function StadiumScreen.new(game, adopt)
+  return setmetatable({ game = game, hold = 0, started = adopt and true or false,
+                        adopted = adopt and true or false }, StadiumScreen)
 end
 
 -- Opaque: the loading screen owns the frame, so the map underneath is not
@@ -100,6 +136,7 @@ end
 StadiumScreen.isOpaque = true
 
 function StadiumScreen:enter()
+  if self.adopted then return end
   local ok, err = StadiumInstall.begin()
   self.started = ok and true or false
   if not ok then
@@ -156,10 +193,10 @@ function StadiumScreen:draw()
   centred("OF STADIUM ASSETS", 46)
 
   if status.state == "failed" then
-    centred("COULD NOT BUILD", 70)
-    local why = tostring(status.error or "unknown"):sub(1, 24)
-    centred(why, 84)
-    centred("STADIUM IS OFF", 104)
+    centred("COULD NOT BUILD", 68)
+    local lines = wrapped(status.error or "unknown", 2)
+    for i, line in ipairs(lines) do centred(line, 82 + (i - 1) * 10) end
+    centred("STADIUM IS OFF", 110)
     love.graphics.setColor(1, 1, 1, 1)
     return
   end
@@ -226,9 +263,21 @@ function StadiumScreen.maybePush()
     -- they need is an absolute path that depends on how the game was
     -- installed, so it cannot be written into the options help text.
     if not StadiumInstall.available() then
+      -- The IMPORT row is the answer wherever a file dialog can be opened,
+      -- and it is the better one: no folder to create, no path to get right,
+      -- no restart. The folder is still said, once, for the platforms with no
+      -- dialog (Android, a handheld Linux with neither zenity nor kdialog)
+      -- and for anyone who would rather drop a file than click through one.
+      local okPick, pick = pcall(V.require, "StadiumRomPick")
+      local canPick = okPick and pick and pick.available()
       V.mod.log:info("stadium: no Pokemon Stadium ROM found, so the STADIUM "
-                     .. "battle rungs are off. Put one (.z64/.n64/.v64) in "
-                     .. "%s and restart.", StadiumInstall.romHint())
+                     .. "battle rungs are off. %s",
+                     canPick
+                       and ("Import one from OPTIONS -> " .. pick.LABEL
+                            .. ", or put a .z64/.n64/.v64 in "
+                            .. StadiumInstall.romHint() .. " and restart.")
+                       or ("Put one (.z64/.n64/.v64) in "
+                           .. StadiumInstall.romHint() .. " and restart."))
     end
     return false
   end

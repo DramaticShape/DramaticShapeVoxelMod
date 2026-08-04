@@ -205,6 +205,38 @@ local function onField(battle, side, mon)
   end
   local ok, hidden = pcall(battle.fxHidden, battle, battler)
   if ok and hidden then return false end
+  -- ------- FLY and DIG: the Pokemon that is not there
+  --
+  -- `fxHidden` above is the damage BLINK and nothing else. The other way a
+  -- Pokemon leaves the screen -- the important one -- is the engine's
+  -- per-battler pic program, `picFx`, and that is where the two-turn moves
+  -- live: FLY runs SE_SLIDE_MON_OFF and DIG SE_SLIDE_MON_DOWN on the charge
+  -- turn, each a 19-24 frame slide that ENDS by setting `hidden`, and the
+  -- release turn puts the pic back through SE_SLIDE_MON_UP /
+  -- SE_SHOW_MON_PIC. Every other vanishing act is the same field: the user
+  -- of Explosion, a Pokemon that has been Teleported away.
+  --
+  -- Without this the model simply stood on its tile while the game said it
+  -- was underground -- and said it in the strongest way it has, by making
+  -- every attack aimed at it miss. That is the one thing in the frame
+  -- contradicting the battle it is part of.
+  --
+  -- Read as the engine's own answer rather than as a list of moves: this
+  -- mode's whole method is to let the battle decide and follow it, and a
+  -- table of move ids here would be a second place for the same facts to
+  -- live and would go stale against a mod that adds a third one.
+  --
+  -- The engine's slide is 19-24 frames, so the model plays the opening of
+  -- its own FLY or DIG animation while the pic slides and is gone when the
+  -- pic is. It is NOT held to the end of that animation the way a collapse
+  -- is (see below), and the difference is not an oversight: the Stadium
+  -- animations are authored as the WHOLE move -- Charizard's DIG is 3.83
+  -- seconds of burrow, emerge and hit -- because Stadium plays it in one
+  -- turn. Gen 1 splits it across two, so cutting at the engine's own hide
+  -- shows the burrowing and holds the strike back for the turn it lands on,
+  -- which is the right half of the animation for the turn being played.
+  local pf = battle.picFx and battle.picFx[battler]
+  if pf and pf.hidden then return false end
   if battler.fainted then
     local okF, sliding = pcall(battle.fxFaintActive, battle, battler)
     if okF and sliding then return true end

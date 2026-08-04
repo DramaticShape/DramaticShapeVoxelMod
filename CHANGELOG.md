@@ -96,9 +96,30 @@
   mod ships no Pokemon Stadium data and cannot: it is that game's. What it
   ships is the READER.
 
-  Drop a Pokemon Stadium (US) ROM -- `.z64`, `.n64` or `.v64`, the byte
-  order is detected -- into a `baseroms/` folder beside the game, straight in
-  it rather than in a revision subfolder under it, and the first time it runs
+  **Press STADIUM ROM on the OPTIONS menu and pick the file.** The row opens
+  the host's own file dialog -- osascript on macOS, PowerShell's
+  OpenFileDialog on Windows, zenity then kdialog on Linux, which are the same
+  four the engine's own Game Boy importer uses -- and the models are built
+  from whatever comes back. `.z64`, `.n64` and `.v64` all work; the byte
+  order is detected. The row reads IMPORT before and READY after, and
+  pressing it again imports a different cartridge.
+
+  The ROM is **not kept**: it is read, built from, and forgotten. A Stadium
+  cartridge is 32 MB and the models built out of it are 34, so keeping both
+  would double the cost of the feature for a file with no further use -- the
+  marker still records its md5, so a swapped cartridge is noticed.
+
+  The wrong file is refused with a reason on the loading screen rather than
+  half-built, and refused BEFORE anything is written -- which matters more
+  than it sounds, because the marker is the only thing that makes 151 files
+  on disk count as installed, so a refusal that wrote one anyway would
+  uninstall a working set.
+
+  The original route still works everywhere, and is the answer on the
+  platforms with no dialog (Android; a Linux install with neither zenity nor
+  kdialog): drop a Pokemon Stadium (US) ROM into a `baseroms/` folder beside
+  the game, straight in it rather than in a revision subfolder under it, and
+  the first time it runs
   the 151 battle models are built out of it on a loading screen, in about ten
   seconds, one species a frame. The screen says what it is doing in those
   words -- **ONE-TIME EXTRACTION OF STADIUM ASSETS** -- carries a progress bar
@@ -233,6 +254,28 @@
   fired late at whoever is standing there. Measured rather than eyeballed:
   the shot driver's `DS_FAINT` case prints the frame the bar empties against
   the frame the animation starts, and they are the same frame.
+
+- **FLY and DIG now take the model off the field.** The charging turn of a
+  two-turn move puts the Pokemon out of reach, and the engine says so through
+  `picFx[battler].hidden` -- FLY runs `SE_SLIDE_MON_OFF` and DIG
+  `SE_SLIDE_MON_DOWN`, each a 19-24 frame slide that ends by setting that
+  flag, and the release turn puts the pic back. The model was reading
+  `fxHidden`, which is the damage BLINK and nothing else, so it stood on its
+  tile while the game insisted it was underground -- and insisted in the
+  strongest way it has, by making every attack aimed at it miss.
+
+  It now reads the same field the pic does, which also covers every other
+  vanishing act on that seam: the user of Explosion, a Pokemon Teleported
+  away. Read as the engine's own answer rather than as a list of move ids,
+  so a mod that adds a third two-turn move gets it for free.
+
+  It is deliberately NOT held to the end of its own animation the way a
+  collapse is. The Stadium animations are authored as the WHOLE move --
+  Charizard's DIG is 3.83 seconds of burrow, emerge and strike, because
+  Stadium plays it in one turn -- so cutting at the engine's own hide shows
+  the burrowing and holds the strike back for the turn it actually lands on.
+  Verified as a timeline (`DS_FLY`, and `DS_MOVE=DIG`): the pic hid at frame
+  67, the model went with it, and both came back at 264.
 
 - **And the faint animation now gets to finish.** A fainted Pokemon left the
   field when its PIC did, and the engine's pic slide is fourteen frames of a

@@ -1136,6 +1136,20 @@ Game.keypressed(keyGame, "7")
 T.neq(Curve.setting:get(), curveBefore, "7 cycles V-CURVE")
 
 local Battles = run.loader.exports.DRAMATIC_SHAPE.lib.require("OverworldBattle")
+
+-- The two STADIUM rungs are gated on the models being installed, and they are
+-- not installed anywhere this suite runs: the repository carries no Pokemon
+-- Stadium data, so a clean clone has none and a developer checkout has them
+-- only after tools/stadium_pack.py has been run. What the walk below is about
+-- is the LADDER -- five rungs, in order, wrapping -- so the gate is held OPEN
+-- for it and the skipping behaviour is tested on its own further down, where
+-- it is the subject rather than an accident of the machine it ran on.
+--
+-- Held in GLOBALS rather than locals, here and for the pack probe below: this
+-- chunk is at Lua's 200-local ceiling and three more would not compile.
+BATTLE_ROW_GATE = Battles.setting.gate
+Battles.setting:setGate(function() return true end)
+
 T.eq(Battles.setting:get(), true, "3D-BTL starts on 2D-3D A")
 T.eq(Battles.discs(), false, "which stages the fight on the map")
 Game.keypressed(keyGame, "8")
@@ -1155,6 +1169,69 @@ Game.keypressed(keyGame, "8")
 T.eq(Battles.setting:get(), false, "again and overworld battles are off")
 Game.keypressed(keyGame, "8")
 T.eq(Battles.setting:get(), true, "and the ladder wraps back to 2D-3D A")
+
+Battles.setting:setGate(BATTLE_ROW_GATE)
+
+-- ------- importing a ROM instead of being told where to put one
+--
+-- The row is an ACTION, not a setting: it has no stored rung, so it is not in
+-- SETTINGS and the mod manager's page does not carry it. What it shows is a
+-- state, and what it does is open the host's file dialog -- which is why it
+-- is absent where no dialog can be opened rather than being offered as a
+-- button that does nothing.
+;(function()
+  local Pick = run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumRomPick")
+  local Install =
+    run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumInstall")
+
+  T.check(type(Pick.available()) == "boolean",
+    "the picker reports whether this platform has a file dialog at all")
+
+  local row = Pick.row()
+  if not Pick.available() then
+    T.eq(row, nil,
+      "with no dialog available there is no row -- a button that cannot open "
+      .. "anything is worse than the folder instruction it would replace")
+  else
+    T.check(row ~= nil, "and where there is one, there is a row")
+    T.eq(row.label, "STADIUM ROM", "which says what it is for")
+    T.check(type(row.step) == "function", "and does something when pressed")
+    -- the value is the STATE, so a player can see whether it worked
+    T.eq(row.value(), Install.available() and "READY" or "IMPORT",
+      "reading READY once the models are installed and IMPORT before that")
+  end
+
+  -- A ROM that carries no models must be refused BEFORE anything is written.
+  -- An empty build otherwise completes with nothing attempted and therefore
+  -- nothing failed, and the marker gets written saying so -- which on a
+  -- machine that already had a set would uninstall it, because the marker is
+  -- the only thing that makes 151 files on disk count as installed.
+  T.eq(Install.beginFrom("", "empty"), false,
+    "an empty file is refused outright")
+  T.eq(select(2, Install.beginFrom(("\0"):rep(4096), "zeros")) ~= nil, true,
+    "and so is a file that is not a ROM, with a reason")
+  T.eq(Install.status.state ~= "building", true,
+    "and neither of those started a build")
+end)()
+
+-- ------- the model set, when there is one
+--
+-- Everything below that loads a .dsm needs a BUILT set, and the repository
+-- deliberately carries none: the models are Pokemon Stadium's data, built out
+-- of the player's own ROM at runtime (StadiumInstall) or by
+-- tools/stadium_pack.py into assets/stadium/ in a developer checkout. So a
+-- clean clone has nothing to read, and these say so and stand down rather
+-- than failing for the absence of data that is absent on purpose.
+--
+-- Announced rather than silent. A test that quietly evaporates when its
+-- fixture is missing is a test that has stopped running and not told anyone,
+-- which is worse than one that fails.
+HAVE_STADIUM_PACKS =
+  run.loader.exports.DRAMATIC_SHAPE.lib.require("StadiumPack").available(25)
+if not HAVE_STADIUM_PACKS then
+  print("SKIP stadium model tests -- no built .dsm set (run "
+        .. "tools/stadium_pack.py, or play once with a ROM in baseroms/)")
+end
 
 -- ------- the eyes blink once a loop, not six times a second
 --
@@ -1222,6 +1299,7 @@ end)()
 -- Driven on a REAL species, through a rig with no meshes (there is no
 -- graphics context here, and pose() only touches the matrix arrays).
 ;(function()
+  if not HAVE_STADIUM_PACKS then return end
   local lib = run.loader.exports.DRAMATIC_SHAPE.lib
   local Pack, Rig = lib.require("StadiumPack"), lib.require("StadiumRig")
   local model = Pack.load(25)                     -- Pikachu
@@ -1292,6 +1370,7 @@ end)()
 -- they decline the model outright and the Game Boy's own battle pic stands
 -- instead -- the same fallback a species with no pack at all takes.
 ;(function()
+  if not HAVE_STADIUM_PACKS then return end
   local lib = run.loader.exports.DRAMATIC_SHAPE.lib
   local Mon = lib.require("StadiumMon")
   for _, dex in ipairs({ 103, 114, 126 }) do
@@ -1372,6 +1451,29 @@ end)()
     .. "the pic, exactly as before")
   T.eq(onField(battle, "enemy", nil), false,
     "and a side with no model at all is not held open by this")
+
+  -- ------- FLY and DIG take it off the field entirely
+  --
+  -- The charge turn runs a 19-24 frame slide and ends by setting
+  -- `picFx[battler].hidden`; the release turn clears it. That field is the
+  -- engine's whole answer to "is this Pokemon on screen", and it is NOT
+  -- fxHidden, which is the damage blink alone -- so a model reading only the
+  -- blink stood on its tile while every attack aimed at it missed.
+  battle.enemy = { sprite = true }
+  battle.picFx = { [battle.enemy] = { hidden = true } }
+  T.eq(onField(battle, "enemy", mon("attack", false)), false,
+    "a Pokemon that has flown up or dug in is not on the field, however "
+    .. "much of its own animation is still to play")
+
+  battle.picFx = { [battle.enemy] = { kind = "slideOff", t = 4 } }
+  T.eq(onField(battle, "enemy", mon("attack", false)), true,
+    "but it IS while the engine's slide is still running -- which is the "
+    .. "window its own launch animation plays in")
+
+  battle.picFx = { [battle.enemy] = {} }
+  T.eq(onField(battle, "enemy", mon("idle", false)), true,
+    "and a pic program that has finished and cleared leaves it standing")
+  battle.picFx = nil
 end)()
 
 -- ------- and the two STADIUM rungs are SKIPPED when the models are not there
@@ -1407,9 +1509,15 @@ end)()
   Battles.setting.index = 3
   T.eq(Battles.setting:get(), true,
     "a stored STADIUM with no models behind it reads as 2D-3D A")
-  Battles.setting:setGate(gate)
+  -- and opening the gate hands the choice straight back, off the stored
+  -- value that was never overwritten. Opened by HAND rather than by putting
+  -- the real gate back: the real one answers "are the models installed on
+  -- this machine", which is false wherever this suite runs from a clean
+  -- clone -- and the subject here is the ladder, not the installer.
+  Battles.setting:setGate(function() return true end)
   T.eq(Battles.setting:get(), "stadium",
     "and comes back the moment the models do")
+  Battles.setting:setGate(gate)
   Battles.setting:setValue(true, Game)
 end)()
 

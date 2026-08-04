@@ -182,6 +182,74 @@ return function(game)
     return
   end
 
+  -- ------- DS_FLY: does the Pokemon actually leave?
+  --
+  -- FLY and DIG take the user off the field for a turn, and the engine says
+  -- so through `picFx[battler].hidden` rather than through fxHidden (which is
+  -- the damage blink alone). A model that ignores that stands on its tile
+  -- while every attack aimed at it misses into empty air.
+  --
+  -- A TIMELINE again, not a still: what is being checked is that the model
+  -- goes when the pic goes and comes back when it comes back, which is three
+  -- moments and a screenshot has one.
+  if os.getenv("DS_FLY") then
+    local Stadium2 = lib.require("Stadium")
+    local move = os.getenv("DS_MOVE") or "FLY"
+    local mine = Pokemon.new(game.data, "CHARIZARD", 60)
+    -- give it the move outright: what is under test is the vanish, not
+    -- whether this species learns it by level 60
+    mine.moves = { { id = move, pp = 15 } }
+    game.save.party = { mine }
+    local battle = BattleState.newWild(game, "PIKACHU", 5)
+    battle.onFinish = function() end
+    game.overworld:pushBattle(battle)
+    U.wait(70)
+    for _ = 1, 40 do
+      if battle.phase == "menu" then break end
+      U.tap(game, "a")
+      U.wait(10)
+    end
+    U.tap(game, "a")      -- FIGHT
+    U.wait(12)
+    U.tap(game, "a")      -- the first (only) move
+
+    local goneAt, backAt, wasGone = nil, nil, false
+    for f = 1, 400 do
+      if f % 20 == 0 then U.tap(game, "a") end
+      U.wait(1)
+      local me = battle.player
+      local pf = battle.picFx and battle.picFx[me]
+      local picHidden = (pf and pf.hidden) and true or false
+      local showing = Stadium2.showing("player")
+      if f % 25 == 0 or (picHidden ~= wasGone) then
+        U.log(("  f=%3d picHidden=%-5s model=%-5s anim=%s")
+              :format(f, tostring(picHidden), tostring(showing),
+                      tostring(Stadium2.animOf("player"))))
+      end
+      if picHidden and not goneAt then goneAt = f end
+      if picHidden and not showing and not wasGone then
+        wasGone = true
+        U.shot(game, ("%s/fly_1_gone.png"):format(DIR))
+      end
+      if wasGone and not picHidden and not backAt then
+        backAt = f
+        U.shot(game, ("%s/fly_2_back.png"):format(DIR))
+        break
+      end
+    end
+    U.log(("%s: the pic hid at frame %s, the model was gone with it (%s), "
+           .. "and both came back at %s")
+          :format(move, tostring(goneAt), tostring(wasGone), tostring(backAt)))
+    U.log(wasGone and "  OK -- the model leaves the field with the pic"
+          or "  WRONG -- the model stood there while the game said it was gone")
+    while game.stack:top() and game.stack:top() ~= game.overworld do
+      game.stack:pop()
+    end
+    U.wait(10)
+    U.log("done -- " .. DIR)
+    return
+  end
+
   -- ------- DS_FAINT: does the collapse wait for the bar?
   --
   -- The faint animation must not start until the foe's HP bar has finished

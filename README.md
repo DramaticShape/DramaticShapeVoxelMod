@@ -124,14 +124,28 @@ under that cave's void and its own flat light.
 data. What ships is the reader; you supply the cartridge, exactly as this
 engine already asks you to supply the Game Boy ROM it is a recompilation of.
 
-1. Put a **Pokémon Stadium (US)** ROM in a `baseroms/` folder beside the game
-   — straight in it, not in a subfolder. `.z64`, `.n64` and `.v64` all work;
-   the byte order is detected.
-   In a packaged build, `baseroms/` goes in the save directory; the mod logs
-   the exact path on startup when it cannot find one.
-2. Start the game. The 151 models are built out of the ROM on a loading
-   screen that says so and shows a progress bar, in about ten seconds.
-3. The two STADIUM rungs appear on the 3D-BTL row.
+1. Open **OPTIONS** and press the **STADIUM ROM** row. It opens your system's
+   file picker; choose a **Pokémon Stadium (US)** ROM. `.z64`, `.n64` and
+   `.v64` all work — the byte order is detected, and the wrong file is
+   refused with a reason rather than half-built.
+2. The 151 models are built on a loading screen that says so and shows a
+   progress bar, in about ten seconds. The row then reads **READY**.
+
+The ROM itself is **not kept** — it is read, built from, and forgotten, so
+the cartridge does not sit in your save directory alongside the models it
+produced. Press the row again any time to import a different one.
+
+There is no picker on Android, or on a Linux install with neither `zenity`
+nor `kdialog`. Those keep the original route, which still works everywhere:
+
+- Put the ROM in a `baseroms/` folder beside the game — straight in it, not
+  in a subfolder — and start the game.
+- In a packaged build (and on Android) `baseroms/` goes in the save
+  directory; the mod logs the exact path on startup when it cannot find one.
+  On Android that is the app's external-files folder, reachable over USB or
+  any file manager without root.
+
+Either way, the two STADIUM rungs appear on the 3D-BTL row when it's done.
 
 The built models live in the save directory, not in the mod folder, and are
 rebuilt automatically if the format changes or the ROM does. Until they exist
