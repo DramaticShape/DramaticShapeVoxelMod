@@ -1043,6 +1043,7 @@ function OverworldBattle.install()
   function BattleState:picImage(img)
     local out = innerPic(self, img)
     if not OverworldBattle.shot() then return out end
+    if _G.__crystalSpritesActive then return out end
     return BattlePics.filled(out, OverworldBattle.pinnedPic(self, img))
   end
 
