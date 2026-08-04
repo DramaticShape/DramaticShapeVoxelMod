@@ -151,28 +151,31 @@ end
 -- "between frame 12 and 13, three tenths of the way" means for THIS
 -- animation's looping.
 
-local function sampleLinear(c, i0, i1, k)
+-- One component at one frame.
+--
+-- ------- why there is no interpolation here
+--
+-- There used to be, and it was the cause of a real glitch: bones snapping to
+-- an upside-down pose for a frame, arms turning inside out for a few.
+--
+-- These streams are not keyframes. They carry ONE VALUE PER FRAME at 30 Hz
+-- -- the sampler they come out of indexes them by frame number and clamps
+-- (`min(frame, count - 1)`), with no times and nothing to interpolate
+-- between. The game plays them a frame at a time, and at 60 Hz each pose
+-- simply holds for two.
+--
+-- Blending between consecutive entries therefore invented motion that was
+-- never authored, and for ROTATION it invented the wrong motion. These are
+-- Euler triples, and a Euler triple is not a direction you can walk along:
+-- interpolating (0, 20976, 32736) toward (0, -19936, -5904) component by
+-- component passes through orientations that are nothing like either end --
+-- which is precisely a bone flipping over and back inside one frame.
+-- Slerping proper quaternions would fix the direction, but there is still
+-- nothing to slerp TOWARD: the next entry is the next frame, not a keyframe
+-- some distance away, and holding it is what the source does.
+local function sampleAt(c, i)
   if type(c) == "number" then return c end
-  local a = c[i0]
-  if k <= 0 then return a end
-  local b = c[i1]
-  if b == nil then return a end
-  return a + (b - a) * k
-end
-
--- The same, for a BINARY ANGLE, which wraps. Interpolating 32700 toward
--- -32700 the long way round spins the bone most of a full turn in one
--- frame; the short way is the one the eye expects and the one the game's
--- own player takes.
-local function sampleAngle(c, i0, i1, k)
-  if type(c) == "number" then return c end
-  local a = c[i0]
-  if k <= 0 then return a end
-  local b = c[i1]
-  if b == nil then return a end
-  local d = b - a
-  if d > 32768 then d = d - 65536 elseif d < -32768 then d = d + 65536 end
-  return a + d * k
+  return c[i]
 end
 
 -- ------- the pose
@@ -187,27 +190,30 @@ function StadiumRig:pose(anim, frame, wrap)
   local tracks = anim and StadiumPack.tracks(model, anim) or nil
   local frames = anim and model.anims[anim] and model.anims[anim].frames or 1
 
-  -- the two frames this instant falls between, and how far
-  local i0, i1, k = 1, 1, 0
+  -- which frame of the animation this instant shows. One frame, not two:
+  -- the streams are per-frame and are stepped, not blended (see sampleAt).
+  local i0 = 1
   if tracks and frames > 1 then
     local f = frame
     if f < 0 then f = 0 end
     local base = floor(f)
-    k = f - base
-    if base >= frames - 1 then
+    if base >= frames then
       if wrap then
+        -- the far end joins back to loopStart, which is where the game's own
+        -- player sends the counter (func_80016FBC)
         local loop = model.anims[anim].loopStart or 0
-        base = base % frames
-        i0 = base + 1
-        i1 = (base + 1 >= frames) and (loop + 1) or (base + 2)
+        if loop > 0 and loop < frames then
+          base = loop + (base - loop) % (frames - loop)
+        else
+          base = base % frames
+        end
       else
-        i0, i1, k = frames, frames, 0
+        base = frames - 1                   -- a faint holds where it fell
       end
-    else
-      i0, i1 = base + 1, base + 2
     end
+    i0 = base + 1
     if i0 > frames then i0 = frames end
-    if i1 > frames then i1 = frames end
+    if i0 < 1 then i0 = 1 end
   end
 
   -- The frame this animation is actually SHOWING, after the wrap or the
@@ -229,15 +235,15 @@ function StadiumRig:pose(anim, frame, wrap)
     local tx, ty, tz, rx, ry, rz, kx, ky, kz
     local comps = tracks and tracks[b]
     if comps then
-      tx = sampleLinear(comps[1], i0, i1, k)
-      ty = sampleLinear(comps[2], i0, i1, k)
-      tz = sampleLinear(comps[3], i0, i1, k)
-      rx = sampleAngle(comps[4], i0, i1, k)
-      ry = sampleAngle(comps[5], i0, i1, k)
-      rz = sampleAngle(comps[6], i0, i1, k)
-      kx = sampleLinear(comps[7], i0, i1, k)
-      ky = sampleLinear(comps[8], i0, i1, k)
-      kz = sampleLinear(comps[9], i0, i1, k)
+      tx = sampleAt(comps[1], i0)
+      ty = sampleAt(comps[2], i0)
+      tz = sampleAt(comps[3], i0)
+      rx = sampleAt(comps[4], i0)
+      ry = sampleAt(comps[5], i0)
+      rz = sampleAt(comps[6], i0)
+      kx = sampleAt(comps[7], i0)
+      ky = sampleAt(comps[8], i0)
+      kz = sampleAt(comps[9], i0)
     else
       -- a bone this animation never touches keeps its rest transform
       tx, ty, tz = restT[o3 + 1], restT[o3 + 2], restT[o3 + 3]
