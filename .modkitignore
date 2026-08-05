@@ -4,6 +4,8 @@
 # The SDK suite and the probes it grew out of. A shipped test that requires
 # an engine module reads as a private require against the archive
 # (CONTRIBUTING-mods.md "What the PR must contain", 2).
+tests/arena_config.lua
+tests/arena_editor.lua
 tests/arena_pick.lua
 tests/battle_shots.lua
 tests/dramatic_shape_test.lua

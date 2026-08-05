@@ -107,7 +107,7 @@ def bind_extent(data):
 
 # Which context name wins when several claim the same animation. The battle
 # table points many slots at one clip, and these are the ones worth naming.
-NAME_PREF = ['idle', 'hit', 'faint', 'entrance', 'struggle', 'flinch']
+NAME_PREF = ['idle', 'attack_default', 'faint', 'entrance', 'struggle', 'flinch']
 
 
 def label_animations(data, rows, moves):
@@ -294,7 +294,7 @@ def main(argv):
     moves_out = []
     if move_rows:
         default_anim = {p['species']: next(
-            (a['index'] for a in p['animations'] if 'hit' in a.get('contexts', [])), -1)
+            (a['index'] for a in p['animations'] if 'attack_default' in a.get('contexts', [])), -1)
             for p in manifest['pokemon']}
         for mid in range(1, battle.N_MOVES + 1):
             users, tally, ndiff = [], collections.Counter(), 0

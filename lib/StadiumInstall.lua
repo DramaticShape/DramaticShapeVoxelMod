@@ -56,6 +56,13 @@ StadiumInstall.MARKER = StadiumInstall.DIR .. "/pack.info"
 -- than misread. Must track StadiumPack's magic.
 StadiumInstall.FORMAT = "DSM3"
 
+-- Bumped when the packs' CONTENT changes without the byte layout moving, so
+-- a cache built by an older extractor is rebuilt rather than trusted. Rev 2
+-- is the hermite-animation decode fix: the five keyframe species (Pidgeot,
+-- Dodrio, Exeggutor, Tangela, Magmar) come out garbled or bind-posed from
+-- any rev-1 build.
+StadiumInstall.REV = 2
+
 StadiumInstall.COUNT = 151
 
 -- Named ROM files, then any ROM at all sitting in the folder.
@@ -138,9 +145,10 @@ local function readMarker()
   if not (f and isFile(StadiumInstall.MARKER)) then return nil end
   local ok, text = pcall(f.read, StadiumInstall.MARKER)
   if not (ok and type(text) == "string") then return nil end
-  local format, count, md5 = text:match("^(%S+)%s+(%d+)%s*(%S*)")
+  local format, count, md5, rev = text:match("^(%S+)%s+(%d+)%s*(%S*)%s*(%S*)")
   if not format then return nil end
-  return { format = format, count = tonumber(count), md5 = md5 }
+  return { format = format, count = tonumber(count), md5 = md5,
+           rev = tonumber(rev) }
 end
 
 -- Whether a complete, current set of packs is on disk.
@@ -150,7 +158,8 @@ function StadiumInstall.ready()
   if readyCache ~= nil then return readyCache end
   local m = readMarker()
   readyCache = (m ~= nil and m.format == StadiumInstall.FORMAT
-                and m.count == StadiumInstall.COUNT) and true or false
+                and m.count == StadiumInstall.COUNT
+                and m.rev == StadiumInstall.REV) and true or false
   return readyCache
 end
 
@@ -315,8 +324,9 @@ function StadiumInstall.step()
     local wrote = #job.failed == 0 and job.total > 0
     if wrote and f then
       pcall(f.write, StadiumInstall.MARKER,
-            ("%s %d %s\n"):format(StadiumInstall.FORMAT, job.total,
-                                  tostring(job.md5 or "")))
+            ("%s %d %s %d\n"):format(StadiumInstall.FORMAT, job.total,
+                                     tostring(job.md5 or ""),
+                                     StadiumInstall.REV))
       readyCache = nil
       StadiumPack.forget()
     end

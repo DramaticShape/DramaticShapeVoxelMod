@@ -55,14 +55,22 @@ local floor = math.floor
 --
 -- DIR is inside the mod, and exists for a developer checkout that has run
 -- tools/stadium_pack.py -- which is also how the oracle the Lua extractor is
--- tested against gets built. It is second because a locally built cache
--- should win over whatever a checkout happens to have lying around.
+-- tested against gets built. It is second because a locally built CURRENT
+-- cache should win over whatever a checkout happens to have lying around --
+-- current as judged by StadiumInstall's marker, so a cache an old extractor
+-- built does not shadow a fresh set (see readPack).
 StadiumPack.CACHE_DIR = "dramatic_shape/stadium"
 StadiumPack.DIR = "assets/stadium"
 
 local function readPack(species)
+  -- The cache only counts when StadiumInstall's marker says it is a
+  -- complete, CURRENT build -- an old cache (a rev the extractor has since
+  -- fixed, a format that moved) must not shadow a fresh shipped set, and a
+  -- half-written folder must not be read at all. Required lazily: Install
+  -- requires this module at load, so the reverse edge cannot be taken then.
   local rel = ("%s/%03d.dsm"):format(StadiumPack.CACHE_DIR, species)
-  if love and love.filesystem and love.filesystem.getInfo then
+  if love and love.filesystem and love.filesystem.getInfo
+     and V.require("StadiumInstall").ready() then
     local okInfo, info = pcall(love.filesystem.getInfo, rel, "file")
     if okInfo and info then
       local ok, bytes = pcall(love.filesystem.read, rel)
@@ -83,9 +91,11 @@ end
 -- contract and the packer's CONTEXTS must stay identical to it.
 -- Position 2 was called "hit" until the move table was read against it: it
 -- is the animation most of a species' MOVES play, which makes it the default
--- attack and not a damage reaction (see StadiumMon's STATES). The name is a
--- label on a position -- the format is the ORDER -- so renaming it changes no
--- bytes, but it has to match tools/stadium_pack.py's CONTEXTS.
+-- attack and not a damage reaction (see StadiumMon's STATES). The slot TABLE
+-- is indexed by position, but the name also reaches the packed files: the
+-- packers bake it into the animation NAME strings, so it has to match
+-- tools/stadium_pack.py's CONTEXTS *and* pipeline/battle.py's CONTEXT_SLOTS,
+-- or the oracle diff reports every species.
 StadiumPack.CONTEXT = {
   "idle", "attack_default", "faint", "entrance", "reaction_169", "reaction_170",
   "reaction_171", "reaction_172", "reaction_173", "reaction_174",

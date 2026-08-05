@@ -22,9 +22,10 @@
 -- everything else is render state this rebuilds from the texture table
 -- instead.
 --
--- THE ANIMATIONS are packed per-frame streams of 12- or 16-bit fields. The
--- game also has a hermite-keyframe mode (flags & 8); it is ported for
--- completeness but no animation of any of the 151 battle Pokemon uses it.
+-- THE ANIMATIONS are packed per-frame streams of 12- or 16-bit fields for
+-- 146 of the 151 species. The other five -- Pidgeot, Dodrio, Exeggutor,
+-- Tangela and Magmar -- use the game's hermite-keyframe mode (flags & 8),
+-- some for every animation, some for a subset.
 --
 -- ------- arithmetic, and why there are no bit operations here
 --
@@ -86,10 +87,31 @@ local function roundHalfEven(x)
   return f + 1
 end
 
+-- Python's round(x, nd). Multiplying by 10^nd first is WRONG: the multiply
+-- itself rounds, and a value just under a decimal boundary can land exactly
+-- on it -- Magmar's attack scale track holds 1.008874999..., whose *1e5 is
+-- exactly 100887.5, and the fold then differed from the oracle by one bit.
+-- Python rounds the EXACT binary expansion, and so does LuaJIT's own float
+-- formatter, so the digits come from string.format instead.
 local function roundTo(x, nd)
   if nd == 0 then return roundHalfEven(x) end
-  local m = 10 ^ nd
-  return roundHalfEven(x * m) / m
+  if x ~= x or x == math.huge or x == -math.huge then return x end
+  -- A true decimal tie -- the exact expansion terminating one digit past nd
+  -- with a 5 -- only a dyadic value can produce, and its zeros then run out
+  -- forever; any other double shows a nonzero digit within ~18 places. The
+  -- formatter rounds such a tie away from zero where Python rounds it to
+  -- even, so it is the one case the digits cannot settle.
+  local s = string.format("%." .. (nd + 24) .. "f", x)
+  local dot = s:find(".", 1, true)
+  local tail = s:sub(dot + nd + 1)
+  if not tail:match("^50*$") then
+    return tonumber(string.format("%." .. nd .. "f", x))
+  end
+  local head = s:sub(1, dot + nd)         -- sign, integer part, nd digits
+  local last = head:byte(-1) - 48
+  if last % 2 == 0 then return tonumber(head) end
+  -- an odd digit bumps to even with no carry
+  return tonumber(head:sub(1, -2) .. string.char(head:byte(-1) + 1))
 end
 
 StadiumFragment.roundHalfEven = roundHalfEven
@@ -572,7 +594,9 @@ Anim.__index = Anim
 local function newAnim(frag, off)
   return setmetatable({
     f = frag, off = off,
-    flags      = frag:u8(off),
+    -- the u16 at +0: the flag bits live in its LOW byte, so a u8 read at +0
+    -- gets the always-zero high byte and silently hides hermite mode
+    flags      = frag:u16(off),
     startFrame = frag:u16(off + 4),
     loopStart  = frag:u16(off + 6),
     nChannels  = frag:u16(off + 8),
@@ -592,20 +616,20 @@ function Anim:chan(i)
            oRot = f:u16(o + 6), oTrans = f:u16(o + 8) }
 end
 
--- Packed per-frame streams (flags & 8 == 0), which is what every animation of
--- every battle Pokemon actually uses.
+-- Packed per-frame streams (flags & 8 == 0).
 --
--- A count of 0 means the component has no stream at all. The game's own index
--- arithmetic (offset + count - 1) then runs off the front of the array -- for
--- Tangela's idle the scale "array" is two entries long and the computed index
--- is 99 -- so an empty channel is read as "keep the bind-pose value", which is
--- what the nil return means to the caller.
+-- A count of 0 means the component has no stream. In the ROM that only ever
+-- happens in HERMITE animations, where a count under 2 means "the offset
+-- field IS the constant value" -- no packed animation of any of the 151
+-- species carries an empty channel, so the bind-pose fallback (the nil
+-- return) is dead code kept as a safety net.
 function Anim:transPacked(c, frame)
   if c.nTrans == 0 then return nil end
   local wide = floor(self.flags / 4) % 2 == 1
   local bits = wide and 16 or 12
   if c.nTrans == 1 then
-    if wide then return c.oTrans + 0.0 end
+    -- func_80016848 reads the u16 offset field back as a SIGNED constant
+    if wide then return signed(c.oTrans, 16) + 0.0 end
     return floor(signed(c.oTrans * 16 % 65536, 16) / 16) + 0.0
   end
   local i = c.oTrans + (frame < c.nTrans - 1 and frame or c.nTrans - 1)
@@ -626,9 +650,9 @@ function Anim:scalePacked(c, frame)
   return self.f:s16(self.scaleData + i * 2) / 1000.0
 end
 
--- Hermite keyframes (flags & 8). Ported for completeness: no animation of any
--- of the 151 battle Pokemon sets that flag, which was measured rather than
--- assumed.
+-- Hermite keyframes (flags & 8): Pidgeot, Dodrio, Exeggutor, Tangela and
+-- Magmar. src/17300.c func_80016934 (narrow, 6-byte keys) and func_80016B30
+-- (wide, 8-byte keys with a separate out-tangent).
 function Anim:hermite(base, n, frame, wide)
   local f = self.f
   local stride = wide and 8 or 6
@@ -673,7 +697,10 @@ function Anim:rotKey(c, frame)
                        floor(c.interp / 2) % 2 == 1) / 10.0
   end
   deg = deg % 360.0
-  return floor(deg / 360.0 * 65536.0)
+  -- func_80016DE0 returns s16: the f32 -> s16 cast WRAPS an angle above 180
+  -- degrees to its negative twin, and the pack writer clamps i16, so an
+  -- unwrapped value would pin at 32767 instead
+  return signed(floor(deg / 360.0 * 65536.0) % 65536, 16)
 end
 
 function Anim:scaleKey(c, frame)
@@ -721,7 +748,8 @@ Aux.__index = Aux
 local function newAux(frag, off)
   return setmetatable({
     f = frag,
-    flags      = frag:u8(off),
+    flags      = frag:u16(off),   -- low byte, same layout as Anim
+
     startFrame = frag:u16(off + 4),
     loopStart  = frag:u16(off + 6),
     nChannels  = frag:u16(off + 8),

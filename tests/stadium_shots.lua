@@ -44,10 +44,14 @@ return function(game)
     { "ONIX", "DIGLETT" },        -- the tallest against nearly the shortest
     { "ZUBAT", "TENTACRUEL" },    -- hovers above its origin / hangs below it
     { "GASTLY", "CATERPIE" },     -- a floater and the smallest in the set
-    -- the two species whose animation data is corrupt at source: BOTH of
-    -- these must come out as flat battle pics standing on their tiles, not
-    -- as models (see StadiumMon.setSpecies). Tangela is the third.
+    -- the five hermite-keyframe species (flags & 8), which the extractor
+    -- used to misread as packed streams: Exeggutor, Tangela and Magmar came
+    -- out so garbled the packer declined them to flat pics, and Pidgeot and
+    -- Dodrio animated garbled. All five must now stand as MODELS in a sane
+    -- standby loop (see StadiumFragment's animation notes).
     { "EXEGGUTOR", "MAGMAR" },
+    { "PIDGEOT", "TANGELA" },
+    { "DODRIO", "PIDGEOTTO" },    -- with its packed-stream evolution as control
     { "GYARADOS", "SNORLAX" },    -- the two biggest bodies in the set
   }
 

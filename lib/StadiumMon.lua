@@ -205,32 +205,23 @@ end
 -- card, which is a per-POKEMON decline rather than a per-battle one: a fight
 -- can perfectly well have a model on one side and a pic on the other.
 --
--- ------- the three the extraction cannot read
+-- ------- staticPose: the corrupt-idle escape hatch
 --
--- Exeggutor, Tangela and Magmar come out of the ROM with standby loops that
--- throw bones hundreds of units off the body -- the game's own index
--- arithmetic evidently reads those channel streams differently from the way
--- this does. StadiumBuild.idleIsBroken measures it and the pack carries the
--- verdict as `staticPose`.
+-- StadiumBuild.idleIsBroken measures whether a species' standby loop throws
+-- bones off the body, and the pack carries the verdict as `staticPose`. A
+-- species so marked DECLINES here -- the Game Boy's own battle sprite
+-- stands on the tile instead, drawn by the same 2D-3D path every species
+-- uses when its model is unavailable -- because a bind pose held for a
+-- whole fight reads as broken, not as "this one does not animate".
 --
--- That flag used to mean "stand this one still in its bind pose", on the
--- reasoning that a Pokemon standing there looking like itself beats one
--- coming apart. It does -- but only just. A bind pose is a RIGGING pose, not
--- a portrait: arms out, neck straight, nothing where the artwork put it. Set
--- among a hundred and forty-eight species that breathe, the three that hold
--- a T-pose for the whole fight do not read as "these ones do not animate",
--- they read as broken -- which they are.
---
--- So they decline instead, and the Game Boy's own battle sprite stands on
--- the tile in front of the same arena, lit the same way, drawn by the same
--- 2D-3D path every species uses when its model is unavailable. The mode
--- already had that fallback for a species with no pack at all; this is three
--- more species taking it.
---
--- Keyed on the DATA rather than on a list of dex numbers on purpose: the
--- test that produced the flag is in the packer, so a re-extraction that
--- fixes those streams -- or breaks a fourth species -- moves this with it
--- and nothing here has to be edited.
+-- No species is marked today. Exeggutor, Tangela and Magmar used to be:
+-- their animations are hermite keyframes (flags & 8), the extractor misread
+-- the flags byte and decoded them as packed streams, and the exploding
+-- result tripped the detector (Pidgeot and Dodrio were garbled by the same
+-- bug, just not hard enough to trip it). The detector stays, keyed on the
+-- DATA rather than a list of dex numbers, so a future extraction bug that
+-- corrupts a species' idle falls back to the sprite instead of coming
+-- apart on the field -- and nothing here has to be edited when it does.
 function StadiumMon:setSpecies(dex)
   if dex == self.species then return self.rig ~= nil end
   if self.rig then self.rig:release() end

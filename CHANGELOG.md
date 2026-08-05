@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Exeggutor, Tangela and Magmar stand as models in STADIUM battles, and
+  Pidgeot and Dodrio stop animating garbled.** Five species animate with
+  hermite keyframes rather than packed per-frame streams, and the extractor
+  read the animation flags byte from the wrong half of its u16 -- the half
+  that is always zero -- so it decoded their keyframe tables as streams.
+  For Exeggutor, Tangela and Magmar the result exploded so hard the packer
+  declined them to flat battle pics; Pidgeot and Dodrio stayed models but
+  played the garbage. All five now decode the way the game's own sampler
+  (src/17300.c) does, and no species is held off the field any more.
+
+  Model packs built by an older version of the mod are detected by a
+  revision stamp in the install marker and rebuilt from the ROM on the next
+  launch (or shadowed by a checkout's freshly packed set) rather than
+  trusted.
+
 ## 1.6.0
 
 ### Added
