@@ -940,7 +940,16 @@ vec2 waveUV(vec2 tc, vec2 col) {
 // can afford it -- the colour is a colour, and tc/sc arrived through
 // LOVE's mediump plumbing whatever this signature says -- and the maths
 // below runs on the stage default the moment the values touch a local.
-vec4 effect(mediump vec4 color, Image tex, mediump vec2 tc, mediump vec2 sc) {
+//
+// Which precision that has to BE is not ours to know: LOVE 12 forward-
+// declares effect() under a different one, and pins that matched 11's
+// prototype are the mismatch there -- the same refusal, from the other
+// side, with the water falling back to flat. So the qualifier is a define
+// the Lua side fills in, and Water.shader compiles the pinned form first
+// and the bare one only if that is refused. Whichever prototype a runtime
+// brought, one of the two agrees with it.
+vec4 effect(EFFECT_PREC vec4 color, Image tex, EFFECT_PREC vec2 tc,
+            EFFECT_PREC vec2 sc) {
   // THE DEPTH TEST, done here because the buffer that would have done it is
   // detached for the length of this pass so it can be READ (see the header).
   // Same comparison, same buffer, same result: a building in front of a pond
@@ -1133,7 +1142,7 @@ end
 
 Water._trainSource = trainSource       -- named for the suite
 
-local function source(grid)
+local function source(grid, bare)
   local src = SHADER_SRC:gsub("//@CRATERS", (craterSource():gsub("%%", "%%%%")))
   src = src:gsub("//@TRAINS", (trainSource():gsub("%%", "%%%%")))
   local head = ("#define RAY_STEPS %d\n#define RAY_REFINE %d\n"
@@ -1141,6 +1150,12 @@ local function source(grid)
     :format(Water.RAY_STEPS, Water.RAY_REFINE, Water.WAVE_STEPS,
             Water.WAVE_STRIDE)
   if grid then head = head .. "#define VOXEL_GRID 1\n" end
+  -- effect()'s parameter precision -- see the signature for why it cannot
+  -- simply be spelled there. Empty is a define all the same: the params
+  -- then carry the stage default, which is what a prototype declared
+  -- without qualifiers wants.
+  head = head .. (bare and "#define EFFECT_PREC\n"
+                        or "#define EFFECT_PREC mediump\n")
   return head .. src
 end
 
@@ -1159,6 +1174,13 @@ function Water.shader(grid)
       shaders[grid] = false
     else
       local ok, sh = pcall(love.graphics.newShader, source(grid))
+      if not ok then
+        -- the pinned prototype was the wrong one for this runtime; the bare
+        -- one is the only other shape there is, and a driver that refuses
+        -- both was never going to draw this water anyway
+        local bareOk, bareSh = pcall(love.graphics.newShader, source(grid, true))
+        if bareOk then ok, sh = bareOk, bareSh end
+      end
       if not ok and V and V.mod and V.mod.log then
         -- once, where it can be read: the fallback is flat water, which is
         -- easy to look at and impossible to diagnose without this line
