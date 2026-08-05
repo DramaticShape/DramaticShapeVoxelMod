@@ -1,7 +1,7 @@
 {
   "id": "DRAMATIC_SHAPE",
   "name": "Dramatic Shape Voxel Mod",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -10,7 +10,7 @@
   "priority": 100,
   "dependencies": [],
   "optional_dependencies": [],
-  "conflicts": [],
+  "conflicts": ["ds_fp_ceiling"],
   "permissions": [
     "engine_internals"
   ],
