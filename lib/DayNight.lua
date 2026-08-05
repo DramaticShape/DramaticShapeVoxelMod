@@ -82,6 +82,10 @@ DayNight.clock = DayNight.T.day     -- the running cycle's own position
 
 -- noon IS the existing sun: shear (-0.85, -0.55) hangs it at
 -- atan2(0.55, 0.85) south of east, atan(1/hypot) = 44.65 degrees up
+local NOON_KX, NOON_KZ = -0.85, -0.55
+local TH_NOON = math.deg(math.atan2(-NOON_KZ, -NOON_KX))
+local EL_NOON = math.deg(math.atan(1 / math.sqrt(NOON_KX * NOON_KX
+                                                 + NOON_KZ * NOON_KZ)))
 
 local TH_RISE, TH_NOON, TH_SET = 0, 90, 180
 local EL_NOON = 62
@@ -94,10 +98,10 @@ local EL_MOON = 48
 
 -- Ao se aproximar do horizonte, cotangente tende ao infinito.
 -- O limite preserva sombras longas sem estourar o frustum do shadow map.
-DayNight.K_MAX = 1.55
+DayNight.K_MAX = 3.5
 DayNight.ALPHA_SUN = 0.40
 DayNight.ALPHA_MOON = 0.18
-DayNight.FADE_DEG = 16
+DayNight.FADE_DEG = 10
 
 -- disc PLACEMENT only: the true elevation would put the noon sun far above
 -- any frame, so the arc the discs ride is squashed toward the horizon. The
@@ -168,60 +172,112 @@ end
 function DayNight.shearAt(t)
   local bearing, elevation, moon = DayNight.bodyAt(t)
 
-  -- A cotangente descreve o comprimento geometrico da sombra.
-  -- Perto do horizonte esse valor cresce demais para a escala
-  -- compacta do diorama.
+  -- Impede divisao por zero exatamente no horizonte.
   local safeElevation = math.max(elevation, 0.25)
-  local physicalLength = 1 / math.tan(math.rad(safeElevation))
 
-  -- Compressao exponencial suave. Sombras pequenas preservam sua
-  -- variacao, enquanto valores extremos se aproximam de K_MAX sem
-  -- encontrar um corte abrupto.
-  local normalized = 1 - math.exp(
-    -physicalLength / DayNight.K_MAX
-  )
-
-  local length = DayNight.K_MAX * normalized
-
-  -- Nos primeiros graus acima do horizonte, a sombra recebe uma
-  -- reducao adicional. Isso representa visualmente a difusao
-  -- atmosferica do amanhecer e impede projecoes exageradas.
-  local horizonProgress = math.max(
-    0,
-    math.min(1, elevation / 12)
-  )
-
-  local horizonFactor = 0.72 + 0.28 * horizonProgress
-  length = length * horizonFactor
+  -- Comprimento da sombra em relacao a altura do objeto.
+  -- cot(elevacao) fica grande com a luz baixa e pequeno com a luz alta.
+  local length = 1 / math.tan(math.rad(safeElevation))
+  length = math.max(0, math.min(DayNight.K_MAX, length))
 
   local angle = math.rad(bearing)
 
-  -- A sombra aponta para o lado oposto ao corpo luminoso.
+  -- A sombra segue no sentido oposto ao corpo luminoso.
   local kx = -math.cos(angle) * length
   local kz = -math.sin(angle) * length
 
-  -- Remove residuos numericos nas direcoes cardeais.
+  -- Evita valores residuais como 6e-17 nos pontos cardeais.
   if math.abs(kx) < 1e-10 then kx = 0 end
   if math.abs(kz) < 1e-10 then kz = 0 end
 
   return kx, kz, moon
 end
 
+
+-- How much shadow the light can press right now, 0..1 of the body's own
+-- weight: full up high, gone at the horizon, so sunset hands off to
+-- moonrise through a soft shadowless gap instead of snapping.
 function DayNight.strengthAt(t)
   local _, elevation = DayNight.bodyAt(t)
 
-  -- No horizonte, a sombra pode ser longa, mas deve ser muito
-  -- difusa. O contraste aumenta conforme o corpo luminoso sobe.
   local strength = elevation / DayNight.FADE_DEG
   strength = math.max(0, math.min(1, strength))
 
-  -- Smootherstep possui transicao suave nos dois extremos.
-  -- Isso impede pulsos ao nascer do sol e ao atingir a
-  -- intensidade completa.
-  return strength * strength * strength
-         * (strength * (strength * 6 - 15) + 10)
+  -- Smoothstep evita um aparecimento abrupto da sombra quando o corpo
+  -- cruza o horizonte.
+  return strength * strength * (3 - 2 * strength)
 end
 
+
+-- ------- the palettes
+--
+-- Sky bands, lightest FIRST (the horizon end), exactly the shape Sky.bands
+-- reads. Six bands, not four: twilight is the whole show here, and six rungs
+-- of it is what keeps a sunset reading as a gradient rather than as stripes.
+-- Every channel is a multiple of 8 -- the 5-bit GBC lattice -- including
+-- after blending, which re-quantises onto it.
+-- `golden` and `violet` are not pins -- they are WAYPOINTS the blends pass
+-- through. Day's blue horizon and dusk's gold one are near-complements, and
+-- a straight lerp between complements bottoms out in grey: mid-transition
+-- the whole sky went the colour of dishwater, and gold-to-navy did the same
+-- on the far side of sunset. So the evening bends through a golden hour
+-- (horizon warming, zenith still blue -- late afternoon), and both edges of
+-- the night bend through a violet civil twilight (rose horizon under a
+-- violet sky -- the real colour of that half hour).
+DayNight.PALETTES = {
+  day = { { 184, 216, 248 }, { 144, 192, 248 }, { 104, 160, 240 },
+          { 72, 128, 224 }, { 48, 96, 200 }, { 40, 72, 168 } },
+  golden = { { 248, 216, 144 }, { 232, 184, 136 }, { 176, 152, 168 },
+             { 120, 128, 192 }, { 80, 104, 184 }, { 56, 80, 152 } },
+  dawn = { { 248, 216, 152 }, { 248, 176, 136 }, { 232, 136, 144 },
+           { 176, 104, 168 }, { 112, 80, 168 }, { 64, 64, 136 } },
+  dusk = { { 248, 200, 112 }, { 248, 152, 96 }, { 232, 104, 96 },
+           { 184, 80, 136 }, { 120, 64, 152 }, { 56, 48, 120 } },
+  violet = { { 200, 136, 160 }, { 152, 104, 160 }, { 112, 80, 152 },
+             { 72, 56, 128 }, { 40, 40, 96 }, { 16, 24, 64 } },
+  night = { { 88, 104, 160 }, { 64, 80, 136 }, { 48, 56, 112 },
+            { 32, 40, 88 }, { 16, 24, 64 }, { 8, 8, 40 } },
+}
+
+-- what the world's own colours are multiplied by, per phase (0..255)
+DayNight.TINTS = {
+  day = { 255, 255, 255 },
+  golden = { 255, 232, 208 },
+  dawn = { 255, 216, 192 },
+  dusk = { 255, 192, 168 },
+  violet = { 184, 160, 200 },
+  night = { 120, 136, 192 },
+}
+
+-- the twilight glow around the low sun, and the discs' own four-shade
+-- palettes (lightest first, so a display mode transforms them like any
+-- other palette)
+DayNight.GLOWS = { dawn = { 248, 232, 176 }, dusk = { 248, 224, 168 } }
+DayNight.SUN_COLORS = { { 248, 240, 200 }, { 248, 208, 96 },
+                        { 248, 144, 80 }, { 216, 96, 64 } }
+DayNight.MOON_COLORS = { { 240, 244, 248 }, { 224, 232, 240 },
+                         { 168, 184, 208 }, { 120, 136, 168 } }
+
+-- The dial as keyframes: a repeated name is a plateau, a change is a
+-- BLEND-wide ramp. Laid out so DUSK and DAWN proper land exactly on their
+-- pinned times, and so the evening approaches dusk THROUGH the golden-hour
+-- waypoint rather than straight across the grey between blue and gold. The
+-- morning side needs no waypoint of its own: dawn's pinks into day's blues
+-- share a family and blend clean.
+local DIAL
+local function dial()
+  if DIAL then return DIAL end
+  local B, D, C = DayNight.BLEND, DayNight.DAY_LEN, DayNight.CYCLE
+  DIAL = {
+    { 0, "dawn" }, { B, "day" },
+    { D - 2 * B, "day" }, { D - B, "golden" }, { D, "dusk" },
+    { D + B / 2, "violet" }, { D + B, "night" },
+    { C - B, "night" }, { C - B / 2, "violet" }, { C, "dawn" },
+  }
+  return DIAL
+end
+
+-- Phase weights at clock `t`, off the dial above.
 function DayNight.mix(t)
   t = t % DayNight.CYCLE
   local d = dial()
