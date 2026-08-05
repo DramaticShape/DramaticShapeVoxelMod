@@ -117,6 +117,56 @@ end
 -- skipping ~a million short-lived Lua tables per route and LOVE's slow
 -- table-by-table vertex upload.
 
+-- Encode face orientation beside the existing AO/shade value without
+-- expanding Voxel3D.FORMAT. The integer part is the cardinal normal and
+-- the fractional part carries the original 0..1 shade.
+--
+--   1 = +X east
+--   2 = -X west
+--   3 = +Y top
+--   4 = -Y bottom
+--   5 = +Z south
+--   6 = -Z north
+--
+-- The multiplier stays below one whole unit, so floor() recovers the face
+-- reliably in the shader. Existing AO continues to vary per corner.
+local FACE_SHADE_SCALE = 0.125
+
+local function faceCode(c)
+  local ax = c[2][1] - c[1][1]
+  local ay = c[2][2] - c[1][2]
+  local az = c[2][3] - c[1][3]
+
+  local bx = c[3][1] - c[1][1]
+  local by = c[3][2] - c[1][2]
+  local bz = c[3][3] - c[1][3]
+
+  local nx = ay * bz - az * by
+  local ny = az * bx - ax * bz
+  local nz = ax * by - ay * bx
+
+  local x = math.abs(nx)
+  local y = math.abs(ny)
+  local z = math.abs(nz)
+
+  if x >= y and x >= z then
+    return nx >= 0 and 1 or 2
+  elseif y >= x and y >= z then
+    return ny >= 0 and 3 or 4
+  else
+    return nz >= 0 and 5 or 6
+  end
+end
+
+local function packFaceShade(c, shade)
+  local value = tonumber(shade) or 1
+
+  if value < 0 then value = 0 end
+  if value > 1 then value = 1 end
+
+  return faceCode(c) + value * FACE_SHADE_SCALE
+end
+
 local function newTableSink()
   local verts, indices, quads = {}, {}, 0
   return {
@@ -125,7 +175,7 @@ local function newTableSink()
       for i = 1, 4 do
         local cc, t = c[i], uv[i]
         verts[#verts + 1] = { cc[1], cc[2], cc[3], t[1], t[2],
-                              flat and shade or shade[i] }
+                              packFaceShade(c, flat and shade or shade[i]) }
       end
       Voxel3D.pushQuad(indices, quads)
       quads = quads + 1
@@ -163,7 +213,10 @@ local function newFfiSink()
         buf[base + 2] = cc[3]
         buf[base + 3] = t[1]
         buf[base + 4] = t[2]
-        buf[base + 5] = flat and shade or shade[i]
+        buf[base + 5] = packFaceShade(
+          c,
+          flat and shade or shade[i]
+        )
         base = base + 6
       end
       n = n + 6
