@@ -1358,9 +1358,32 @@ end
 -- caster itself it is a no-op -- that quad is already flat.
 function Voxel3D.casterMatrix(px, py, y, mirror)
   local m = Mat4.translate(px + 8, y, py + 8)
-  if mirror then m = Mat4.mul(m, Mat4.scale(-1, 1, 1)) end
-  return Mat4.mul(Mat4.mul(m, Mat4.translate(-8, 0, 0)),
-                  Mat4.scale(1, 1, 0))
+
+  -- O personagem e uma placa vertical 2D. Quando sua largura fica
+  -- paralela ao raio da luz, o shadow map enxerga a placa de lado e
+  -- a sombra colapsa para uma linha fina.
+  --
+  -- Giramos somente o caster usado pelo shadow map. A sprite visivel
+  -- continua orientada para a camera como antes.
+  local kx = Voxel3D.SHADOW_KX or 0
+  local kz = Voxel3D.SHADOW_KZ or 0
+  local horizontal = math.sqrt(kx * kx + kz * kz)
+
+  if horizontal > 1e-6 then
+    -- Faz o plano da placa ficar de frente para a direcao horizontal
+    -- da luz, preservando uma silhueta larga no chao.
+    local yaw = math.atan2(-kx, -kz)
+    m = Mat4.mul(m, Mat4.rotateY(yaw))
+  end
+
+  if mirror then
+    m = Mat4.mul(m, Mat4.scale(-1, 1, 1))
+  end
+
+  return Mat4.mul(
+    Mat4.mul(m, Mat4.translate(-8, 0, 0)),
+    Mat4.scale(1, 1, 0)
+  )
 end
 
 -- FALLBACK ONLY (no shadow map: headless, or a driver that cannot make the

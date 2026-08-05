@@ -68,9 +68,11 @@ DayNight.setting = ModSetting.new(DayNight.KEY, DayNight.LABEL,
 -- arrive at or act under FULL (main.lua: the preset itself, the rows hook,
 -- the manager's options_changed), mirroring OverworldBattle.forceOG.
 function DayNight.forceSync(game)
-  if DayNight.setting:get() ~= "sync" then
-    DayNight.setting:setIndex(1, game)
-  end
+  -- FULL e apenas um preset visual. O horario escolhido pelo jogador
+  -- permanece ativo e nao e mais redefinido automaticamente para SYNC.
+  --
+  -- A funcao permanece para compatibilidade com os chamadores existentes.
+  return DayNight.setting:get()
 end
 
 DayNight.clock = DayNight.T.day     -- the running cycle's own position
@@ -98,10 +100,10 @@ local EL_MOON = 48
 
 -- Ao se aproximar do horizonte, cotangente tende ao infinito.
 -- O limite preserva sombras longas sem estourar o frustum do shadow map.
-DayNight.K_MAX = 1.70
+DayNight.K_MAX = 1.25
 DayNight.ALPHA_SUN = 0.40
 DayNight.ALPHA_MOON = 0.18
-DayNight.FADE_DEG = 14
+DayNight.FADE_DEG = 16
 
 -- disc PLACEMENT only: the true elevation would put the noon sun far above
 -- any frame, so the arc the discs ride is squashed toward the horizon. The
