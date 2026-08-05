@@ -98,10 +98,10 @@ local EL_MOON = 48
 
 -- Ao se aproximar do horizonte, cotangente tende ao infinito.
 -- O limite preserva sombras longas sem estourar o frustum do shadow map.
-DayNight.K_MAX = 3.5
+DayNight.K_MAX = 1.70
 DayNight.ALPHA_SUN = 0.40
 DayNight.ALPHA_MOON = 0.18
-DayNight.FADE_DEG = 10
+DayNight.FADE_DEG = 14
 
 -- disc PLACEMENT only: the true elevation would put the noon sun far above
 -- any frame, so the arc the discs ride is squashed toward the horizon. The
