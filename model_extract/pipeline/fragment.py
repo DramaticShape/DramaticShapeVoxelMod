@@ -315,7 +315,11 @@ class Animation:
     def __init__(self, frag, off):
         f = self.f = frag
         self.off = off
-        self.flags     = f.u8(off)
+        # The flags live in the LOW byte of the u16 at +0 -- reading the byte
+        # AT +0 gets the always-zero high byte, which silently turns every
+        # hermite animation (flags & 8: Pidgeot, Dodrio, Exeggutor, Tangela,
+        # Magmar) into a packed-stream read of keyframe tables.
+        self.flags     = f.u16(off)
         self.startFrame= f.u16(off + 4)
         self.loopStart = f.u16(off + 6)
         self.nChannels = f.u16(off + 8)
@@ -333,16 +337,20 @@ class Animation:
                     oRot=f.u16(o + 6), oTrans=f.u16(o + 8))
 
     # -- packed stream sampling (flags & 8 == 0) --------------------------
-    # A count of 0 means the component has no stream at all. The game's index
-    # arithmetic (offset + count - 1) then runs off the front of the array -- for
-    # Tangela's idle the scale "array" is two entries long and the computed index
-    # is 99 -- so an empty channel is treated as "keep the bind-pose value".
+    # A count of 0 means the component has no stream. In the ROM that only
+    # ever happens in HERMITE animations, where a count under 2 means "the
+    # offset field IS the constant value" -- no packed animation of any of the
+    # 151 species carries an empty channel, so the bind-pose fallback here is
+    # dead code kept as a safety net.
     def _trans_packed(self, c, frame):
         if c['nTrans'] == 0:
             return None
         bits = 16 if (self.flags & 4) else 12
         if c['nTrans'] == 1:
-            return float(c['oTrans'] if (self.flags & 4) else signed((c['oTrans'] * 16) & 0xFFFF, 16) >> 4)
+            # (s16) casts both ways: func_80016848 reads the u16 offset field
+            # back as a signed constant.
+            return float(signed(c['oTrans'], 16) if (self.flags & 4)
+                         else signed((c['oTrans'] * 16) & 0xFFFF, 16) >> 4)
         i = c['oTrans'] + min(frame, c['nTrans'] - 1)
         return float(bitfield(self.f, self.transData, i, bits))
 
@@ -404,7 +412,11 @@ class Animation:
         else:
             deg = self._hermite(self.rotData + c['oRot'] * 2, c['nRot'], frame, c['interp'] & 2) / 10.0
         deg %= 360.0
-        return int(deg / 360.0 * 65536.0)
+        # func_80016DE0 returns s16: the f32 -> s16 cast WRAPS an angle above
+        # 180 degrees to its negative twin. Same binary angle either way, but
+        # the packer stores i16 with clamping, so an unwrapped 350-degree
+        # value would pin at 32767 (= 180 degrees) instead.
+        return signed(int(deg / 360.0 * 65536.0) & 0xFFFF, 16)
 
     def _scale_key(self, c, frame):
         if c['nScale'] < 2:
@@ -439,7 +451,7 @@ class AuxAnimation:
 
     def __init__(self, frag, off):
         f = self.f = frag
-        self.flags     = f.u8(off)
+        self.flags     = f.u16(off)         # low byte, same layout as Animation
         self.startFrame= f.u16(off + 4)
         self.loopStart = f.u16(off + 6)
         self.nChannels = f.u16(off + 8)

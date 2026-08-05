@@ -229,11 +229,9 @@ def stance(data):
     Measured on the BIND POSE, which is the one pose in the set that can be
     trusted for this.  Two things recommend it.  It reproduces the verified
     glTF export bit for bit on all 151 species, so it is measuring the same
-    skeleton the reference implementation agreed with; and it is immune to
-    the animation quirks a handful of species carry (Exeggutor's idle throws
-    limbs hundreds of units off the body from frame 1 on, and Magmar's does
-    something similar) -- quirks that would otherwise decide how big every
-    OTHER frame of those species is drawn.
+    skeleton the reference implementation agreed with; and it does not move
+    with the animations, so no single clip's excursion decides how big every
+    other frame of that species is drawn.
 
     The floor is the interesting number, and it reads cleanly: 119 of the
     151 sit within 5% of zero, which says the model origin IS where the game
@@ -249,13 +247,15 @@ def stance(data):
 
 
 def idle_is_broken(data, idle):
-    """Whether this species' standby loop is corrupt in the source data.
+    """Whether this species' standby loop is corrupt as extracted.
 
-    A handful of species come out of the extraction with animations that
-    throw bones hundreds of units off the body -- Exeggutor, Tangela and
-    Magmar, whose channel streams the game's own index arithmetic evidently
-    reads differently from the way the exporter does.  Played, they look
-    like a Pokemon coming apart; the mod would rather stand them still.
+    No species trips this today.  Exeggutor, Tangela and Magmar used to:
+    their animations are hermite keyframes (flags & 8), the extractor read
+    the flags byte at +0 -- the always-zero high half of the u16 -- and
+    decoded keyframe tables as packed streams, which threw bones hundreds
+    of units off the body.  The detector stays as the guard against the
+    next extraction bug: played, a broken idle looks like a Pokemon coming
+    apart, and the mod would rather show the sprite fallback.
 
     The test is deliberately narrow, because "differs from the bind pose" is
     NOT brokenness.  It is asked only of the STANDBY loop, which is the one
