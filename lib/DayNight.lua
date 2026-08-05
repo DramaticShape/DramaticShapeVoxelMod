@@ -8,30 +8,19 @@
 -- function of the clock, so the pinned settings and the running cycle can
 -- never drift apart: DUSK is simply the cycle stopped at sunset.
 --
--- THE SUN's noon is this mod's existing sun, exactly: shear (-0.85, -0.55),
--- hanging in the southeast about 45 degrees up. That is the DAY setting and
--- the default, so a player who never touches the row sees the mod they
--- already had. From there the arc swings NORTH at both ends -- rising 70
--- degrees north of east, setting the mirror of that -- because the camera
--- looks north and the northern sky is the only sky it ever frames: a sun
--- that rose due east would light the world for ten minutes without once
--- being seen. Swung north, the disc stands in frame through dawn and dusk
--- (the hours worth looking at) and passes overhead-behind-the-camera
--- through midday, which is where a noon sun belongs.
+-- THE SUN follows a simplified northern-hemisphere trajectory. It rises
+-- in the east, crosses the southern sky and sets in the west. Its elevation
+-- creates long shadows during dawn, short shadows around noon and long
+-- shadows in the opposite direction during dusk.
 --
--- THE MOON arcs entirely through the northern sky -- rising northeast, due
--- north at mid-night, setting northwest -- so it hangs over the diorama all
--- night and the pinned NIGHT setting puts it dead centre. Its shadows fall
--- softly south, away from it, at about two-thirds the sun's weight.
+-- THE MOON follows a weaker east-to-west trajectory during the night. Its
+-- lower elevation and reduced alpha keep moon shadows visible without making
+-- the night look as strongly illuminated as daytime.
 --
--- SHADOWS are the shear the light throws: direction opposite the body's
--- bearing, length its elevation's cotangent (clamped -- a rising sun throws
--- a long shadow, not an infinite one), strength fading to nothing over the
--- last twelve degrees before the horizon so the handoff between sun and
--- moon is a soft gap rather than a snap. Face shading (Voxel3D.FACE_SHADE)
--- deliberately stays the noon bake: it is a subtle angle term baked into
--- every mesh, and rebaking the world's geometry per phase buys less than
--- the cast shadows, the sky and the tint already say.
+-- SHADOWS use the direction opposite to the active body. Their length is
+-- calculated from the cotangent of its elevation and safely clamped near
+-- the horizon. Their opacity fades smoothly while the sun or moon rises and
+-- sets, preventing a sudden switch between solar and lunar shadows.
 --
 -- OUTDOOR ONLY. Indoors keeps the noon rig, the untinted world and no sky:
 -- a cave at midnight is exactly as dark as a cave at noon, which is what a
@@ -98,14 +87,21 @@ local TH_NOON = math.deg(math.atan2(-NOON_KZ, -NOON_KX))
 local EL_NOON = math.deg(math.atan(1 / math.sqrt(NOON_KX * NOON_KX
                                                  + NOON_KZ * NOON_KZ)))
 
-local TH_RISE, TH_SET = -70, 250            -- north of east / north of west
-local TH_MRISE, TH_MMID, TH_MSET = -20, -90, -160
-local EL_MOON = 40
+local TH_RISE, TH_NOON, TH_SET = 0, 90, 180
+local EL_NOON = 62
 
-DayNight.K_MAX = 2.0          -- shear clamp: a shadow at most twice its height
-DayNight.ALPHA_SUN = 0.40     -- the existing midday shadow weight
-DayNight.ALPHA_MOON = 0.26    -- moonlight is a softer press
-DayNight.FADE_DEG = 12        -- shadows fade out over the last degrees of a rise/set
+-- A lua segue uma trajetoria semelhante, mas um pouco mais baixa.
+-- Isso mantem a iluminacao noturna suave e produz sombras lunares
+-- discretamente mais longas.
+local TH_MRISE, TH_MMID, TH_MSET = 0, 90, 180
+local EL_MOON = 48
+
+-- Ao se aproximar do horizonte, cotangente tende ao infinito.
+-- O limite preserva sombras longas sem estourar o frustum do shadow map.
+DayNight.K_MAX = 3.5
+DayNight.ALPHA_SUN = 0.40
+DayNight.ALPHA_MOON = 0.18
+DayNight.FADE_DEG = 10
 
 -- disc PLACEMENT only: the true elevation would put the noon sun far above
 -- any frame, so the arc the discs ride is squashed toward the horizon. The
@@ -113,9 +109,21 @@ DayNight.FADE_DEG = 12        -- shadows fade out over the last degrees of a ris
 DayNight.ELEV_SQUASH = 0.14
 
 -- three-point arc: a at s=0, b at s=0.5, c at s=1
+local function smoothstep(value)
+  value = math.max(0, math.min(1, value))
+  return value * value * (3 - 2 * value)
+end
+
+-- Interpolacao suave em duas metades. A velocidade angular diminui
+-- naturalmente perto do meio-dia e nao sofre uma quebra visivel.
 local function arc(a, b, c, s)
-  if s < 0.5 then return a + (b - a) * 2 * s end
-  return b + (c - b) * (2 * s - 1)
+  if s < 0.5 then
+    local u = smoothstep(s * 2)
+    return a + (b - a) * u
+  end
+
+  local u = smoothstep((s - 0.5) * 2)
+  return b + (c - b) * u
 end
 
 -- The body lighting the world at clock `t`: bearing and elevation in
@@ -124,34 +132,82 @@ end
 -- not the moon rising.
 function DayNight.bodyAt(t)
   t = t % DayNight.CYCLE
+
   if t <= DayNight.DAY_LEN then
-    local s = t / DayNight.DAY_LEN
-    return arc(TH_RISE, TH_NOON, TH_SET, s),
-           EL_NOON * math.sin(math.pi * s), false
+    local progress = t / DayNight.DAY_LEN
+
+    -- Leste ao nascer, sul ao meio-dia e oeste ao entardecer.
+    local bearing = arc(
+      TH_RISE,
+      TH_NOON,
+      TH_SET,
+      progress
+    )
+
+    -- O seno cria uma elevacao fisicamente intuitiva:
+    -- zero no horizonte e maxima no meio do periodo.
+    local elevation = EL_NOON * math.sin(math.pi * progress)
+
+    return bearing, elevation, false
   end
-  local s = (t - DayNight.DAY_LEN) / (DayNight.CYCLE - DayNight.DAY_LEN)
-  return arc(TH_MRISE, TH_MMID, TH_MSET, s),
-         EL_MOON * math.sin(math.pi * s), true
+
+  local nightLength = DayNight.CYCLE - DayNight.DAY_LEN
+  local progress = (t - DayNight.DAY_LEN) / nightLength
+
+  local bearing = arc(
+    TH_MRISE,
+    TH_MMID,
+    TH_MSET,
+    progress
+  )
+
+  local elevation = EL_MOON * math.sin(math.pi * progress)
+
+  return bearing, elevation, true
 end
+
 
 -- The shadow shear that body throws: drift per pixel of height, opposite
 -- the bearing, cot(elevation) long, clamped.
 function DayNight.shearAt(t)
-  local th, el, moon = DayNight.bodyAt(t)
-  if el < 0.5 then el = 0.5 end
-  local k = math.min(DayNight.K_MAX, 1 / math.tan(math.rad(el)))
-  return -math.cos(math.rad(th)) * k, -math.sin(math.rad(th)) * k, moon
+  local bearing, elevation, moon = DayNight.bodyAt(t)
+
+  -- Impede divisao por zero exatamente no horizonte.
+  local safeElevation = math.max(elevation, 0.25)
+
+  -- Comprimento da sombra em relacao a altura do objeto.
+  -- cot(elevacao) fica grande com a luz baixa e pequeno com a luz alta.
+  local length = 1 / math.tan(math.rad(safeElevation))
+  length = math.max(0, math.min(DayNight.K_MAX, length))
+
+  local angle = math.rad(bearing)
+
+  -- A sombra segue no sentido oposto ao corpo luminoso.
+  local kx = -math.cos(angle) * length
+  local kz = -math.sin(angle) * length
+
+  -- Evita valores residuais como 6e-17 nos pontos cardeais.
+  if math.abs(kx) < 1e-10 then kx = 0 end
+  if math.abs(kz) < 1e-10 then kz = 0 end
+
+  return kx, kz, moon
 end
+
 
 -- How much shadow the light can press right now, 0..1 of the body's own
 -- weight: full up high, gone at the horizon, so sunset hands off to
 -- moonrise through a soft shadowless gap instead of snapping.
 function DayNight.strengthAt(t)
-  local _, el = DayNight.bodyAt(t)
-  local s = el / DayNight.FADE_DEG
-  if s < 0 then return 0 end
-  return s < 1 and s or 1
+  local _, elevation = DayNight.bodyAt(t)
+
+  local strength = elevation / DayNight.FADE_DEG
+  strength = math.max(0, math.min(1, strength))
+
+  -- Smoothstep evita um aparecimento abrupto da sombra quando o corpo
+  -- cruza o horizonte.
+  return strength * strength * (3 - 2 * strength)
 end
+
 
 -- ------- the palettes
 --
@@ -374,7 +430,7 @@ end
 
 -- The clock the RIG runs on: quantised, so the shadow map redraws a few
 -- times a minute as the sun crawls rather than every frame.
-DayNight.STEP = 2
+DayNight.STEP = 0.5
 
 function DayNight.rigTime()
   local t = DayNight.time()

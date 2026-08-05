@@ -3726,23 +3726,35 @@ DayNight.update(10)
 T.check(math.abs(DayNight.clock - 5) < 1e-9,
   "the dial wraps at twenty minutes, back into dawn")
 
--- the sun: noon is the mod's existing sun, exactly
-local kx, kz, moon = DayNight.shearAt(300)
-T.check(not moon, "noon is the sun's")
-T.check(math.abs(kx - (-0.85)) < 1e-9 and math.abs(kz - (-0.55)) < 1e-9,
-  ("DAY throws the shadows the mod always threw: (%.4f, %.4f)"):format(kx, kz))
-local kx0, kz0 = DayNight.shearAt(0)
-T.check(math.abs(math.sqrt(kx0 * kx0 + kz0 * kz0) - DayNight.K_MAX) < 1e-9,
-  "a rising sun throws a LONG shadow, clamped -- never an infinite one")
-T.eq(DayNight.strengthAt(0), 0, "and at the horizon it presses nothing")
-T.eq(DayNight.strengthAt(300), 1, "at noon it presses in full")
+-- dynamic sun: east at dawn, south at noon and west at dusk
+local dawnKx, dawnKz, dawnMoon = DayNight.shearAt(0)
+T.check(not dawnMoon, "dawn belongs to the sun")
+T.check(dawnKx < 0 and math.abs(dawnKz) < 1e-9,
+  "the eastern sunrise throws its long shadow west")
+T.check(math.abs(math.sqrt(dawnKx * dawnKx + dawnKz * dawnKz)
+                 - DayNight.K_MAX) < 1e-9,
+  "the sunrise shadow is safely clamped")
+T.eq(DayNight.strengthAt(0), 0,
+  "the shadow fades out exactly at the horizon")
 
--- the moon: due north at mid-night, pressing softly south
-local mkx, mkz, mmoon = DayNight.shearAt(900)
-T.check(mmoon, "mid-night is the moon's")
-T.check(math.abs(mkx) < 1e-9, "due north: no east-west drift at all")
-T.check(math.abs(mkz - 1 / math.tan(math.rad(40))) < 1e-9,
-  "shadows fall south, away from it, cot(40) long")
+local noonKx, noonKz, noonMoon = DayNight.shearAt(300)
+T.check(not noonMoon, "noon belongs to the sun")
+T.check(math.abs(noonKx) < 1e-9 and noonKz < 0,
+  "the southern noon sun throws its shorter shadow north")
+T.eq(DayNight.strengthAt(300), 1,
+  "the noon shadow reaches full solar strength")
+
+local morningKx = DayNight.shearAt(150)
+local afternoonKx = DayNight.shearAt(450)
+T.check(morningKx < 0 and afternoonKx > 0,
+  "the shadow rotates from west to east across the day")
+
+local moonKx, moonKz, isMoon = DayNight.shearAt(900)
+T.check(isMoon, "midnight belongs to the moon")
+T.check(math.abs(moonKx) < 1e-9 and moonKz < 0,
+  "the southern midnight moon throws its shadow north")
+T.check(math.abs(moonKz + 1 / math.tan(math.rad(48))) < 1e-9,
+  "moon shadow length follows its lower elevation")
 
 -- the palettes: pins land on their phase palette unmixed, blends stay on
 -- the 5-bit lattice
