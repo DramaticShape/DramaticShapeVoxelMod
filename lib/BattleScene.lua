@@ -654,11 +654,13 @@ function BattleScene.render(state, arena, textures, token)
     -- pull is also what keeps a tuft from z-fighting the floor it stands on
     local pull = VoxelScene.pull(math.max(pitch, 0.05))
     if not discs then
+      Voxel3D.sway(true)
       Voxel3D.draw(ChunkMesher.grass(host), atlasFor(host), nil, pull)
       for _, nb in ipairs(neighbors) do
         Voxel3D.draw(ChunkMesher.grass(nb.map), atlasFor(nb.map),
                      Mat4.translate(nb.ox, 0, nb.oy), pull)
       end
+      Voxel3D.sway(false)
       local fpull = math.max(0, pull - 8 * math.sin(math.max(pitch, 0.05)))
       Voxel3D.draw(ChunkMesher.flowers(host), atlasFor(host), nil, fpull,
                    ShadowMap.snug(nil))

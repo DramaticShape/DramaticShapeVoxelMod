@@ -3383,6 +3383,14 @@ end
 -- depth, so a clump read as two stubs rather than one tuft.
 local GRASS_THICK = 2
 
+-- The gust, as radians of wind phase per world pixel travelled. Together
+-- these two set both the direction the wave rolls (diagonally, so it never
+-- lines up with the tile grid and reads as a marching row) and how long it
+-- is: about a hundred pixels from crest to crest, or a dozen tiles, so a
+-- meadow on screen is caught mid-wave rather than leaning all one way.
+local GRASS_WIND_X = 0.050
+local GRASS_WIND_Z = 0.031
+
 local function grassTemplate(map, data, tileId)
   local perRow = map.tileset.tilesPerRow or 16
   local atlasW = map.tileset.imageWidth or 128
@@ -3480,13 +3488,20 @@ function Structures.buildGrass(S, map, x0, x1, y0, y1, data)
           templates[tileId] = tpl
         end
         local wx, wz = tx * 8, ty * 8
+        -- when this tuft's turn in the wind comes (Voxel3D.SWAY_FORMAT):
+        -- one number for the whole clump, so its blades bend together and
+        -- no quad is sheared. Read off the tile's own place on the map, so
+        -- the offset runs smoothly from cell to cell and a gust crosses a
+        -- meadow as a wave -- and so it is the SAME wave either side of a
+        -- map seam, where two chunks meet in world coordinates.
+        local phase = wx * GRASS_WIND_X + wz * GRASS_WIND_Z
         for _, q in ipairs(tpl) do
           quads[#quads + 1] = {
             { q[1][1] + wx, q[1][2], q[1][3] + wz },
             { q[2][1] + wx, q[2][2], q[2][3] + wz },
             { q[3][1] + wx, q[3][2], q[3][3] + wz },
             { q[4][1] + wx, q[4][2], q[4][3] + wz },
-            uv = q.uv, shade = q.shade,
+            uv = q.uv, shade = q.shade, sway = phase,
           }
         end
       end
