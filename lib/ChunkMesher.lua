@@ -55,6 +55,7 @@ local Structures = V.require("Structures")
 local TileShape = V.require("TileShape")
 local Voxel3D = V.require("Voxel3D")
 local Budget = V.require("BuildBudget")
+local MeshDiskCache = V.require("MeshDiskCache")
 
 local ffi = nil
 do
@@ -133,7 +134,7 @@ local function newTableSink()
       return verts, indices, quads
     end,
     finish = function()
-      return Voxel3D.newMesh(verts, indices)
+      return Voxel3D.newMesh(verts, indices), nil, nil
     end,
   }
 end
@@ -190,7 +191,15 @@ local function newFfiSink()
         end
         return m
       end)
-      return ok and mesh or nil
+      if not ok or not mesh then return nil, nil, nil end
+
+      -- The native buffer is already packed exactly as Voxel3D.FORMAT
+      -- expects. Copy it once only when the completed build is ready to
+      -- become persistent; no geometry calculation is repeated.
+      local byteCount = n * 6 * 4
+      local payload = ffi.string(buf, byteCount)
+
+      return mesh, n, payload
     end,
   }
   return sink
@@ -962,39 +971,119 @@ end
 local function runJob(job)
   local map = job.map
   local c = entry(job.id)
+  local waterName = waterSlot(job.slot)
+
+  -- Disk lookup happens before Structures analysis. A returning map can
+  -- therefore put its terrain back on the GPU immediately while auxiliary
+  -- grass, flowers and figures are prepared during later coroutine slices.
+  local cachedMesh, meshHit = MeshDiskCache.load(job.id, job.slot)
+  local cachedWater, waterHit = MeshDiskCache.load(job.id, waterName)
+  local terrainHit = meshHit and waterHit
+
+  if terrainHit and (gen[job.id] or 0) == job.gen then
+    swapSlot(c, job.slot, cachedMesh or false)
+    swapSlot(c, waterName, cachedWater or false)
+
+    if c.stale then
+      c.stale[job.slot] = nil
+    end
+  end
+
   if c.grass == nil or c.flowers == nil or c.figures == nil
      or (c.stale and c.stale.aux) then
     local okG, grass = pcall(buildGrassMesh, map)
+    Budget.check()
+
     local okF, flowers = pcall(buildFlowerMesh, map)
+    Budget.check()
+
     local okX, figures = pcall(buildFigureMeshes, map)
+
     if (gen[job.id] or 0) ~= job.gen then
-      if okG and grass and grass.release then pcall(grass.release, grass) end
+      if okG and grass and grass.release then
+        pcall(grass.release, grass)
+      end
+
       if okF and flowers and flowers.release then
         pcall(flowers.release, flowers)
       end
+
       if okX then releaseFigures(figures) end
       return
     end
+
     swapSlot(c, "grass", (okG and grass) or false)
     swapSlot(c, "flowers", (okF and flowers) or false)
+
     releaseFigures(c.figures)
     c.figures = (okX and figures) or false
+
     if c.stale then c.stale.aux = nil end
   end
+
+  -- A valid terrain/water pair needs no geometry rebuild.
+  if terrainHit then
+    if c.stale then
+      c.stale[job.slot] = nil
+
+      if not (c.stale.full or c.stale.body or c.stale.aux) then
+        c.stale = nil
+      end
+    end
+
+    return
+  end
+
   local sink = newSink()
   local waterSink = newSink()
-  runGeometry(map, job.slot == "body", job.masks, sink, waterSink)
-  local mesh = sink.finish()
-  local water = waterSink.finish()
+
+  runGeometry(
+    map,
+    job.slot == "body",
+    job.masks,
+    sink,
+    waterSink
+  )
+
+  local mesh, meshCount, meshPayload = sink.finish()
+  local water, waterCount, waterPayload = waterSink.finish()
+
   if (gen[job.id] or 0) ~= job.gen then
     if mesh and mesh.release then pcall(mesh.release, mesh) end
     if water and water.release then pcall(water.release, water) end
     return
   end
+
   swapSlot(c, job.slot, mesh or false)
-  swapSlot(c, waterSlot(job.slot), water or false)
+  swapSlot(c, waterName, water or false)
+
+  -- Only the FFI sink exposes packed bytes. On a platform using the table
+  -- sink, gameplay remains unchanged and no persistent file is written.
+  if meshCount and meshPayload then
+    MeshDiskCache.store(
+      job.id,
+      job.slot,
+      meshCount,
+      meshPayload
+    )
+  elseif mesh == nil then
+    MeshDiskCache.store(job.id, job.slot, 0, "")
+  end
+
+  if waterCount and waterPayload then
+    MeshDiskCache.store(
+      job.id,
+      waterName,
+      waterCount,
+      waterPayload
+    )
+  elseif water == nil then
+    MeshDiskCache.store(job.id, waterName, 0, "")
+  end
+
   if c.stale then
     c.stale[job.slot] = nil
+
     if not (c.stale.full or c.stale.body or c.stale.aux) then
       c.stale = nil
     end
@@ -1162,6 +1251,7 @@ end
 -- to the flat 2D path, a whole-world blink for a one-block edit.
 function ChunkMesher.refresh(mapId)
   if not mapId then return ChunkMesher.invalidate() end
+  MeshDiskCache.invalidate(mapId)
   local c = cache[mapId]
   -- nothing drawable cached: the plain drop costs nothing visible
   if not (c and (c.full or c.body)) then
@@ -1221,6 +1311,12 @@ end
 -- the generation counter.
 function ChunkMesher.invalidate(mapId)
   Structures.invalidate(mapId)
+
+  if mapId then
+    MeshDiskCache.invalidate(mapId)
+  else
+    MeshDiskCache.clear()
+  end
   if mapId then
     local c = cache[mapId]
     if c then releaseEntry(c) end
