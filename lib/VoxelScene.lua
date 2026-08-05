@@ -295,6 +295,24 @@ local function billboardMatrix(px, py, y, mirror)
   return Mat4.mul(m, Mat4.translate(-8, 0, 0))
 end
 
+-- Project the top-center of the same leaned/yawed card billboard. The
+-- engine's LAN overlay uses this to keep a remote trainer's name anchored to
+-- the sprite instead of applying a perspective-incorrect screen offset.
+function VoxelScene.projectBillboardTop(wx, wz, height)
+  local blend = FirstPerson.cardBlend()
+  local theta = (leanAngle() - math.pi / 2) * (1 - blend)
+  local localX = 0
+  local localY = height * math.cos(theta)
+  local localZ = height * math.sin(theta)
+  if blend > 0 then
+    local yaw = FirstPerson.cardYaw(wx, wz) * blend
+    local cosine, sine = math.cos(yaw), math.sin(yaw)
+    localX = sine * localZ
+    localZ = cosine * localZ
+  end
+  return Voxel3D.project(wx + localX, localY, wz + localZ)
+end
+
 local function billboardPull()
   return VoxelScene.pull(math.max(leanAngle(), 0.05))
 end
@@ -534,8 +552,36 @@ local function posesOf(state, spriteColors)
       end
     end
   end
+
+  -- The voxel pipeline owns the complete world frame, so it does not pass
+  -- through OverworldController's normal 2D/TILT character pass. LAN players
+  -- intentionally are not state.entities: they have no local collision,
+  -- scripts, or save data. Add them only to this frame's visual pose list so
+  -- they share the ordinary billboard, occlusion, shadow, and palette paths.
+  local Game = require("src.core.Game")
+  local lan = Game and Game.lanSession
+  if lan and lan.players then
+    for _, entry in ipairs(lan:players()) do
+      local remote = entry.player
+      if remote and remote.map == state.map.id and remote.sprite then
+        posed[#posed + 1] = {
+          sprite = remote.sprite,
+          px = remote.px,
+          py = remote.py,
+          facing = remote.facing,
+          phase = remote:walkPhase(),
+          flip = remote.stepFlip,
+          gh = groundAt(state.map, remote.cellX, remote.cellY),
+          lift = 0,
+          colors = colors,
+        }
+      end
+    end
+  end
   return posed, me
 end
+
+VoxelScene._posesOf = posesOf -- named for the suite
 
 -- ------- the glint's drive
 --

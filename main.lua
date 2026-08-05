@@ -282,8 +282,14 @@ mod.content.render_pipelines:register("voxel", {
       -- else -- so the scale goes up with it, or the "!" bubble lands the
       -- right place at half the size.  project() already answers in canvas
       -- pixels, so only the scale needs saying.
-      ctx.drawFx(function(wx, wy) return Voxel3D.project(wx, 0, wy) end,
-                 ctx.scale * AntiAlias.factor())
+      -- The first two arguments retain the ground-plane (x, z) contract. An
+      -- optional third argument projects above-ground points for labels over
+      -- the remote-player billboards supplied by the engine's LAN overlay.
+      ctx.drawFx(function(wx, wz, wy)
+        return Voxel3D.project(wx, wy or 0, wz)
+      end,
+      ctx.scale * AntiAlias.factor(),
+      VoxelScene.projectBillboardTop)
       -- the horde's readout rides the same overlay, over the FX: health,
       -- ammunition, the crosshair and the banners, sized in the same
       -- supersampled canvas pixels everything else here is drawn in. A

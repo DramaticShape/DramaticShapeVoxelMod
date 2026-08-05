@@ -995,6 +995,79 @@ local VoxelScene = run.loader.exports.DRAMATIC_SHAPE.lib.require("VoxelScene")
 local modeColors = VoxelScene._modeColors
 T.check(type(modeColors) == "function", "the scene exposes its palette resolve")
 
+-- ------- LAN remotes join the voxel-only character pass
+
+do
+  local Game = require("src.core.Game")
+  local previousLan = Game.lanSession
+  local sprite = { id = "remote-sprite" }
+  local remote = {
+    map = "PALLET_TOWN", sprite = sprite,
+    px = 32, py = 48, cellX = 2, cellY = 3,
+    facing = "left", stepFlip = true,
+    walkPhase = function() return 1 end,
+  }
+  Game.lanSession = {
+    players = function()
+      return {
+        { player = remote },
+        { player = { map = "VIRIDIAN_CITY", sprite = sprite } },
+      }
+    end,
+  }
+  local map = {
+    id = "PALLET_TOWN",
+    inBounds = function() return false end,
+  }
+  local colors = { "world-palette" }
+  local posed = VoxelScene._posesOf(
+    { map = map, entities = {}, ghosts = {} },
+    function() return colors end)
+  Game.lanSession = previousLan
+
+  T.eq(#posed, 1, "the voxel pose list includes one same-map LAN remote")
+  T.eq(posed[1].sprite, sprite, "the remote keeps its LAN sprite")
+  T.eq(posed[1].px, 32, "the remote keeps its interpolated x")
+  T.eq(posed[1].py, 48, "the remote keeps its interpolated y")
+  T.eq(posed[1].facing, "left", "the remote keeps its facing")
+  T.eq(posed[1].phase, 1, "the remote keeps its walk phase")
+  T.eq(posed[1].flip, true, "the remote keeps its alternating step")
+  T.eq(posed[1].colors, colors, "the remote uses the current map palette")
+end
+
+-- The label anchor must project the transformed top of the sprite card, not
+-- move a fixed amount up the screen from its feet. Pin the orbit-camera case;
+-- first-person uses the same function after adding the card's yaw.
+do
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local Voxel3D = lib.require("Voxel3D")
+  local VoxelState = lib.require("VoxelState")
+  local previousProject = Voxel3D.project
+  local previousAngle = VoxelState.angle
+  local previousLean = VoxelScene.spriteLean
+  local projected
+  VoxelState.angle = math.pi / 4
+  VoxelScene.spriteLean = nil
+  Voxel3D.project = function(x, y, z)
+    projected = { x, y, z }
+    return 11, 22
+  end
+  local sx, sy = VoxelScene.projectBillboardTop(40, 56, 16)
+  Voxel3D.project = previousProject
+  VoxelState.angle = previousAngle
+  VoxelScene.spriteLean = previousLean
+
+  local offset = 16 / math.sqrt(2)
+  T.eq(sx, 11, "the label helper returns projected screen x")
+  T.eq(sy, 22, "the label helper returns projected screen y")
+  T.check(math.abs(projected[1] - 40) < 1e-9,
+    "an orbit billboard top remains centered in world x")
+  T.check(math.abs(projected[2] - offset) < 1e-9,
+    "the label rises by the leaned billboard's vertical component")
+  T.check(math.abs(projected[3] - (56 - offset)) < 1e-9,
+    "the label follows the leaned billboard's depth component")
+end
+
 -- a recognisable stand-in for a map's SGB zone palette: strongly blue, so
 -- "came through as SGB" is visible in the values themselves
 local sgbBlue = { { 248, 248, 248 }, { 96, 152, 232 },
