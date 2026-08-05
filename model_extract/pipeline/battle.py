@@ -28,9 +28,12 @@ CONTEXT_SLOTS = {
     165: ('idle', 'code',
           'The standby loop. func_8432B0A4 restores this slot whenever the Pokemon '
           'returns to neutral, and it resolves to animation 0 for all 151 species.'),
-    166: ('hit', 'data',
+    166: ('attack_default', 'data',
           'Resolves to animation 2 for 149/151 species, the same animation slots '
-          '178-181 use in the reaction paths.'),
+          '178-181 use in the reaction paths. Called "hit" until the move table '
+          'was read against it: it is the animation most of a species\' MOVES '
+          'play, the default attack rather than a damage reaction (the name has '
+          'to match lib/StadiumPack.lua\'s CONTEXT and StadiumBuild\'s CONTEXTS).'),
     167: ('faint', 'data',
           'The referenced animation always ends far from the standing pose - the '
           'model collapses to 0.03-0.84x its idle height, or leaves the frame '

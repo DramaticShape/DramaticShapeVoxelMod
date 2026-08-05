@@ -216,13 +216,14 @@ end
 
 StadiumBuild.stance = stance
 
--- Whether this species' standby loop is corrupt in the source data.
+-- Whether this species' standby loop is corrupt as extracted.
 --
--- A handful come out of the extraction with animations that throw bones
--- hundreds of units off the body -- Exeggutor, Tangela and Magmar, whose
--- channel streams the game's own index arithmetic evidently reads differently
--- from the way this does. Played, they look like a Pokemon coming apart; the
--- mod would rather stand them still.
+-- No species trips this today. Exeggutor, Tangela and Magmar used to, when
+-- the flags byte was misread and their hermite-keyframe animations were
+-- decoded as packed streams, throwing bones hundreds of units off the body.
+-- It stays as the guard against the next extraction bug: played, a broken
+-- idle looks like a Pokemon coming apart, and the mod would rather show
+-- the sprite fallback (see StadiumMon).
 --
 -- The test is deliberately narrow, because "differs from the bind pose" is NOT
 -- brokenness. It is asked only of the STANDBY loop -- the one animation that

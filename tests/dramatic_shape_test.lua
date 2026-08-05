@@ -5581,11 +5581,15 @@ for _, dex in ipairs({ 25, 6, 95, 143 }) do
   end
 end
 
--- the three species whose standby loop is corrupt in the source extraction
--- are marked to hold their bind pose instead of coming apart
-T.eq(Pack.load(126).staticPose, true,
-  "Magmar is held at its bind pose -- its source animations are broken")
-T.eq(pikachu.staticPose, false, "and a species with good data is not")
+-- No species is held at its bind pose any more. Magmar (with Pidgeot,
+-- Dodrio, Exeggutor and Tangela) uses the game's hermite-keyframe animation
+-- mode, which the extractor used to misread as packed streams -- the flags
+-- byte was read at +0, the always-zero high half of the u16 -- and the
+-- packer then declared their exploding standby loops corrupt. The broken-
+-- idle detector stays as the guard, so this asserts it no longer fires.
+T.eq(Pack.load(126).staticPose, false,
+  "Magmar animates -- its hermite animations decode correctly now")
+T.eq(pikachu.staticPose, false, "and a packed-stream species does too")
 end)()
 
 Pipelines.reset()
