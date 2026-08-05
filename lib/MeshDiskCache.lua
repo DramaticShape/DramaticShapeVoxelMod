@@ -18,7 +18,7 @@ local MeshDiskCache = {}
 --
 -- Including a build tag prevents older experimental files from being read
 -- after this persistent-cache implementation changes.
-MeshDiskCache.VERSION = "dsm-v2-dynamic-face-light"
+MeshDiskCache.VERSION = "dsm-v1-c31a26f"
 MeshDiskCache.DIRECTORY = "dramatic_shape/mesh_cache/" ..
                           MeshDiskCache.VERSION
 

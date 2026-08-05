@@ -108,7 +108,6 @@ Voxel3D.SWAY_PERIOD = 2.5
 
 local SHADER = [[
   varying float vShade;
-  varying float vFaceLight;
   varying vec3 vSun;          // this fragment's place in the sun's view
 #ifdef VOXEL_GRID
   // model space, one unit per voxel -- see VoxelGrid. Precision matters
@@ -129,35 +128,7 @@ local SHADER = [[
   attribute float VertexShade;
   attribute float VertexSway;  // this clump's wind phase (see SWAY_FORMAT)
   vec4 position(mat4 transform_projection, vec4 vertex_position) {
-    // VertexShade carries two values without growing the mesh format:
-    // integer part = face direction, fractional part = original AO/shade.
-    float faceId = floor(VertexShade + 0.0001);
-    vShade = clamp(fract(VertexShade) * 8.0, 0.0, 1.0);
-
-    vec3 objectNormal;
-
-    if (faceId < 1.5) {
-      objectNormal = vec3(1.0, 0.0, 0.0);
-    } else if (faceId < 2.5) {
-      objectNormal = vec3(-1.0, 0.0, 0.0);
-    } else if (faceId < 3.5) {
-      objectNormal = vec3(0.0, 1.0, 0.0);
-    } else if (faceId < 4.5) {
-      objectNormal = vec3(0.0, -1.0, 0.0);
-    } else if (faceId < 5.5) {
-      objectNormal = vec3(0.0, 0.0, 1.0);
-    } else {
-      objectNormal = vec3(0.0, 0.0, -1.0);
-    }
-
-    // Transform as a direction, never as a position. This also follows
-    // rotated props, characters and Stadium pieces correctly.
-    vec3 worldNormal = normalize(
-      (model * vec4(objectNormal, 0.0)).xyz
-    );
-
-    float facing = max(dot(worldNormal, lightDir), 0.0);
-    vFaceLight = faceAmbient + faceDiffuse * facing;
+    vShade = VertexShade;
 #ifdef VOXEL_GRID
     // MODEL space, deliberately: every mesh here is built a unit per
     // voxel in its own frame, so the seams ride the model however it is
@@ -294,9 +265,6 @@ local SHADER = [[
   }
 #endif
 
-  uniform vec3 lightDir;      // surface -> active sun or moon
-  uniform float faceAmbient; // light reaching faces turned away
-  uniform float faceDiffuse; // directional contribution
   uniform vec3 ghostColor;    // the flat silhouette colour
   uniform float ghost;        // 0 = shade normally, 1 = flatten to it
   uniform vec3 dayTint;       // the hour's light on the world; 1,1,1 = noon
@@ -315,8 +283,7 @@ local SHADER = [[
     if (p.a < 0.5) discard;
     // the hour's tint multiplies like the sun terms do: it is LIGHT, the
     // same warm or moonlit cast on every surface, not a palette swap
-    vec3 rgb = p.rgb * vShade * vFaceLight
-                   * sunlight(vSun) * dayTint;
+    vec3 rgb = p.rgb * vShade * sunlight(vSun) * dayTint;
 #ifdef VOXEL_GRID
     // darken what is there rather than painting a colour, so a seam across
     // dark grass and one across a white roof each stay in their own palette
@@ -1014,23 +981,6 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
   local tex = ShadowMap.texture()
   if tex then pcall(sh.send, sh, "sunMap", tex) end
   pcall(sh.send, sh, "sunDark", map and Voxel3D.SHADOW_ALPHA or 0)
-
-  -- ShadowMap.sunDir is the direction in which light travels. Surface
-  -- lighting needs the opposite direction, from the surface toward the
-  -- active sun or moon.
-  local travel = ShadowMap.sunDir()
-  local light = {
-    -(travel[1] or 0),
-    -(travel[2] or -1),
-    -(travel[3] or 0),
-  }
-
-  pcall(sh.send, sh, "lightDir", light)
-
-  -- Ambient keeps the far side readable in the four-colour art while the
-  -- directional component makes east/west/north/south visibly distinct.
-  pcall(sh.send, sh, "faceAmbient", 0.62)
-  pcall(sh.send, sh, "faceDiffuse", 0.38)
   pcall(sh.send, sh, "sunBias", ShadowMap.bias)
   local texel = 1 / ShadowMap.res
   pcall(sh.send, sh, "sunTexel", { texel, texel })
