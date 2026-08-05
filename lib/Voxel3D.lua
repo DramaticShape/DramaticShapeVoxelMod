@@ -48,6 +48,25 @@ Voxel3D.FORMAT = {
   { "VertexShade", "float", 1 },
 }
 
+-- The same, plus the wind phase of the clump a vertex belongs to. Only the
+-- meshes that actually bend carry it (the tall-grass rows), because the
+-- phase has to be CONSTANT across a whole tuft: a quad in this world is up
+-- to eight pixels wide, and a phase computed per vertex from its own
+-- position leans the two ends of one blade by different amounts and shears
+-- the blade instead of bending it. Baked per clump at build time, it is one
+-- number for every vertex of that tuft and the quad stays a quad.
+--
+-- The scene shader declares the attribute unconditionally, so the meshes
+-- built on the narrower FORMAT above simply never supply it -- and never
+-- read it either, since it is only touched while the wind is on and the
+-- wind is only on around these meshes.
+Voxel3D.SWAY_FORMAT = {
+  { "VertexPosition", "float", 3 },
+  { "VertexTexCoord", "float", 2 },
+  { "VertexShade", "float", 1 },
+  { "VertexSway", "float", 1 },
+}
+
 -- Face shading by direction id: top faces stay
 -- full brightness, sides step down so an extruded block reads as solid
 -- instead of a flat sticker, and the faces turned away from the sun are
@@ -69,6 +88,24 @@ Voxel3D.FACE_SHADE = {
   [6] = 0.68,   -- -Z north (away)
 }
 
+-- ---- wind ----
+--
+-- How far a blade's TIP leans, in world pixels. One, and it has to be a
+-- whole number: the vertex shader rounds the lean to the pixel grid the
+-- rest of this world is drawn on, so anything under half a pixel would
+-- never move at all and anything over one would tear a tuft off its root.
+Voxel3D.SWAY_PIXELS = 1
+
+-- The beat the lean SNAPS on, in steps per second, pinned to the engine's
+-- own 60Hz tile clock the way the water's crests are. Below the water's
+-- twelve on purpose: a blade has three states (left, still, right), so a
+-- faster beat reads as a flicker rather than as wind.
+Voxel3D.SWAY_FPS = 8
+
+-- Seconds for the wind to come round again. Long enough that a meadow is
+-- never caught doing the same thing twice in a glance.
+Voxel3D.SWAY_PERIOD = 2.5
+
 local SHADER = [[
   varying float vShade;
   varying vec3 vSun;          // this fragment's place in the sun's view
@@ -87,7 +124,9 @@ local SHADER = [[
   uniform vec3 eye;
   uniform float pull;
   uniform vec3 curve;         // xy = the focus in world XZ, z = k; 0 = off
+  uniform vec2 sway;          // x = pixels of lean, y = phase; 0 = off
   attribute float VertexShade;
+  attribute float VertexSway;  // this clump's wind phase (see SWAY_FORMAT)
   vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vShade = VertexShade;
 #ifdef VOXEL_GRID
@@ -108,6 +147,30 @@ local SHADER = [[
     // answered. (The pull below is excluded for the same reason: it is a
     // depth trick aimed at the camera's own buffer.)
     vSun = (sunVP * (sunModel * vertex_position)).xyz;
+    // Wind, on whatever pass asked for it (see Voxel3D.sway -- the tall
+    // grass rows). MODEL space decides how far a vertex leans: a tuft is
+    // built eight units tall from its own root, so y/8 pins the blade's
+    // foot still and gives the tip the whole amplitude, and a clump bends
+    // rather than sliding off its cell. WHEN it leans is the clump's own
+    // baked phase, so neighbouring tufts are caught at different moments
+    // and a gust rolls across a meadow instead of the field swinging as
+    // one board (see SWAY_FORMAT for why that is baked and not derived
+    // here from the vertex's own position).
+    //
+    // Quantised to whole world pixels, like the water's crests and for the
+    // same reason: this world has no half pixels anywhere else, and a
+    // blade leaning a third of one would only soften its own edge for a
+    // frame. So the lean SNAPS -- which is the Gen 1 idiom for movement.
+    //
+    // The sun lookup above is deliberately left at the still position.
+    // Grass casts no shadow (VoxelScene leaves it out of the sun pass), so
+    // this only decides where it RECEIVES one, and re-deriving the lean in
+    // the sun's frame to move that by a texel or two buys nothing.
+    if (sway.x > 0.0) {
+      float lift = clamp(vertex_position.y * 0.125, 0.0, 1.0);
+      float lean = sin(sway.y + VertexSway) * lift * sway.x;
+      w.x += floor(lean + 0.5);
+    }
     // The curved world (see WorldCurve): drop every vertex by the square
     // of how far its column stands from the camera's focus. Applied AFTER
     // the shadow lookup above and clear of the wireframe's model space, so
@@ -390,6 +453,17 @@ end
 function Voxel3D.newMesh(verts, map)
   if #verts == 0 then return nil end
   local ok, mesh = pcall(love.graphics.newMesh, Voxel3D.FORMAT, verts,
+                         "triangles", "static")
+  if not ok then return nil end
+  if map and #map > 0 then pcall(mesh.setVertexMap, mesh, map) end
+  return mesh
+end
+
+-- A mesh whose vertices also carry the wind phase of the CLUMP they belong
+-- to (see SWAY_FORMAT and Voxel3D.sway).
+function Voxel3D.newSwayMesh(verts, map)
+  if #verts == 0 then return nil end
+  local ok, mesh = pcall(love.graphics.newMesh, Voxel3D.SWAY_FORMAT, verts,
                          "triangles", "static")
   if not ok then return nil end
   if map and #map > 0 then pcall(mesh.setVertexMap, mesh, map) end
@@ -936,6 +1010,10 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
   pcall(sh.send, sh, "glassGlint", Voxel3D.glassGlint or 0)
   -- on until a sprite pass says otherwise, reset per frame like `ghost`
   pcall(sh.send, sh, "glassOn", 1)
+  -- still until a pass asks for wind, reset per frame for the same reason
+  -- `ghost` is: a scene that opened between sway(true) and sway(false)
+  -- would otherwise lean every wall it drew.
+  pcall(sh.send, sh, "sway", { 0, 0 })
   -- the curved world bends about the camera's focus, so the horizon keeps
   -- a fixed distance ahead of the player rather than sitting on the map.
   -- A placed camera may decline it outright (Voxel3D.camera.curve = 0).
@@ -1194,6 +1272,42 @@ end
 function Voxel3D.glass(on)
   if not (active and activeShader) then return end
   pcall(activeShader.send, activeShader, "glassOn", on and 1 or 0)
+end
+
+-- The wind's phase, off the ENGINE's tile-animation clock -- the same 60Hz
+-- counter the water's crests and the animated tiles run on, so everything
+-- that moves in this world moves off one number rather than drifting
+-- against each other. Floored to the sway beat: the value only changes on
+-- the frame a step begins.
+local function swayPhase()
+  -- lazily and through the mod namespace, as Water does: TerrainAtlas
+  -- reaches into the engine's renderer at load time, and nothing in a draw
+  -- path should depend on that having already happened.
+  local ok, frame = pcall(function()
+    return V.require("TerrainAtlas")._animFrame()
+  end)
+  if not (ok and type(frame) == "number") then return 0 end
+  local step = 60 / math.max(1, Voxel3D.SWAY_FPS)
+  local secs = math.floor(frame / step) * step / 60
+  return secs * (2 * math.pi / math.max(0.001, Voxel3D.SWAY_PERIOD))
+end
+
+Voxel3D._swayPhase = swayPhase   -- named for the suite
+
+-- Whether what is drawn next leans in the wind. Same shape as glass()
+-- above, and gated per DRAW for the same reason: the shader decides how
+-- far a vertex leans from its height in its OWN model, which is only the
+-- height of a blade for a mesh that is made of blades. Turned on around
+-- the tall-grass rows and off again straight after, so the walls, the
+-- roofs and the people drawn from the same shader stand still.
+function Voxel3D.sway(on)
+  if not (active and activeShader) then return end
+  if not on then
+    pcall(activeShader.send, activeShader, "sway", { 0, 0 })
+    return
+  end
+  pcall(activeShader.send, activeShader, "sway",
+        { Voxel3D.SWAY_PIXELS, swayPhase() })
 end
 
 function Voxel3D.endGhost()

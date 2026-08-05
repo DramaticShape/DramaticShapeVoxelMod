@@ -819,12 +819,17 @@ local function quadsMesh(quads)
     for i = 1, 4 do
       local c = q[i]
       local uv = q.uv and q.uv[i] or { q.u, q.v }
-      verts[#verts + 1] = { c[1], c[2], c[3], uv[1], uv[2], q.shade }
+      verts[#verts + 1] = { c[1], c[2], c[3], uv[1], uv[2], q.shade,
+                            q.sway or 0 }
     end
     Voxel3D.pushQuad(indices, n)
     n = n + 1
   end
-  return Voxel3D.newMesh(verts, indices)
+  -- these are the standing cutouts -- grass and flowers -- and the grass
+  -- rows bend in the wind, so they are built on the format that carries a
+  -- clump's phase. Flowers ride the same builder with a phase of zero and
+  -- are drawn outside the wind, so they cost one float and stand still.
+  return Voxel3D.newSwayMesh(verts, indices)
 end
 
 -- The tall-grass rows as their own mesh: VoxelScene draws it AFTER the

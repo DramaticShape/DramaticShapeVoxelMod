@@ -1126,11 +1126,14 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
   -- so the tuft rows keep exactly the characters' own depth handicap
   local lean = math.max(leanAngle(), 0.05)
   local pull = VoxelScene.pull(lean)
+  -- and the wind, for the length of these rows only (Voxel3D.sway)
+  Voxel3D.sway(true)
   Voxel3D.draw(ChunkMesher.grass(state.map), atlasFor(state.map), nil, pull)
   for _, nb in ipairs(state.neighbors or {}) do
     Voxel3D.draw(ChunkMesher.grass(nb.map), atlasFor(nb.map),
                  Mat4.translate(nb.ox, 0, nb.oy), pull)
   end
+  Voxel3D.sway(false)
   -- flower billboards: pulled like the characters and the grass, MINUS
   -- the depth of 8 world pixels along the view (8 sin a -- the camera
   -- looks along (0, -cos a, -sin a), so that is exactly one tile row of
