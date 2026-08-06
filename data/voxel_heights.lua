@@ -168,6 +168,10 @@ return {
     -- a round drawing stacked two cells high on one cell of plot (the
     -- Centers' potted plants): 32px of hull standing in its lower cell
     planter = 32,
+    -- the little trees (Celadon Gym's garden, the overworld's cuttable
+    -- tree): the round hull squashed front to back, 16px of drawn
+    -- elevation like every other one-cell tree drawing
+    sapling = 16,
     relief = 3,
     bookcase = 32,
     stair_e = 16,
@@ -199,13 +203,14 @@ return {
       -- outline, round in depth, so tree rows become rows of real canopies
       --
       -- The cuttable tree ($2D/$2E/$3D/$3E, the four tiles Cut deletes)
-      -- joins them: it is Celadon Gym's little tree redrawn pixel-for-
-      -- pixel on this atlas (same 146/256 silhouette, only canopy
-      -- highlight texels differ), and takes the identical hull -- the
-      -- scraggly canopy revolves into a gapped ball, the 2-4px trunk
-      -- into a thin round column, the root flare into a round mound.
-      -- It used to sit in the `prop` pool as a 5-voxel standee; see
-      -- GYM's cylinder entry for the reading.  Scanned: the 2x2 grid
+      -- takes the same hull SQUASHED: it is Celadon Gym's little tree
+      -- redrawn pixel-for-pixel on this atlas (same 146/256 silhouette,
+      -- only canopy highlight texels differ), so the two must stay one
+      -- model -- the scraggly canopy revolves into a gapped ball, the
+      -- 2-4px trunk into a thin round column, the root flare into a
+      -- round mound.  It used to sit in the `prop` pool as a 5-voxel
+      -- standee; see GYM's sapling entry for the reading and for what
+      -- sapling_squash does.  Scanned: the 2x2 grid
       -- occurs 32 times on this atlas across the towns and routes, and
       -- per-tile counts equal the grid count (32 hits for $2D alone),
       -- so no stray occurrence renders as a lone hull.  The same four
@@ -214,8 +219,9 @@ return {
       -- collisions, none of this entry's business.  Cut itself only
       -- swaps the map block to plain grass, so the pin never sees a
       -- cut stump.
-      cylinder = { 42, 43, 58, 59, 64, 65, 80, 81,
-                   45, 46, 61, 62 },
+      cylinder = { 42, 43, 58, 59, 64, 65, 80, 81 },
+      sapling = { 45, 46, 61, 62 },
+      sapling_squash = 50,
       -- the town sign (blockset 8's SE cell): a standing per-pixel slab
       -- 2 voxels thin, transparency respected -- never a solid box
       signpost = { 70, 71, 86, 87 },
@@ -357,25 +363,40 @@ return {
       -- -- PEWTER_GYM's walls and rock maze, and BRUNOS_ROOM's
       -- clusters.  DOJO shares gym.png but places none of them, so
       -- the pin is not copied there.
+      cylinder = { 44, 45, 46, 47,
+                   7, 8, 23, 24 },
       -- Celadon's three little trees ($40/$41 canopy over $50/$51
-      -- trunk) round out the same family: a scraggly canopy over a
-      -- 2-4px trunk flaring into a round root mound.  Every drawn row
-      -- states its own width, which is exactly what the hull revolves
-      -- -- the canopy turns into a ball with its drawn gaps kept, the
-      -- trunk into a thin round column, the mound into a round foot --
-      -- so the tree stands beside the hedge balls as a solid object
-      -- of the same construction.  It used to sit in the `prop` pool
-      -- ("a trunk is not round"), but the standee rendered as the
-      -- whole 16x16 cell extruded, background and all -- the extruded
-      -- picture -- and the trunk IS round; the hull reads it right.
+      -- trunk): a scraggly canopy over a 2-4px trunk flaring into a
+      -- round root mound.  Every drawn row states its own width, which
+      -- is exactly what the hull revolves -- the canopy turns into a
+      -- ball with its drawn gaps kept, the trunk into a thin round
+      -- column, the mound into a round foot.  They used to sit in the
+      -- `prop` pool ("a trunk is not round"), but the standee rendered
+      -- as the whole 16x16 cell extruded, background and all -- the
+      -- extruded picture -- and the trunk IS round; the hull reads it
+      -- right.  The same drawing is the overworld's cuttable tree (see
+      -- OVERWORLD's sapling entry); one drawing, one model.
+      --
+      -- sapling_squash 50 is the one AUTHORED number and the only knob
+      -- taste moves: the percent of its revolved depth every chord
+      -- keeps.  A full revolve (100) assumes the drawing's width is
+      -- also its depth, which is honest for the hedge balls and
+      -- boulders in the `cylinder` pool above but not for a tree --
+      -- the trunk is a stick, the crown is more air than wood, and at
+      -- full width the tree filled a whole cell of depth and read as a
+      -- boulder wearing bark.  50 halves it to an ellipse in plan;
+      -- the model stays round in section and centred on the cell.
+      -- The height is NOT authored: the class's 16 (see the `heights`
+      -- table at the top of this file) is the drawn elevation, which
+      -- is also the model's top plane, so anything riding a tree cell
+      -- lands right.
       -- Scanned: the 2x2 grid occurs 3 times on this atlas and only
       -- in CELADON_GYM -- cells (2,4), (7,5), (5,7) -- and per-tile
       -- counts equal the grid count (3 hits for $40 alone), so no
       -- stray occurrence renders as a lone hull.  DOJO shares gym.png
       -- and places none, so the pin is not copied there.
-      cylinder = { 44, 45, 46, 47,
-                   7, 8, 23, 24,
-                   64, 65, 80, 81 },
+      sapling = { 64, 65, 80, 81 },
+      sapling_squash = 50,
       -- Vermilion Gym's trash cans ($0B/$0C over $1B/$1C), the switch
       -- puzzle's fifteen cans plus the sixteenth beside the leader's
       -- platform.  An open galvanised bin in the 3/4 view, and its plan is
@@ -437,7 +458,7 @@ return {
       can_taper = 4,
       heights = { can = 9 },
       -- The statues.  (Celadon's trees $40/$41/$50/$51 lived here
-      -- too until they moved to the cylinder hull above.)
+      -- too until they moved to the sapling hull above.)
       prop = { 2, 56, 18, 19 },
       -- The Hall of Fame's recording machine, the one piece of real
       -- furniture in the tileset.  It is drawn 32px wide and THREE tile
@@ -1875,6 +1896,18 @@ return {
       -- 18/19) sitting in a WALKABLE cell, so flat floor until pinned.
       -- The 8px standee pool, seat height, as in Red's rooms.
       stool = { 2, 3, 18, 19 },
+      -- ...and the height a figure riding that cell stands at, which is
+      -- the SEAT and not the backrest: the chair's seat is drawn rows
+      -- 26-31, six of them, so 6.  All three Game Freak developers are
+      -- placed ON their chair cell (CELADON_MANSION_3F objects at (0,4),
+      -- (3,4) and (0,7)), and VoxelScene.groundAt reads this pin, not
+      -- the `mansion_computer_desk` model that now draws the chair -- at
+      -- the class default 8 they floated two voxels over the seat.  The
+      -- same reading INTERIOR's `stool = 5` carries for Bill's chair,
+      -- which is this drawing with one white margin column instead of
+      -- two; these four ids are the mansion desks' chairs and nothing
+      -- else on this atlas, so the override reaches only them.
+      heights = { stool = 6 },
       -- the potted palms: two cells of drawing (68/69 crown, 8/9 fronds,
       -- 70/71 stem, 24/25 pot), mostly silhouette, so the THIN standee
       -- pool -- the same numbers the generic HOUSE entry uses, and the
@@ -4236,6 +4269,89 @@ return {
         },
         roofRows = 28, roofBack = 24, roofFront = 0, roofCycle = { 2, 23 },
         slab = 3, frontEave = 0, ledge = nil,
+      },
+      -- F07c: the Game Freak office's COMPUTER DESK -- the writing desks
+      -- of CELADON_MANSION_2F cell (0,5) and CELADON_MANSION_3F cells
+      -- (0,3), (3,3) and (0,6).  scan.lua on the 4x4 grid returns those
+      -- four and nothing else, and each of the four ids that carry the
+      -- apron and chair rows (2/3/85/86, 18/19) occurs on this atlas ONLY
+      -- inside them -- so no stray cell can pick this model up.  (The
+      -- same ids are furniture on the HOUSE and FACILITY atlases; those
+      -- are different images and none of this entry's business.)
+      --
+      -- Rows 0-15 are BILL'S DESK, byte for byte.  A whole-crop diff of
+      -- these tiles against the interior atlas's 11/12/13/14 over
+      -- 27/28/29/30 comes back empty for all 512 pixels: the same
+      -- tabletop seen from above -- black rim, white highlight course,
+      -- grey field -- with the same terminal, cord and 2:1 isometric
+      -- computer drawn into it.  One drawing is one model, so the four
+      -- parts below are `bills_desk`'s verbatim; that entry carries the
+      -- readings (paper is flat, the keyboard's keys ride its top face,
+      -- `plan` = rx makes the computer a cube turned 45 and not a slab).
+      --
+      -- Only the FRONT is redrawn, and it is 6 rows where Bill's is 7:
+      --   15      the top's own black front edge.  This is the row the
+      --           lid replaces, so it opens the fascia exactly the way
+      --           Bill's row 16 does, and the desk stands 7 voxels to
+      --           his 8 -- measured, not chosen.
+      --   16-17   the #555 edge lip and the black seam under it: the
+      --           desktop's own rim, which is why they are `fascia` --
+      --           that band wraps every side, and a desktop's edge is
+      --           visible from all four.
+      --   18-21   the base: the left leg (the black/#555/black at
+      --           x0-x2), the open apron between, and the DRAWER
+      --           PEDESTAL at x20-x31 -- two #555 drawer fronts (rows
+      --           16-17 and 19-20) inside a black frame.  Each is a
+      --           non-black region sealed behind its own black outline
+      --           and under 24px, so the measured recess pass sinks it
+      --           one voxel and the frame stays proud: the drawer gaps
+      --           come off the pixels, nothing is authored.
+      -- Row 21 is the ground line and 22 is the measured one.  Rows
+      -- 22-23 are the desk's cast SHADOW, dithered into the checker
+      -- floor of the walkable cell in front, so the model builds none of
+      -- them -- they are floor, not furniture.
+      --
+      -- The chair is Bill's chair REDRAWN rather than the same pixels
+      -- (two white margin columns round the backrest panel where his
+      -- has one, and it sits at x4-x15 rather than x2-x13), but the same
+      -- object band for band -- rows 20-21 the backrest top seen from
+      -- above, 22-31 its elevation -- so it takes his part table with x
+      -- and `rise` moved: `rise` is the whole plane back down, because
+      -- the chair stands on the FLOOR and not on the desk.
+      --
+      -- Why the grid runs two tile rows past the desk: the artist drew
+      -- the apron into the WALKABLE cell in front (2/3 + 85/86), and
+      -- 2/3 also carry the chair's back.  A template claims whole TILES,
+      -- so reading the apron takes the chair with it -- which is what
+      -- makes the template owe it, exactly as at Bill's.  `desk.depth`
+      -- stops the desk box at its own two cells; the chair keeps the
+      -- front one.  The `table` pin on the top tiles and the `stool` pin
+      -- on 2/3/18/19 both stay as the degradation path, neutralized
+      -- wherever this stamps.
+      {
+        id = "mansion_computer_desk",
+        tiles = {
+          { 36, 37, 52, 53 },
+          { 64, 65, 66, 67 },
+          {  2,  3, 85, 86 },
+          { 18, 19, 17, 17 },
+        },
+        roofRows = 0, roofBack = 0, roofFront = 0, roofCycle = { 0, 0 },
+        slab = 0, frontEave = 0, ledge = nil, depth = 4,
+        -- the desk's own plot is its two cells; the grid runs on because
+        -- its apron and the CHAIR share tiles 2/3
+        desk = { fascia = { 15, 17 }, base = { 18, 21 }, depth = 2 },
+        parts = {
+          { kind = "flat", x = { 2, 15 }, rows = { 3, 7 } },   -- the notes
+          { kind = "upright", x = { 4, 15 }, top = { 8, 12 },
+            facade = { 12, 13 }, z = 8, depth = 6 },           -- keyboard
+          { kind = "upright", x = { 16, 19 }, top = { 8, 8 },
+            facade = { 8, 9 }, z = 8, depth = 2 },             -- the cord
+          { kind = "iso", x = { 19, 30 }, rows = { 1, 13 },
+            plan = 6, z = 9 },                                 -- the computer
+          { kind = "upright", x = { 4, 15 }, top = { 20, 21 },
+            facade = { 22, 31 }, rise = -7, z = 22, depth = 10 }, -- chair
+        },
       },
     },
 

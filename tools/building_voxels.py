@@ -697,6 +697,63 @@ TEMPLATES = {
         roof_rows=28, roof_back=24, roof_front=0, roof_cycle=(2, 23),
         slab=3, front_eave=0, ledge=None, tileset="mansion",
     ),
+    # F07c: the Game Freak office's computer desk -- CELADON_MANSION_2F
+    # cell (0,5) and CELADON_MANSION_3F cells (0,3), (3,3) and (0,6)
+    # (4 placements, scan.lua, and the four ids of its apron and chair
+    # row occur nowhere else on this atlas).
+    #
+    # Rows 0-15 are BILL'S DESK, byte for byte: the same tabletop seen
+    # from above with the same terminal, cord and isometric computer
+    # drawn into it (a whole-crop diff against the interior atlas's
+    # 11/12/13/14 + 27/28/29/30 comes back empty for every one of the
+    # 512 pixels). One drawing = one model, so those four parts are
+    # bills_desk's verbatim -- see that entry for the readings.
+    #
+    # Only the FRONT differs, and it is drawn 6 rows where Bill's is 7:
+    #   15      the top's own black front edge -- the row the lid
+    #           replaces, so it opens the fascia the way Bill's row 16
+    #           does and the desk stands 7 voxels rather than 8
+    #   16-17   the #555 edge lip and the black seam under it: the
+    #           desktop's own rim, so `fascia` (it wraps every side)
+    #   18-21   the base -- the left leg (the @#@ at x0-x2), the open
+    #           apron between, and the DRAWER PEDESTAL at x20-x31: two
+    #           #555 drawer fronts (rows 16-17 and 19-20) in a black
+    #           frame, which the measured recess pass sinks a voxel
+    #           each because they are non-black regions sealed behind
+    #           their own black outline. Row 21 is the ground line, and
+    #           the measured 22 is where the drawing puts the cast
+    #           shadow on the floor -- 22-23 are that shadow, dithered
+    #           floor in the walkable cell, and the model builds none
+    #           of it.
+    # The chair is Bill's chair REDRAWN, not the same pixels (a 2px
+    # white margin round the backrest panel where Bill's has 1px, and
+    # it sits at x4-x15 rather than x2-x13), but the same object band
+    # for band, so it takes that part table with x and rise adjusted:
+    # rows 20-21 the backrest top seen from above, 22-31 its elevation,
+    # rise = -7 putting it back on the floor, z 22 depth 10.
+    "mansion_computer_desk": dict(
+        tiles=[
+            [36, 37, 52, 53],
+            [64, 65, 66, 67],
+            [2, 3, 85, 86],
+            [18, 19, 17, 17],
+        ],
+        roof_rows=0, roof_back=0, roof_front=0, roof_cycle=(0, 0),
+        slab=0, front_eave=0, ledge=None, tileset="mansion", depth=4,
+        # the desk's own plot is its two cells; the grid runs on because
+        # its apron and the CHAIR share tiles 2/3
+        desk=dict(fascia=(15, 17), base=(18, 21), depth=2),
+        parts=[
+            dict(kind="flat", x=(2, 15), rows=(3, 7)),       # the notes
+            dict(kind="upright", x=(4, 15), top=(8, 12), facade=(12, 13),
+                 z=8, depth=6),                              # the keyboard
+            dict(kind="upright", x=(16, 19), top=(8, 8), facade=(8, 9),
+                 z=8, depth=2),                              # the cord
+            dict(kind="iso", x=(19, 30), rows=(1, 13), plan=6, z=9),
+            dict(kind="upright", x=(4, 15), top=(20, 21), facade=(22, 31),
+                 rise=-7, z=22, depth=10),                   # the chair
+        ],
+    ),
     # F08: the dining table of the generic town house -- 18 placements,
     # every home's cells (3,3):(4,4) -- the chief's long table (F07) at
     # two cells wide. The same read to the row: 0-23 the rounded

@@ -601,9 +601,22 @@ local PLANTER_SPRAY = { rows = 24, depth = 5 }
 -- states no profile, the honest reading is the one the thin standee pools
 -- exist for: the foliage stands as a per-pixel slab and keeps the airy
 -- silhouette that makes it read as leaves.
+-- `squash`, when given, is the PERCENT of its revolved depth every chord
+-- keeps -- 100 (or nil) is the identity, 50 halves the hull front to back.
+--
+-- A full revolve assumes the drawing's width is also its depth, which is
+-- true of a thing that really is round in plan (a hedge ball, a boulder,
+-- a trash can). A TREE is round in its canopy and thin at every other
+-- reading: the trunk is a stick, the crown is more air than wood, and the
+-- drawing is scenery seen from one side. Revolved at full width the little
+-- tree eats a whole cell of depth and reads as a boulder wearing bark, so
+-- the plan stays a circle and shrinks toward an ellipse: still round in
+-- section, still stepping pixel by pixel, just shallower. The chord is
+-- re-centred on the mid-plane, so the model neither slides nor detaches
+-- from the cells around it.
 local function roundTemplate(S, map, data, cx, cy, groundTiles, N, capRows,
                              NYin, spray, baseRows, bodyRows, wellRows,
-                             taperVox)
+                             taperVox, squash)
   -- The canvas is NX wide and NX DEEP (a hull is round in plan, so its
   -- depth is its width) by NY tall. NX = 16 is one cell, 32 a 2x2-cell
   -- group; NY defaults to NX -- a ball -- and NY = 2 * NX is a drawing
@@ -864,6 +877,7 @@ local function roundTemplate(S, map, data, cx, cy, groundTiles, N, capRows,
                                        + 0.5))
           end
           if spray and iy < spray.rows then n = math.min(n, spray.depth) end
+          if squash then n = math.max(1, math.floor(n * squash / 100 + 0.5)) end
           z0[i] = math.floor(N2 - n / 2 + 0.5)
           z1[i] = z0[i] + n
           -- a row the can's body band was repeated into wears the row it
@@ -974,6 +988,9 @@ local function roundTemplate(S, map, data, cx, cy, groundTiles, N, capRows,
               if hw * hw > dx * dx then
                 n = math.max(1, math.floor(2 * math.sqrt(hw * hw - dx * dx)
                                            + 0.5))
+              end
+              if squash then
+                n = math.max(1, math.floor(n * squash / 100 + 0.5))
               end
               z0[i] = math.floor(N2 - n / 2 + 0.5)
               z1[i] = z0[i] + n
@@ -1298,6 +1315,8 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
   -- voxels the body band is repeated up to
   local stumpCap, canCap, canBase, canHeight, canWell, canTaper
     = 6, 9, 4, 9, 5, 4
+  -- the sapling class's depth, as a PERCENT of the revolved chord
+  local saplingSquash = 50
   do
     local okP, prof = pcall(V.data, "voxel_heights")
     local entry = okP and type(prof) == "table" and prof.tilesets
@@ -1319,6 +1338,9 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
     end
     if entry and type(entry.can_taper) == "number" then
       canTaper = entry.can_taper
+    end
+    if entry and type(entry.sapling_squash) == "number" then
+      saplingSquash = entry.sapling_squash
     end
   end
 
@@ -1439,13 +1461,19 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
         local tall = s.class == "can" and canHeight or nil
         local well = s.class == "can" and canWell or nil
         local taper = s.class == "can" and canTaper or nil
+        -- 100% is the full revolve, so it is the identity: never signed
+        -- into the cache key, and never passed, by a class that has no
+        -- squash of its own
+        local squash = (s.class == "sapling" and saplingSquash ~= 100)
+                       and saplingSquash or nil
         local ground = false
         if data then
           local sig = tsid .. (cap and ("|c" .. cap) or "")
             .. (base and ("|b" .. base) or "")
             .. (tall and ("|h" .. tall) or "")
             .. (well and ("|w" .. well) or "")
-            .. (taper and ("|t" .. taper) or "") .. "|"
+            .. (taper and ("|t" .. taper) or "")
+            .. (squash and ("|q" .. squash) or "") .. "|"
             .. gsig .. "|" .. table.concat({
             S.tileAt[k], S.tileAt[keyOf(cx * 2 + 1, cy * 2)],
             S.tileAt[keyOf(cx * 2, cy * 2 + 1)],
@@ -1454,7 +1482,7 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
           if not tpl then
             local tq, tbg = roundTemplate(S, map, data, cx, cy,
                                           groundTiles, 16, cap, nil, nil,
-                                          base, tall, well, taper)
+                                          base, tall, well, taper, squash)
             tpl = { quads = tq, bg = tbg }
             roundCache[sig] = tpl
           end
