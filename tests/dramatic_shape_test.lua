@@ -319,7 +319,7 @@ local order = {}
 for i, row in ipairs(grouped) do order[row.id] = i end
 T.check(order["pipeline:tiltshift"] < order["DRAMATIC_SHAPE:grid"],
   "the mode's settings follow its pipeline rows")
-T.eq(order["DRAMATIC_SHAPE:battles"] - order["pipeline:tiltshift"], 4,
+T.eq(order["DRAMATIC_SHAPE:battles"] - order["pipeline:tiltshift"], 5,
   "and sit in one unbroken block, not scattered to the end of the list")
 T.check(order["void_fill"] > order["DRAMATIC_SHAPE:battles"],
   "with the engine's own later rows still after them")
@@ -404,18 +404,23 @@ local hookedRows = Runtime.call("ui.options.rows", function(_, r) return r end,
 -- (nothing to store, nothing for the mod manager to persist) and is offered
 -- on every platform, saying WHERE? rather than IMPORT where there is no file
 -- dialog to open
-T.eq(#hookedRows, 10, "the options hook added a row per setting, plus the "
+T.eq(#hookedRows, 11, "the options hook added a row per setting, plus the "
   .. "STADIUM ROM action row")
 local grid, curve, water = hookedRows[2], hookedRows[3], hookedRows[4]
-local battles, backRow, daytime = hookedRows[5], hookedRows[6], hookedRows[7]
--- the AA row is hookedRows[8]; it is read in its own block below, because
--- this chunk is one main function and has 200 local slots to spend
+local battles, backRow, daytime = hookedRows[6], hookedRows[7], hookedRows[8]
+-- the FOREST FX row is hookedRows[5] and AA hookedRows[9]; both are read
+-- where they are used rather than named here, because this chunk is one
+-- main function and has 200 local slots to spend
 T.eq(water.label, "WATER", "the water row carries its label")
 T.eq(water.value(), "FULL",
   "and defaults to FULL -- reflections are the point of having the row")
 water.step({ save = { options = {} }, mods = { modOptions = {} } }, 1)
 T.eq(water.value(), "SKY",
   "stepping down drops the screen-space march and keeps the sky, sun and moon")
+T.eq(hookedRows[5].label, "FOREST FX", "the atmosphere row carries its label")
+T.eq(hookedRows[5].value(), "FULL",
+  "and defaults to FULL -- it only spends anything on a map with an "
+  .. "atmosphere entry, which is one forest today")
 T.eq(daytime.label, "DAYTIME", "the day/night row carries its label")
 T.eq(daytime.value(), "SYNC",
   "and defaults to SYNC -- no value set follows the clock on the wall")
@@ -499,7 +504,7 @@ do
 local AntiAlias = run.loader.exports.DRAMATIC_SHAPE.lib.require("AntiAlias")
 local VoxelGrid = run.loader.exports.DRAMATIC_SHAPE.lib.require("VoxelGrid")
 local aaGame = { save = { options = {} }, mods = { modOptions = {} } }
-local aa = hookedRows[8]
+local aa = hookedRows[9]
 T.eq(aa.label, "AA", "the anti-aliasing row carries its label")
 T.eq(aa.value(), "OFF",
   "and starts off -- supersampling is a cost knob, and a mod must not spend "
@@ -4062,6 +4067,92 @@ T.check(not DayNight.isCanopy({ id = "MT_MOON_1F" }),
 T.check(not DayNight.isCanopy({ id = "PALLET_TOWN" }),
   "and an outdoor town is already the clock's in full")
 T.check(not DayNight.isCanopy(nil), "no map, no canopy")
+end
+
+-- ------- the air under the canopy
+--
+-- ForestAtmos hangs an INVISIBLE canopy above the forest's real trees and
+-- lets light down through it: fog for the scene shader, a volumetric
+-- march for the beams (GPU-only, not checkable here), colour and strength
+-- following the clock. Everything checkable without a GPU is checked:
+-- the authored table, the hour's ramp, and the seeded particle deal --
+-- which must come out identical on every visit.
+do
+local ForestAtmos =
+  run.loader.exports.DRAMATIC_SHAPE.lib.require("ForestAtmos")
+local DayNight = run.loader.exports.DRAMATIC_SHAPE.lib.require("DayNight")
+
+-- the authored table
+local cfg = ForestAtmos.configFor("VIRIDIAN_FOREST")
+T.check(cfg ~= nil, "Viridian Forest has an atmosphere entry")
+T.check(cfg and (cfg.canopyY or 0) > 32,
+  "whose invisible canopy hangs ABOVE the carved tree hulls (y = 32) -- "
+  .. "a ray is alpha zero at the canopy and only fades in below it")
+T.check(ForestAtmos.configFor("PALLET_TOWN") == nil,
+  "a map without an entry has no atmosphere at all")
+T.check(ForestAtmos.configFor(nil) == nil, "and no map id does not crash")
+
+-- the hour's ramp: gold spears by day, silver rays by night, both dying
+-- back through the twilight handover
+local fmap = { id = "VIRIDIAN_FOREST" }
+local day = ForestAtmos.frame(fmap, DayNight.T.day)
+local night = ForestAtmos.frame(fmap, DayNight.T.night)
+local dusk = ForestAtmos.frame(fmap, DayNight.T.dusk)
+T.check(day and night and dusk, "the forest answers at every pin")
+T.check(day.rayColor[1] > day.rayColor[3],
+  "the day's rays are sun-gold: more red than blue")
+T.check(night.rayColor[3] > night.rayColor[1],
+  "the night's are moon-silver: more blue than red")
+T.check(dusk.rayAlpha < day.rayAlpha and dusk.rayAlpha < night.rayAlpha,
+  "and the twilight is the dim handover between the two")
+T.check(day.fog.density > 0 and night.fog.density > 0,
+  "the haze never lifts entirely, day or night")
+T.check(day.moteLevel > 0.5 and day.fireflyLevel < 0.05,
+  "pollen drifts through the day's beams, with no fireflies out")
+T.check(night.fireflyLevel > 0.5 and night.moteLevel < 0.05,
+  "and the night shift trades them")
+
+-- the seeded deal: the same particles on every visit (the beams place
+-- themselves -- they are marched from the shadow map, not dealt)
+local tcfg = { canopyY = 56, fadeTo = 28, seed = 77,
+               motes = { count = 12 }, fireflies = { count = 6 } }
+local a = ForestAtmos.layout(tcfg, 320, 320)
+local b = ForestAtmos.layout(tcfg, 320, 320)
+T.eq(#a.motes, 12, "the pollen musters at authored strength")
+T.eq(#a.flies, 6, "the fireflies too")
+local same = true
+for i = 1, #a.motes do
+  local m1, m2 = a.motes[i], b.motes[i]
+  same = same and m1.x == m2.x and m1.y == m2.y and m1.z == m2.z
+end
+T.check(same, "and the deal comes out identical on every visit")
+local under = true
+for _, m in ipairs(a.motes) do
+  if m.y >= tcfg.canopyY then under = false end
+end
+T.check(under, "everything drifts BELOW the canopy it lives under")
+
+-- the tuning override, the same handle arena_editor holds on battles
+ForestAtmos.setOverride("PALLET_TOWN", { canopyY = 40, fog = {} })
+T.check(ForestAtmos.configFor("PALLET_TOWN") ~= nil,
+  "an override stages an atmosphere a driver can tune live")
+ForestAtmos.setOverride("VIRIDIAN_FOREST", false)
+T.check(ForestAtmos.configFor("VIRIDIAN_FOREST") == nil,
+  "false is meaningful: this map has none, whatever the file says")
+ForestAtmos.setOverride("PALLET_TOWN", nil)
+ForestAtmos.setOverride("VIRIDIAN_FOREST", nil)
+T.check(ForestAtmos.configFor("VIRIDIAN_FOREST") ~= nil
+        and ForestAtmos.configFor("PALLET_TOWN") == nil,
+  "and nil hands both back to the authored table")
+
+-- the row: OFF is the ladder's last rung and the frame answers nothing
+T.eq(ForestAtmos.setting.values[1], "full",
+  "the atmosphere defaults to FULL -- it costs a handful of quads and "
+  .. "exists on one map")
+ForestAtmos.setting:sync("off")
+T.check(ForestAtmos.frame(fmap, DayNight.T.day) == nil,
+  "OFF answers no frame at all: no fog uniform, no draw, no spend")
+ForestAtmos.setting:sync("full")
 end
 
 -- ------- a shadow keeps hold of the feet that throw it

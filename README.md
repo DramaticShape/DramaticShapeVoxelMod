@@ -213,8 +213,6 @@ alongside.
 
 ## Licenses
 
-This mod is released under the **MIT License** — see [`LICENSE`](LICENSE).
-
 It redistributes one third-party binary:
 
 - **`assets/vr/openxr_loader.dll`** — the Khronos OpenXR loader
