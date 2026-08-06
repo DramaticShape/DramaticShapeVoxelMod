@@ -1246,6 +1246,22 @@ def profile(sp, t):
     wall_h = ground - t["roof_rows"]
     ytop = wall_h - 1 + t["slab"]
 
+    # The row a column's roof SURFACE may sink to. `top[x]` is the
+    # silhouette cap -- the black the drawing closes its shape with -- and
+    # the depth map spends most of a tapered column's depth above it, so a
+    # clamp onto `top[x]` paints that one outline pixel across the slope
+    # and the courses beat against it. The surface belongs on the first
+    # PAINTED row instead, which is the same thing the side faces already
+    # do when the drawing's own pixel is the outline.
+    surface_top = []
+    for x in range(W):
+        y = top[x]
+        while (y < t["roof_rows"] and inside(x, y)
+               and sp["col"][y][x] == BLACK):
+            y += 1
+        surface_top.append(y if y < t["roof_rows"] and inside(x, y)
+                           else top[x])
+
     # Recesses: the panes the art seals behind a black frame. Non-black
     # pixels of the facade split into components across the black outline;
     # a component small enough to be a window or a doorway sinks one voxel.
@@ -1287,7 +1303,8 @@ def profile(sp, t):
     # Depth is the PLOT. For a whole-drawing building that is the grid
     # itself; `depth` (in tile rows) names it when the grid runs past the
     # plot onto ground the drawing merely stands its legs on.
-    return dict(top=top, wall_h=wall_h, ytop=ytop, recess=recess,
+    return dict(top=top, surface_top=surface_top,
+                wall_h=wall_h, ytop=ytop, recess=recess,
                 inside=inside,
                 # `depth` names the plot in TILE ROWS, which is the right
                 # grain for a building. `depth_px` names it in voxels, for
@@ -1697,6 +1714,29 @@ def build_desk_set(sp, pr, t):
     return vox
 
 
+def roof_surface_row(pr, t):
+    """Which drawn row the roof surface wears at column x, depth z.
+
+    The drawing looks at the roof from the north, so its rows ARE depth: the
+    rims map one row per voxel and the middle cycles a run whose period is
+    the course rhythm. A tapered column's band starts lower down the
+    drawing, and the row it wears is lifted to stay inside it."""
+    z0, z1 = 0, pr["D"] - 1 + t["front_eave"]
+    back, front = t["roof_back"], t["roof_front"]
+    c0, c1 = t["roof_cycle"]
+    rows, floor = t["roof_rows"], pr["surface_top"]
+
+    def depth_row(z):
+        df, db = z - z0, z1 - z             # from the north / the south edge
+        if df < back:
+            return df                       # north rim: the drawing's top rows
+        if db < front:
+            return rows - 1 - db            # south rim: fascia and eave course
+        return c0 + (df - c0) % (c1 - c0 + 1)
+
+    return (lambda x, z: max(depth_row(z), floor[x])), z0, z1
+
+
 def build(sp, pr, t):
     """The voxel model. Order is load-bearing: walls, ledge, recesses, then
     the roof solid overwrites what it intersects and the walls are trimmed
@@ -1775,17 +1815,7 @@ def build(sp, pr, t):
         vox.pop((sx, pr["ground"] - 1 - sy, D - 1), None)
 
     # ---- roof: flat top over the plateau, stepped diagonal ends
-    z0, z1 = 0, D - 1 + t["front_eave"]
-    back, front = t["roof_back"], t["roof_front"]
-    c0, c1 = t["roof_cycle"]
-
-    def roof_sy(z):
-        df, db = z - z0, z1 - z             # from the north / the south edge
-        if df < back:
-            return df                       # north rim: the drawing's top rows
-        if db < front:
-            return t["roof_rows"] - 1 - db  # south rim: fascia and eave course
-        return c0 + (df - c0) % (c1 - c0 + 1)
+    surface_row, z0, z1 = roof_surface_row(pr, t)
 
     shade_px = {}
     for sy in range(H):
@@ -1797,10 +1827,7 @@ def build(sp, pr, t):
         tt = T(x)
         for z in range(z0, z1 + 1):
             outer = x == x0d or x == x1d or z == z0 or z == z1
-            # the slope's texture is the drawing's own: clamping into the
-            # column's first drawn row keeps flank battens running down the
-            # slope instead of falling off the silhouette
-            sy = max(roof_sy(z), pr["top"][x])
+            sy = surface_row(x, z)
             for y in range(tt - slab + 1, tt + 1):
                 if y == tt and not outer:
                     put(x, y, z, x, sy)
@@ -2042,6 +2069,19 @@ def verify_roof(vox, pr, t):
         # flat: one level roof the whole drawn span, give or take the
         # drawing's own corner rounding
         assert all(ytop - v <= 1 for v in prof), "the flat roof is not level"
+
+    # The surface is surface, not outline. `top[x]` is the column's own
+    # silhouette cap -- the black the drawing closes the shape with, the
+    # same black measure() already refuses to let stand as a wall's side
+    # face -- so a surface that samples it promotes a boundary decoration
+    # into texture. A tapered column's cap sits well down the band, where
+    # the depth map spends most of the roof's depth above it.
+    surface_row, sz0, sz1 = roof_surface_row(pr, t)
+    for x in roofed[1:-1]:
+        for z in range(sz0 + 1, sz1):
+            assert surface_row(x, z) != top[x], \
+                f"roof surface wears the silhouette cap at {x},{z} " \
+                f"(row {top[x]})"
 
     # every wall column carries roof over it -- and a column the roof never
     # reaches carries nothing at all, rather than being silently trimmed away
