@@ -303,7 +303,11 @@ end
 -- first drawn in.
 local function shadowSignature(state, arena, terrain, nbMesh, token)
   local host = arena.map or state.map
+  -- `turn` is in the signature with the corner and the shape: the same corner
+  -- turned a quarter is a different footprint standing on different ground,
+  -- and a cast kept from the other one freezes the shadows across it
   local parts = { "battle", host.id, arena.x, arena.y, arena.shape,
+                  tostring(arena.turn or 0),
                   tostring(terrain), tostring(token or 0),
                   -- the cycle keeps running through a fight, and an arena lit
                   -- from somewhere new must be re-cast from there
@@ -475,6 +479,17 @@ function BattleScene.render(state, arena, textures, token)
   -- no glint in the arena: the drift is the shot breathing, not the player
   -- moving, and a shimmer on background windows would fight the mons
   Voxel3D.glassGlint = 0
+  -- the host floor's atmosphere reaches the staged shot at HALF density --
+  -- a fight in Viridian Forest sits in the same haze the walk there did,
+  -- thinned so neither mon goes soft -- and its god rays stay out of it:
+  -- this camera is low and long, and a bright blade across a combatant
+  -- reads as a rendering fault, not weather. nil almost everywhere.
+  local ForestAtmos = V.require("ForestAtmos")
+  local atmos = ForestAtmos.frame(host)
+  Voxel3D.fog = atmos and { color = atmos.fog.color,
+                            density = atmos.fog.density * 0.5,
+                            start = atmos.fog.start,
+                            heightK = atmos.fog.heightK } or nil
 
   -- A B RUNG stands the fight on two carried discs against the sky, with no
   -- map in the shot at all (see StadiumStage). Everything below still runs --

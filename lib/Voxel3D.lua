@@ -72,6 +72,7 @@ Voxel3D.FACE_SHADE = {
 local SHADER = [[
   varying float vShade;
   varying vec3 vSun;          // this fragment's place in the sun's view
+  varying float vFog;         // how deep into the map's haze it stands
 #ifdef VOXEL_GRID
   // model space, one unit per voxel -- see VoxelGrid. Precision matters
   // here in a way it does not for a colour: the seam is the FRACTIONAL
@@ -87,6 +88,7 @@ local SHADER = [[
   uniform vec3 eye;
   uniform float pull;
   uniform vec3 curve;         // xy = the focus in world XZ, z = k; 0 = off
+  uniform vec4 fogInfo;       // density, start, heightK; density 0 = clear
   attribute float VertexShade;
   vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vShade = VertexShade;
@@ -108,6 +110,19 @@ local SHADER = [[
     // answered. (The pull below is excluded for the same reason: it is a
     // depth trick aimed at the camera's own buffer.)
     vSun = (sunVP * (sunModel * vertex_position)).xyz;
+    // THE MAP'S HAZE (see ForestAtmos): how much fog stands between the
+    // eye and this vertex -- distance dissolves into it, altitude climbs
+    // out of it. Worked out on the FLAT world like the shadow lookup
+    // above (the curve is a trick played on the viewer, not weather),
+    // and per VERTEX: on meshes built a face per voxel the interpolated
+    // answer is indistinguishable from per-fragment fog at a fraction of
+    // the cost.
+    vFog = 0.0;
+    if (fogInfo.x > 0.0) {
+      float fogRun = max(0.0, length(w.xyz - eye) - fogInfo.y);
+      vFog = (1.0 - exp(-fogInfo.x * fogRun))
+             * exp(-max(w.y, 0.0) * fogInfo.z);
+    }
     // The curved world (see WorldCurve): drop every vertex by the square
     // of how far its column stands from the camera's focus. Applied AFTER
     // the shadow lookup above and clear of the wireframe's model space, so
@@ -205,6 +220,7 @@ local SHADER = [[
   uniform vec3 ghostColor;    // the flat silhouette colour
   uniform float ghost;        // 0 = shade normally, 1 = flatten to it
   uniform vec3 dayTint;       // the hour's light on the world; 1,1,1 = noon
+  uniform vec3 fogColor;      // what the haze is made of (see Voxel3D.fog)
   uniform Image glassMask;    // opaque where the atlas texel is window glass
   uniform vec2 glassSize;     // the mask's dimensions: tc -> atlas texels
   uniform float glassNight;   // 0 = daylight .. 1 = the lamps are on
@@ -256,6 +272,11 @@ local SHADER = [[
       vec3 lamp = vec3(1.0, 0.84, 0.5) * (0.5 + 0.55 * shine);
       rgb = mix(pane, lamp, glassNight * glass);
     }
+    // the haze stands between the eye and the SURFACE, so it lands after
+    // every surface term -- sun, seams, glass -- and before only the
+    // ghost, which must stay one solid readable shape whatever the
+    // weather (see below)
+    rgb = mix(rgb, fogColor, vFog);
     // The hidden player is a SHAPE, not a dimmed picture of itself. Tinting
     // through `color` could only multiply the sprite's own pixels, which
     // darkens each one by its own amount and keeps the character's internal
@@ -687,6 +708,14 @@ end
 -- answers it, so a caller that never does draws exactly what it always drew.
 Voxel3D.tint = { 1, 1, 1 }
 
+-- The map's haze, set the same way (VoxelScene and BattleScene ask
+-- ForestAtmos, who knows which maps have weather): a table of
+-- { color = {r,g,b}, density, start, heightK }, or nil for a clear day.
+-- nil -- the default -- sends density 0, so a caller that never heard of
+-- fog draws exactly what it always drew, and no pass can inherit the
+-- last one's weather.
+Voxel3D.fog = nil
+
 -- The window-glass pass, set the same way and for the same reason: the
 -- MASK belongs to the map's tileset (GlassMask.texture) and how lit the
 -- panes are belongs to the hour and to being outdoors at all
@@ -922,6 +951,12 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
   pcall(sh.send, sh, "ghostColor", Voxel3D.GHOST_COLOR)
   -- the hour's light, as the caller last set it (see Voxel3D.tint)
   pcall(sh.send, sh, "dayTint", Voxel3D.tint or { 1, 1, 1 })
+  -- and the map's haze (see Voxel3D.fog), density 0 when there is none
+  local fog = Voxel3D.fog
+  pcall(sh.send, sh, "fogColor", (fog and fog.color) or { 0, 0, 0 })
+  pcall(sh.send, sh, "fogInfo", fog and
+        { fog.density or 0, fog.start or 0, fog.heightK or 0, 0 }
+        or { 0, 0, 0, 0 })
   -- the window glass: the tileset's mask (or the blank -- the sampler is
   -- declared either way, and unbound is a driver-dependent crash), how lit
   -- the panes are, and the movement-fed glint as the caller last set it
@@ -1123,6 +1158,25 @@ function Voxel3D.endWater()
   if not active then return end
   pcall(love.graphics.setCanvas, depthTarget())
   pcall(love.graphics.setDepthMode, "lequal", true)
+  love.graphics.setColor(1, 1, 1, 1)
+  if activeShader then love.graphics.setShader(activeShader) end
+end
+
+-- A custom shader for the length of a draw, inside the pass. What makes
+-- this a pair rather than a bare setShader at the call site is the way
+-- BACK: the scene shader this pass bound is module-local (activeShader,
+-- above), so only this file can restore it -- the same restore endWater
+-- performs, without the canvas shuffle. Answers false when there is no
+-- pass to come back to, and the caller skips its draw entirely.
+function Voxel3D.beginEffect(shader)
+  if not (active and shader) then return false end
+  love.graphics.setShader(shader)
+  love.graphics.setColor(1, 1, 1, 1)
+  return true
+end
+
+function Voxel3D.endEffect()
+  if not active then return end
   love.graphics.setColor(1, 1, 1, 1)
   if activeShader then love.graphics.setShader(activeShader) end
 end

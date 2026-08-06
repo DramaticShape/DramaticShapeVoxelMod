@@ -90,6 +90,7 @@ local BattleExit = V.require("BattleExit")
 local DayNight = V.require("DayNight")
 local DayTint = V.require("DayTint")
 local Water = V.require("Water")
+local ForestAtmos = V.require("ForestAtmos")
 local AntiAlias = V.require("AntiAlias")
 local FirstPerson = V.require("FirstPerson")
 local FreeMove = V.require("FreeMove")
@@ -191,6 +192,9 @@ mod.content.render_pipelines:register("voxel", {
     -- battles and menus, and a CYCLE evening falls mid-fight exactly as it
     -- would mid-walk
     DayNight.update(dt)
+    -- the atmosphere's own clock (shaft shimmer, drifting motes), on the
+    -- same tick so the beams keep breathing through a dialog box
+    ForestAtmos.update(dt)
     -- The overworld battle rides this hook rather than owning a pipeline of
     -- its own, because it owns no pass of the FRAME: it draws under a battle
     -- screen the engine composites, which is not a stage the registry has.
@@ -302,6 +306,7 @@ mod.content.render_pipelines:register("voxel", {
     OverworldBattle.invalidate()
     AntiAlias.invalidate()
     ChunkMesher.invalidate()   -- no map id = every cached mesh
+    ForestAtmos.invalidate()   -- shaft/particle meshes and shader sentinels
     VR.invalidate()            -- the mirror, and FBO ids of dead canvases
   end,
 })
@@ -427,6 +432,18 @@ local SETTINGS = {
     .. "shoreline, the trees and the buildings behind it; SKY is the sky, "
     .. "the sun and the moon alone, which is most of the look for a "
     .. "fraction of the cost." },
+  -- `full` for the AA reason: additive shafts are fill rate, and under 4X
+  -- supersampling that is a question about the hardware, not the look.
+  { ForestAtmos.setting,
+    "The air of the deep woods (Viridian Forest): a ground haze, and "
+    .. "volumetric light let down through the unseen canopy overhead -- "
+    .. "gold spears of sun by day, silver moon rays at night, pollen "
+    .. "drifting through the beams and fireflies once they cool. LOW "
+    .. "keeps the haze, halves the beam march and stands the particles "
+    .. "down. On a phone the row offers LOW alone: the beams need a "
+    .. "depth texture the pass can read back, and no mobile driver here "
+    .. "grants one.",
+    full = true },
   -- `full` marks a row FULL does not take away. FULL owns the diorama's own
   -- knobs; what a battle is drawn over, and how it is framed, are not that.
   -- Off the OPTIONS menu while VR is on: the headset REQUIRES staged
@@ -914,6 +931,9 @@ mod.events:on("map.reloaded", function(payload)
   if payload and payload.reason == "colors" then return end
   local mapId = payload and (payload.mapId or (payload.map and payload.map.id))
   if mapId then ChunkMesher.invalidate(mapId) end
+  -- the atmosphere's layout stands on the same carved stamps the meshes
+  -- do, so it goes stale on exactly the same event
+  if mapId then ForestAtmos.invalidate(mapId) end
 end)
 
 -- ------- rows come and go, so the menu has to notice
