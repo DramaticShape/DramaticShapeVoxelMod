@@ -2909,6 +2909,109 @@ T.check(math.abs(cex - 124) < 1 and math.abs(cey - 56) < 1,
 T.check(span(closeRig, shot.player) < span(rig, shot.player),
   "the mons render smaller on it, which is what it trades for fitting")
 
+-- ------- the quarter turns
+--
+-- An arena may be laid down any of the four ways (BattleArena's `turn`), and
+-- the whole claim of the feature is that this is a fact about the GROUND and
+-- never about the shot: the footprint, the two mons and the camera turn
+-- together, so the pair land on the same two anchors at the same size and
+-- only what is behind them changes.
+--
+-- Asserted by REPROJECTING each turn through the real rig, exactly the way
+-- the unturned shot is checked above -- so a rig retune, or a sign error in
+-- the rotation, says so here rather than in a screenshot nobody takes.
+--
+-- In its own scope: the suite's main chunk sits at LuaJIT's 200-active-local
+-- ceiling, and every local below would be one more of them. The leading
+-- semicolon is the file's own convention -- without it the previous
+-- statement's `)` and this `(` parse as one call.
+;(function()
+  local corner = { shot.x, shot.y }
+  -- How wide a mon's own square comes out, measured ACROSS the arena's axis.
+  -- `span` above offsets along world X, which is across the axis only while
+  -- the arena is standing the way the mode was drawn; on the odd quarters the
+  -- axis IS X, so offsetting along it would measure the square's depth --
+  -- foreshortened by a camera that is looking almost straight down it -- and
+  -- report a shrinking mon that is nothing of the kind.
+  local function acrossSpan(cam, point, turn)
+    local d = (turn % 180 == 0) and { 8, 0 } or { 0, 8 }
+    local a = project(cam, { point[1] - d[1], point[2] - d[2] })
+    local b = project(cam, { point[1] + d[1], point[2] + d[2] })
+    return math.abs(b - a)
+  end
+  for _, turn in ipairs({ 0, 90, 180, 270 }) do
+    BattleCam.reset()
+    local a = BattleArena.at(corner[1], corner[2], "wide", turn)
+    T.check(a ~= nil, ("the wide arena places at turn %d"):format(turn))
+    T.eq(a.turn, turn, ("and carries the turn it was placed at (%d)"):format(turn))
+
+    -- the footprint swaps its reach on the odd quarters, which is the whole
+    -- reason a corridor takes one way round and refuses the other
+    local wantW = (turn % 180 == 0) and 3 or 6
+    local wantH = (turn % 180 == 0) and 6 or 3
+    T.eq(a.w, wantW, ("turn %d is %d cells across"):format(turn, wantW))
+    T.eq(a.h, wantH, ("and %d deep"):format(wantH))
+
+    -- both mons stay inside the footprint they were turned within, and stay
+    -- three cells apart -- the gap the move animations are scaled against
+    T.check(a.enemyCell[1] >= a.x and a.enemyCell[1] < a.x + a.w
+            and a.enemyCell[2] >= a.y and a.enemyCell[2] < a.y + a.h,
+      ("turn %d keeps the foe inside the footprint"):format(turn))
+    T.check(a.playerCell[1] >= a.x and a.playerCell[1] < a.x + a.w
+            and a.playerCell[2] >= a.y and a.playerCell[2] < a.y + a.h,
+      ("turn %d keeps the player inside it too"):format(turn))
+    local gap = math.abs(a.enemyCell[1] - a.playerCell[1])
+                + math.abs(a.enemyCell[2] - a.playerCell[2])
+    T.eq(gap, 3, ("turn %d still stands them three cells apart"):format(turn))
+
+    -- and which way the foe lies from the player, which is what `turn` NAMES
+    local dx = a.enemyCell[1] - a.playerCell[1]
+    local dy = a.enemyCell[2] - a.playerCell[2]
+    local want = ({ [0] = { 0, -3 }, [90] = { 3, 0 },
+                    [180] = { 0, 3 }, [270] = { -3, 0 } })[turn]
+    T.check(dx == want[1] and dy == want[2],
+      ("turn %d puts the foe %d,%d from the player: got %d,%d")
+      :format(turn, want[1], want[2], dx, dy))
+
+    -- THE INVARIANT: the same composition, whichever way round it stands
+    local r = BattleCam.rig(a, 0)
+    local ppx, ppy = project(r, a.player)
+    local eex, eey = project(r, a.enemy)
+    T.check(ppx ~= nil and eex ~= nil,
+      ("turn %d keeps both marks in front of the camera"):format(turn))
+    T.check(math.abs(ppx - 26) < 1 and math.abs(ppy - 96) < 1,
+      ("turn %d lands the player's mark on its anchor: (%.2f, %.2f)")
+      :format(turn, ppx, ppy))
+    T.check(math.abs(eex - 124) < 1 and math.abs(eey - 56) < 1,
+      ("turn %d lands the enemy's on its own: (%.2f, %.2f)")
+      :format(turn, eex, eey))
+    T.check(math.abs(acrossSpan(r, a.player, turn) - 64) < 4,
+      ("turn %d still makes the player's square a back pic wide (64px): got "
+       .. "%.2f"):format(turn, acrossSpan(r, a.player, turn)))
+    T.check(math.abs(acrossSpan(r, a.enemy, turn) - 56) < 4,
+      ("turn %d still makes the foe's square a front pic wide (56px): got "
+       .. "%.2f"):format(turn, acrossSpan(r, a.enemy, turn)))
+
+    -- the eye really did move: a turn that left the camera where it was would
+    -- pass every anchor test above by looking at the pair from the side
+    if turn ~= 0 then
+      local base = BattleArena.at(corner[1], corner[2], "wide", 0)
+      BattleCam.reset()
+      local r0 = BattleCam.rig(base, 0)
+      local moved = math.abs(r.eye[1] - r0.eye[1])
+                    + math.abs(r.eye[3] - r0.eye[3])
+      T.check(moved > 16,
+        ("turn %d actually moves the camera (%.1f world px)"):format(turn, moved))
+    end
+  end
+
+  -- degrees in, degrees out, and anything else folded onto the four
+  T.eq(BattleArena.quarters(360), 0, "a full turn is no turn")
+  T.eq(BattleArena.quarters(-90), 3, "and a negative one comes round the back")
+  T.eq(BattleArena.at(1, 1, "wide").turn, 0,
+    "an arena placed without a turn is the way the mode was drawn")
+end)()
+
 -- an arena picks its rig by name, and anything unnamed gets the default
 T.eq(BattleCam.rigFor({ cam = "wide" }), BattleCam.RIGS.wide,
   "an arena that asks for the wide lens gets it")

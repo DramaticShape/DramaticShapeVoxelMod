@@ -303,7 +303,11 @@ end
 -- first drawn in.
 local function shadowSignature(state, arena, terrain, nbMesh, token)
   local host = arena.map or state.map
+  -- `turn` is in the signature with the corner and the shape: the same corner
+  -- turned a quarter is a different footprint standing on different ground,
+  -- and a cast kept from the other one freezes the shadows across it
   local parts = { "battle", host.id, arena.x, arena.y, arena.shape,
+                  tostring(arena.turn or 0),
                   tostring(terrain), tostring(token or 0),
                   -- the cycle keeps running through a fight, and an arena lit
                   -- from somewhere new must be re-cast from there
