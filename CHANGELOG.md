@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.7.0
+
+### Added
+
+- **The DIORAMA modes: Kanto as a model you can pick up.** The VR row is a
+  ladder now -- OFF / STANDARD / DIORAMA / DIORAMA-MR. STANDARD is what the
+  mod already did (the headset follows the VOXEL ladder, orbit rungs a
+  tabletop and 1ST life size). DIORAMA is one presentation instead of a
+  ladder: the world is always the model on the table, and the model is a
+  thing in the room.
+
+  Everything outside an invisible **box** centred on the view is simply
+  not drawn -- the Final Fantasy Tactics read, a square slab of the world
+  sitting in the air rather than a map running off to a horizon, cut with
+  a hard edge because a flat world is a thing with sides. The cut reaches
+  every pass the world is made of -- terrain, characters, grass, water and
+  the forest's beams and motes.
+
+  **V-CURVE changes its shape.** With the bend on the world is not flat any
+  more -- it is a little globe curling away over its own horizon -- and a
+  square cut through that is a lie about what is being looked at. So the
+  box becomes a **ball**, and its edge becomes a **gradient** dissolving
+  into the sky (the same sky the flat screen has). One click of the left
+  stick throws the row and swaps the whole reading of the model.
+
+  **A staged fight** ignores both shapes and cuts a vertical **pillar**
+  about the arena, always dissolved at the rim, framing the model to it:
+  the fight lifted out of the map as a floating disc.
+
+  **The grips** take hold of the whole thing: one hand carries the model
+  anywhere in the room, both hands turn it and open the viewport out to
+  whatever you spread your hands to. The **left stick's click** throws
+  V-CURVE to its top rung and back rather than stepping views -- there is
+  no 2D diorama and no first-person one, so the ladder is held on an orbit
+  rung for as long as the mode runs, and the Pokedex stays away.
+
+  **DIORAMA-MR** is the same mode with the background keyed pure green --
+  no bands, no sun, no haze, because every one of those is a colour a
+  keyer would have to survive -- for a mixed-reality capture that
+  composites the model into the player's own room.
+
+  A save that stored the old VR toggle as `true` comes back on STANDARD
+  rather than falling to OFF. The viewport is compiled into the scene
+  shader as its own variant, so a flat frame -- and a phone above all --
+  builds and binds exactly what it always did.
+
 ## 1.6.2
 
 ### Added

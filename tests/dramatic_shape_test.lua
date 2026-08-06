@@ -451,20 +451,19 @@ T.eq(settingGame.mods.modOptions.DRAMATIC_SHAPE.grid, true,
 grid.step(settingGame)
 T.eq(grid.value(), "OFF", "stepping again toggles it back")
 
--- the curve is a four-rung ladder rather than a toggle, and wraps
+-- the curve is a six-rung ladder rather than a toggle, and wraps
 curve.step(settingGame, 1)
 T.eq(curve.value(), "1", "stepping the curve climbs its ladder")
 T.eq(settingGame.save.options.modOptions.DRAMATIC_SHAPE.curve, 1,
   "the curve level persists alongside the grid, not over it")
 T.eq(settingGame.save.options.modOptions.DRAMATIC_SHAPE.grid, false,
   "and the grid it shares a bucket with is untouched")
-curve.step(settingGame, 1)
-curve.step(settingGame, 1)
-T.eq(curve.value(), "3", "the ladder reaches its top rung")
+for _ = 1, 4 do curve.step(settingGame, 1) end
+T.eq(curve.value(), "5", "the ladder reaches its top rung")
 curve.step(settingGame, 1)
 T.eq(curve.value(), "OFF", "and wraps back to OFF")
 curve.step(settingGame, -1)
-T.eq(curve.value(), "3", "stepping down from OFF wraps to the top")
+T.eq(curve.value(), "5", "stepping down from OFF wraps to the top")
 curve.step(settingGame, 1)
 
 -- the strength scales with the view height, so a rung looks the same at
@@ -474,9 +473,25 @@ T.eq(WorldCurve.k(154), 0, "an OFF curve bends nothing")
 curve.step(settingGame, 1)
 T.check(math.abs(WorldCurve.k(154) - WorldCurve.AMOUNTS[2] / 154) < 1e-9,
   "rung 1's coefficient is its amount over the view height")
-T.check(WorldCurve.AMOUNTS[2] < WorldCurve.AMOUNTS[3]
-        and WorldCurve.AMOUNTS[3] < WorldCurve.AMOUNTS[4],
-  "the ladder climbs")
+for i = 2, #WorldCurve.AMOUNTS do
+  T.check(WorldCurve.AMOUNTS[i] > WorldCurve.AMOUNTS[i - 1],
+    "the ladder climbs at rung " .. (i - 1))
+end
+-- rung 5 is the HALF SPHERE, and that is arithmetic rather than taste: the
+-- parabola y = k d^2 osculates a sphere of radius R at its pole when
+-- k = 1 / 2R, so an amount of 1 puts the sphere's radius at half a view
+-- height -- which is exactly where the diorama's box is cut, so the
+-- model's own rim is that sphere's equator
+T.eq(WorldCurve.AMOUNTS[#WorldCurve.AMOUNTS], 1.0,
+  "the top rung's amount is 1 -- the half sphere")
+do
+  local Dio = run.loader.exports.DRAMATIC_SHAPE.lib.require("Diorama")
+  local vh = 288
+  local kTop = WorldCurve.AMOUNTS[#WorldCurve.AMOUNTS] / vh
+  T.check(math.abs(1 / (2 * kTop) - vh * Dio.BOX_FRAC) < 1e-6,
+    "whose radius is the diorama's own half-size: the model ends where "
+    .. "the dome does")
+end
 T.check(math.abs(WorldCurve.k(308) * 2 - WorldCurve.k(154)) < 1e-9,
   "halving the zoom halves the coefficient, so the bend looks the same")
 -- the CPU copy Voxel3D.project uses must agree with the shader's quadratic
@@ -488,9 +503,7 @@ T.check(math.abs(WorldCurve.drop(k, 0, 0, 3, 4) - 25 * k) < 1e-9,
 T.check(WorldCurve.drop(k, 0, 0, 20, 0) > 4 * WorldCurve.drop(k, 0, 0, 10, 0)
         - 1e-9,
   "and accelerates, so the far edge rolls away faster than the near one")
-curve.step(settingGame, 1)
-curve.step(settingGame, 1)
-curve.step(settingGame, 1)
+for _ = 1, 5 do curve.step(settingGame, 1) end
 T.eq(curve.value(), "OFF", "the curve is left off for the rows below")
 
 -- ------- AA renders the pass larger and folds it back down
@@ -5205,6 +5218,187 @@ T.eq(type(VRMod.leave), "function",
   .. "is wired to it")
 end
 vrRigSection()
+
+-- ------- the DIORAMA modes
+--
+-- The VR row is a ladder now -- OFF / STANDARD / DIORAMA / DIORAMA-MR --
+-- and the two diorama rungs are one presentation rather than a follow-on
+-- from the VOXEL ladder: a viewport that cuts the world to a ball (a
+-- pillar while a fight is staged), a base a tile deep under it, and grips
+-- that carry, turn and resize the whole thing.
+;(function()
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local VRM = lib.require("VR")
+  local D = lib.require("Diorama")
+  local V3 = lib.require("Voxel3D")
+  local Rig = lib.require("VRRig")
+
+  -- ------- the row
+  T.eq(#VRM.setting.values, 4, "the VR row carries four rungs")
+  T.eq(VRM.setting.values[2], true,
+    "STANDARD is still stored as `true` -- a save written when the row was "
+    .. "a toggle comes back on the rung it was left on")
+  T.eq(VRM.setting.labels[3] .. "/" .. VRM.setting.labels[4],
+    "DIORAMA/DIORAMA-MR", "and the two diorama rungs are labelled")
+  VRM.setting:sync(false)
+  T.eq(VRM.mode(), "off", "OFF is off")
+  VRM.setting:sync(true)
+  T.eq(VRM.mode(), "standard", "the stored true reads as STANDARD")
+  T.eq(VRM.dioramaMode(), false, "which is not a diorama")
+  VRM.setting:sync("diorama")
+  T.eq(VRM.mode(), "diorama", "and the diorama rungs read as themselves")
+  T.check(VRM.enabled() and VRM.dioramaMode(), "both on and a diorama")
+  VRM.setting:sync("diorama-mr")
+  T.check(VRM.dioramaMode(), "MR is a diorama too")
+  T.eq(VRM.setting:get(), "diorama-mr", "under its own stored value")
+
+  -- ------- the frame's own switches
+  T.eq(D.begin("standard"), false, "STANDARD opens no diorama frame")
+  T.eq(D.keyColor(), nil, "and keys nothing")
+  T.eq(D.begin("diorama"), true, "DIORAMA opens one")
+  T.eq(D.keyColor(), nil, "and still keys nothing -- it has a sky")
+  T.eq(D.begin("diorama-mr"), true, "MR opens one as well")
+  T.eq(D.keyColor()[2], 1, "and keys the background PURE green")
+  T.check(D.keyColor()[1] == 0 and D.keyColor()[3] == 0,
+    "no red and no blue in it: a keyer wants the colour the world cannot be")
+
+  -- ------- the viewport
+  --
+  -- A square BOX with a hard edge while the world is flat, and the ball
+  -- with the dissolved rim while V-CURVE bends it -- one click of the
+  -- left stick throws the row and swaps the whole reading.
+  local Curve = lib.require("WorldCurve")
+  local curveWas = Curve.setting:get()
+  Curve.setting:sync(0)
+  local box = D.viewport(100, 200, 288)
+  T.eq(box.kind, D.BOX, "a flat world is cut by a square BOX")
+  T.check(box.x == 100 and box.z == 200, "centred on the view")
+  T.check(math.abs(box.r - 288 * D.BOX_FRAC) < 1e-6,
+    "spanning exactly the view the standard rung would have framed, so "
+    .. "the zoom rows keep meaning what they mean")
+  T.check(1 / box.invFade <= 0.5,
+    "with a HARD edge: a flat world is a thing with sides")
+  T.eq(D.fadeFor(100, false), 0, "and no fade band to speak of")
+  Curve.setting:sync(3)
+  local ball = D.viewport(100, 200, 288)
+  T.eq(ball.kind, D.BALL, "V-CURVE turns the box into a BALL")
+  T.check(math.abs(1 / ball.invFade - ball.r * D.FADE_FRAC) < 1e-6,
+    "whose rim is a gradient fade into the sky rather than an edge")
+  T.check(ball.r > box.r,
+    "and which reaches further than the square did, so the throw curls "
+    .. "the same model rather than shaving its corners off")
+  local pillar = D.pillar({ mid = { 64, 96 },
+                            player = { 64, 120 }, enemy = { 64, 72 } })
+  T.eq(pillar.kind, D.PILLAR, "a staged fight cuts a vertical PILLAR instead")
+  T.check(pillar.x == 64 and pillar.z == 96, "about the arena's midpoint")
+  T.check(math.abs(pillar.r - (24 + D.ARENA_APRON)) < 1e-6,
+    "wide enough for both mons and an apron -- the floating disc")
+  T.eq(D.pillar(nil), nil, "and no arena cuts nothing")
+  Curve.setting:sync(0)
+  local flatFight = D.pillar({ mid = { 0, 0 } })
+  T.eq(flatFight.kind, D.PILLAR,
+    "the fight stays round whatever the curve is doing: a square tile "
+    .. "floating in the air is not the picture")
+  T.check(1 / flatFight.invFade > 1,
+    "and keeps its dissolve with the curve off too -- a hard edge on "
+    .. "something hanging in the air reads as a cookie cutter")
+  Curve.setting:sync(curveWas)
+
+  -- the shader takes the volume through a plain field, so no pass can be
+  -- surprised by a cut world (Voxel3D never requires lib/Diorama)
+  T.eq(V3.cull, nil, "nothing has left a viewport on Voxel3D")
+  T.eq(V3.keyColor, nil, "nor a chroma key")
+
+  -- ------- the grips
+  D.reset()
+  local function hand(x, y, z) return { pos = { x, y, z } } end
+  T.eq(D.gesture({ gripL = 0, gripR = 0 }), false, "an open hand holds nothing")
+  -- one grip: the model follows that hand, metre for metre, and the first
+  -- frame of a squeeze moves nothing (there is no delta yet)
+  D.gesture({ gripL = 1, handl = hand(0, 1, 0) })
+  T.eq(D.offset[2], 0, "taking hold does not itself move the model")
+  D.gesture({ gripL = 1, handl = hand(0.1, 1.25, -0.2) })
+  T.check(math.abs(D.offset[1] - 0.1) < 1e-9
+          and math.abs(D.offset[2] - 0.25) < 1e-9
+          and math.abs(D.offset[3] + 0.2) < 1e-9,
+    "one grip carries it through the room in all three axes")
+  D.gesture({ gripL = 0, gripR = 0 })
+  D.gesture({ gripL = 1, handl = hand(5, 5, 5) })
+  T.check(math.abs(D.offset[2] - 0.25) < 1e-9,
+    "letting go and taking hold somewhere else never snaps it")
+  -- both grips: the turn and the resize, off the line between the hands
+  D.reset()
+  D.gesture({ gripL = 1, gripR = 1,
+              handl = hand(-0.2, 1, 0), handr = hand(0.2, 1, 0) })
+  local zoom0 = D.zoom
+  D.gesture({ gripL = 1, gripR = 1,
+              handl = hand(0, 1, 0.2), handr = hand(0, 1, -0.2) })
+  T.check(math.abs(D.yaw - math.pi / 2) < 1e-6,
+    "hand over hand turns the model by the same angle the mapping yaws by")
+  T.check(math.abs(D.zoom - zoom0) < 1e-6,
+    "a pure turn does not resize it")
+  D.gesture({ gripL = 1, gripR = 1,
+              handl = hand(0, 1, 0.4), handr = hand(0, 1, -0.4) })
+  T.check(math.abs(D.zoom - zoom0 * 2) < 1e-6,
+    "opening the hands opens the viewport by the same factor")
+  for _ = 1, 12 do
+    D.gesture({ gripL = 1, gripR = 1,
+                handl = hand(0, 1, 4), handr = hand(0, 1, -4) })
+    D.gesture({ gripL = 1, gripR = 1,
+                handl = hand(0, 1, 0.001), handr = hand(0, 1, -0.001) })
+  end
+  T.check(D.zoom >= D.SCALE_MIN and D.zoom <= D.SCALE_MAX,
+    "and it stays inside its stops however hard it is worked")
+
+  -- ------- and NO base under it
+  --
+  -- The ground was extruded a tile deep once, cut to the viewport's shape
+  -- and wearing Mt Moon's cave floor down its sides. It was removed at the
+  -- user's request; the cut ends at the ground plane. Pinned so nothing
+  -- puts a plinth back under the model by accident.
+  T.eq(D.drawBase, nil, "the diorama draws no base under the world")
+  T.eq(D.BASE_DEPTH, nil, "and keeps none of the arithmetic for one")
+  -- ------- and the curve reaches the eyes
+  --
+  -- It did not: eyeCamera hardcoded `curve = 0`, and Voxel3D reads that
+  -- field with `or` -- where 0 is TRUE in Lua -- so the bend was pinned
+  -- off for every VR frame and the diorama's own V-CURVE throw did
+  -- nothing at all. The rig takes it as a parameter now, and declining is
+  -- still the default for the modes that want to decline.
+  local POSE = { pos = { 0, 0, 0 }, quat = { 0, 0, 0, 1 } }
+  local FOV = { angleLeft = -0.7, angleRight = 0.7,
+                angleUp = 0.6, angleDown = -0.6 }
+  local plain = Rig.eyeCamera(POSE, FOV, { 0, 0, 0 }, { 0, 0, 0 }, 64)
+  T.eq(plain.curve, 0,
+    "an eye declines the curve unless it asks -- first person and the "
+    .. "battle seat both do")
+  local bent = Rig.eyeCamera(POSE, FOV, { 0, 0, 0 }, { 0, 0, 0 }, 64, nil,
+                             0.004)
+  T.eq(bent.curve, 0.004,
+    "and a diorama's eye carries the bend it asked for, which is what "
+    .. "the left stick's throw is for")
+
+  -- ------- the mapping carries all three axes now
+  local a = Rig.dioramaAnchor(0, { 0.5, 0.25, -0.75 })
+  T.check(math.abs(a[1] - 0.5) < 1e-9 and math.abs(a[3] + 0.75) < 1e-9,
+    "the diorama anchor takes the carry in all three axes")
+  T.check(math.abs(a[2] - (0.25 - Rig.VIEW_DIST)) < 1e-9,
+    "with the height still riding the rung's own viewing line")
+  local b = Rig.dioramaAnchor(0, 0.25)
+  T.check(math.abs(b[2] - a[2]) < 1e-9 and b[1] == 0,
+    "and a bare number is still the height alone -- STANDARD's own drag")
+
+  -- ------- what the mode refuses
+  T.eq(VRM.DIORAMA_RUNG, 3,
+    "a diorama holds the VOXEL ladder on an orbit rung: there is no 2D "
+    .. "diorama, and no first-person one either")
+  T.eq(type(VRM.toggleCurve), "function",
+    "and the left stick's click throws V-CURVE instead of stepping views")
+
+  D.reset()
+  VRM.setting:sync(false)
+  T.eq(D.on, false, "and the frame shuts with the session")
+end)()
 
 -- ------- the skybox's checker and glow are the sky's own, not the screen's
 --

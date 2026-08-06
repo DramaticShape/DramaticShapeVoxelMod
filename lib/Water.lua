@@ -463,6 +463,27 @@ uniform float pxAngle;       // radians of view one screen pixel subtends
 // sample to get back to the screen. Declared in both stages, like `vp`, and
 // both are highp here.
 uniform vec3 curve;          // xy = the focus in world XZ, z = k; 0 = off
+// The diorama's viewport, exactly as the scene shader takes it: centre in
+// world pixels, then half-size / one-over-fade / kind (0 off, 1 box, 2
+// ball, 3 the staged fight's pillar). Water is world like anything else,
+// and a lake left lying outside the model would be the one thing floating
+// in the sky.
+uniform vec3 cullAt;
+uniform vec3 cullShape;
+
+float dioramaCull(vec3 p) {
+  if (cullShape.z <= 0.5) return 1.0;
+  vec3 cd = p - cullAt;
+  float d;
+  if (cullShape.z < 1.5) {
+    d = max(abs(cd.x), abs(cd.z));
+  } else if (cullShape.z < 2.5) {
+    d = length(cd);
+  } else {
+    d = length(cd.xz);
+  }
+  return clamp((cullShape.x - d) * cullShape.y, 0.0, 1.0);
+}
 
 // How far the bend has pushed the world down at world XZ `q` -- the vertex
 // stage's own displacement, as a number this stage can add and subtract.
@@ -1089,7 +1110,14 @@ vec4 effect(EFFECT_PREC vec4 color, Image tex, EFFECT_PREC vec2 tc,
 #ifdef VOXEL_GRID
   rgb *= 1.0 - gridDark * columnSeam(hit, sheet, axis);
 #endif
-  return vec4(rgb, 1.0) * color;
+  // and the diorama's rim, over the finished surface. Per FRAGMENT here,
+  // where the scene shader answers per vertex: this stage already carries
+  // the world position it marched with, so the exact answer is free --
+  // and measured on the FLAT world, which is what bendDrop puts back.
+  float cull = dioramaCull(vec3(vBent.x, vBent.y + bendDrop(vBent.xz),
+                                vBent.z));
+  if (cull <= 0.0) discard;
+  return vec4(rgb, cull) * color;
 }
 #endif
 ]]
@@ -1246,6 +1274,12 @@ function Water.begin(ctx)
   send("vp", "row", ctx.vp)
   send("eye", ctx.eye)
   send("curve", ctx.curve)
+  -- the diorama's viewport, as beginScene sent it to the scene shader;
+  -- kind 0 -- every frame that is not a headset's diorama -- is "no cut"
+  local cull = V.require("Voxel3D").cull
+  send("cullAt", cull and { cull.x, cull.y, cull.z } or { 0, 0, 0 })
+  send("cullShape", cull and { cull.r, cull.invFade, cull.kind }
+                    or { 0, 0, 0 })
   send("screen", { ctx.screen[1], ctx.screen[2] })
   send("cell", math.max(1, ctx.cell or 1))
   -- how much of the view one screen pixel is worth: what sets the relief

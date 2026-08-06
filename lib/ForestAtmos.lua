@@ -51,6 +51,20 @@ local floor, sqrt, min, max = math.floor, math.sqrt, math.min, math.max
 
 local ForestAtmos = {}
 
+-- The diorama's viewport, as both shaders here take it (see Voxel3D.cull:
+-- the field is set for a headset's diorama frame and nil for every other,
+-- where kind 0 means "no cut"). Read through V.require rather than held as
+-- an upvalue because this file loads before Voxel3D on some paths.
+local function cullAt()
+  local c = V.require("Voxel3D").cull
+  return c and { c.x, c.y, c.z } or { 0, 0, 0 }
+end
+
+local function cullShape()
+  local c = V.require("Voxel3D").cull
+  return c and { c.r, c.invFade, c.kind } or { 0, 0, 0 }
+end
+
 -- FULL is the point; LOW halves the march and drops the particles, for
 -- hardware that minds a per-pixel loop under 4X supersampling.
 --
@@ -416,6 +430,25 @@ local RAY_SHADER = [[
   uniform vec3 sunward;      // unit, toward the unseen sun
   uniform vec2 wind;         // leaf-field drift, uv per second
   uniform float time;
+  // the diorama's viewport, as the scene shader takes it (see Voxel3D):
+  // air outside the model is not air, so a sample out there contributes
+  // nothing and the beams end with the world they fall through
+  uniform vec3 cullAt;
+  uniform vec3 cullShape;
+
+  float dioramaCull(vec3 p) {
+    if (cullShape.z <= 0.5) return 1.0;
+    vec3 cd = p - cullAt;
+    float d;
+    if (cullShape.z < 1.5) {
+      d = max(abs(cd.x), abs(cd.z));      // the box
+    } else if (cullShape.z < 2.5) {
+      d = length(cd);                     // the ball
+    } else {
+      d = length(cd.xz);                  // the fight's pillar
+    }
+    return clamp((cullShape.x - d) * cullShape.y, 0.0, 1.0);
+  }
 
   float sunDepth(vec2 uv) {
     vec4 c = Texel(sunMap, uv);
@@ -492,7 +525,8 @@ local RAY_SHADER = [[
         float fadeIn = clamp(up / max(fogW.z - fogW.w, 1.0), 0.0, 1.0);
         float foot = 0.55 + 0.45 * clamp(y / 16.0, 0.0, 1.0);
         float dens = fogW.x * exp(-y * fogW.y);
-        acc += trans * lit * dapple * fadeIn * foot * dens * dt;
+        acc += trans * lit * dapple * fadeIn * foot * dens * dt
+               * dioramaCull(p);
       }
       trans *= exp(-fogW.x * 0.5 * dt);
     }
@@ -587,6 +621,8 @@ local PART_SHADER = [[
 #ifdef VERTEX
   uniform mat4 vp;
   uniform vec3 curve;
+  uniform vec3 cullAt;     // the diorama's viewport (see Voxel3D.cull):
+  uniform vec3 cullShape;  // a mote outside the model is not in the air
   uniform vec3 axisR;      // the camera's right, world space
   uniform vec3 axisU;      // and its up: the billboard's own frame
   uniform float time;
@@ -606,6 +642,20 @@ local PART_SHADER = [[
       cos(t * 0.19 + ph * 1.3) * sway.x);
     float s = 0.5 + 0.5 * sin(t * 1.6 + ph * 9.0);
     vGlow = mix(1.0, smoothstep(0.35, 0.75, s), blinky);
+    // a whole mote at once: these are points, so the rim can dim them
+    // rather than having to cut one in half
+    if (cullShape.z > 0.5) {
+      vec3 cd = base - cullAt;
+      float cdd;
+      if (cullShape.z < 1.5) {
+        cdd = max(abs(cd.x), abs(cd.z));
+      } else if (cullShape.z < 2.5) {
+        cdd = length(cd);
+      } else {
+        cdd = length(cd.xz);
+      }
+      vGlow *= clamp((cullShape.x - cdd) * cullShape.y, 0.0, 1.0);
+    }
     vCorner = AtmosData.xy;
     vec4 w = vec4(base + axisR * (AtmosData.x * size)
                        + axisU * (AtmosData.y * size), 1.0);
@@ -763,6 +813,8 @@ function ForestAtmos.draw(map)
         pcall(sh.send, sh, "curve",
               { Voxel3D.curveX or 0, Voxel3D.curveZ or 0,
                 Voxel3D.curveK or 0 })
+        pcall(sh.send, sh, "cullAt", cullAt())
+        pcall(sh.send, sh, "cullShape", cullShape())
         pcall(sh.send, sh, "screen", { w, h })
         pcall(sh.send, sh, "fogW",
               { f.fog.density, f.fog.heightK,
@@ -793,6 +845,8 @@ function ForestAtmos.draw(map)
         pcall(psh.send, psh, "curve",
               { Voxel3D.curveX or 0, Voxel3D.curveZ or 0,
                 Voxel3D.curveK or 0 })
+        pcall(psh.send, psh, "cullAt", cullAt())
+        pcall(psh.send, psh, "cullShape", cullShape())
         pcall(psh.send, psh, "axisR", axisR)
         pcall(psh.send, psh, "axisU", axisU)
         pcall(psh.send, psh, "time", ForestAtmos.time)

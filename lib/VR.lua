@@ -20,7 +20,17 @@
 --     battle or wipe is what the flat screen is showing
 --   xrEndFrame with the projection layer and/or the quad
 --
--- WHICH VR YOU GET mirrors the VOXEL ladder, deliberately: on the orbit
+-- WHICH VR YOU GET is the row's own rung first (see VR.setting), and only
+-- then the VOXEL ladder. STANDARD is the mode described below. The two
+-- DIORAMA rungs are one presentation instead of a ladder -- the world is
+-- always a model on the table, cut to a square viewport (a ball with a
+-- dissolved rim while V-CURVE is on) that the grips pick up, turn and
+-- open out, with a staged fight arriving as a floating disc of map.
+-- lib/Diorama owns all of that; what this file owns is pointing the
+-- mapping at it. DIORAMA-MR is the same with the background keyed green
+-- for a mixed-reality capture.
+--
+-- Within STANDARD, which VR you get mirrors the VOXEL ladder: on the orbit
 -- rungs the world is a TABLETOP DIORAMA pinned below and ahead of where
 -- your head started -- lean in, walk around it; on 1ST you stand inside
 -- at life scale, the HMD steers FirstPerson's yaw and pitch, and FreeMove
@@ -52,12 +62,30 @@ local VRRig = V.require("VRRig")
 local VRXR = V.require("VRXR")
 local VRGL = V.require("VRGL")
 local Pokedex = V.require("Pokedex")
+local Diorama = V.require("Diorama")
 
 local VR = {}
 
--- the row: plain OFF/ON. No hotkey -- the engine's display keys are
--- spoken for, and a headset is not something to toggle by accident.
-VR.setting = ModSetting.new("vr", "VR", { false, true }, { "OFF", "ON" })
+-- The row: OFF, and then WHICH VR. No hotkey -- the engine's display keys
+-- are spoken for, and a headset is not something to toggle by accident.
+--
+--   STANDARD     what this mod shipped: the headset follows the VOXEL
+--                ladder, orbit rungs becoming a tabletop and 1ST standing
+--                you inside the world at life size.
+--   DIORAMA      one presentation instead of a ladder -- the world is
+--                always a model on the table, cut to a viewport you can
+--                pick up, turn and open out (see lib/Diorama). There is no
+--                2D and no first person in it: both are a different promise
+--                about where the player is standing.
+--   DIORAMA-MR   the same, with the background keyed pure green for a
+--                mixed-reality capture.
+--
+-- `true` is still STANDARD's stored value, deliberately: the row used to be
+-- a toggle, and a save that stored it as one must come back on the rung it
+-- was left on rather than falling to OFF.
+VR.setting = ModSetting.new("vr", "VR",
+                            { false, true, "diorama", "diorama-mr" },
+                            { "OFF", "STANDARD", "DIORAMA", "DIORAMA-MR" })
 
 -- How the right stick turns you in first person. OFF is the 45-degree
 -- SNAP this mod shipped with and the reason for it is comfort, not
@@ -152,8 +180,27 @@ function VR.supported()
   return os == "Windows"
 end
 
+-- Which VR the row is asking for: "off", "standard", "diorama" or
+-- "diorama-mr". The one place the stored value is interpreted -- everything
+-- else asks this, so a rung added to the ladder is a change here and
+-- nowhere else.
+function VR.mode()
+  if not VR.supported() then return "off" end
+  local v = VR.setting:get()
+  if v == true then return "standard" end
+  if v == "diorama" or v == "diorama-mr" then return v end
+  return "off"
+end
+
 function VR.enabled()
-  return VR.supported() and VR.setting:get() == true
+  return VR.mode() ~= "off"
+end
+
+-- Whether the row is on one of the DIORAMA rungs -- the modes where the
+-- world is a model with an edge to it rather than a place to stand in.
+function VR.dioramaMode()
+  local m = VR.mode()
+  return m == "diorama" or m == "diorama-mr"
 end
 
 function VR.active()
@@ -208,6 +255,9 @@ local function shutdown(reason)
   zoom, heightOff = 1, 0
   fpYawOff, snapArmed = 0, true
   camMode, fadeAlpha = "explore", 0
+  -- the model goes back on the table where it started: the grab, the turn,
+  -- the viewport's size and the meshes cut for it
+  Diorama.reset()
   status = reason or "off"
 end
 
@@ -286,10 +336,43 @@ local function renderWorld(views, ctl)
   -- three cells behind their own body is a well-known way to make people
   -- ill. The rung still changes the walk and the cards the same way; only
   -- the eye stays where a head belongs.
-  local fp = FirstPerson.engaged()
+  --
+  -- A DIORAMA mode never does either: the world is a model on the table
+  -- whatever the rung says, so first person is refused here rather than
+  -- being made to work at a scale it does not mean.
+  local dio = VR.dioramaMode()
+  local fp = (not dio) and FirstPerson.engaged()
   local battle, battleFloor
   if camMode == "battle" then battle, battleFloor = battleStage() end
-  if battle then
+  if dio then
+    -- ------- the diorama modes
+    --
+    -- The model presents exactly as the standard view frames it -- the
+    -- pivot VIEW_DIST away along the rung's angle, at the scale that
+    -- reproduces that framing -- and then everything the player has done
+    -- to it goes on top: the carry, the turn, the stick's zoom.
+    --
+    -- A STAGED FIGHT does not move the head here (that is the standard
+    -- mode's over-the-shoulder seat, and it is a first-person answer):
+    -- the MODEL re-centres on the arena and the viewport becomes a
+    -- vertical pillar about it, so the fight arrives as a disc of map
+    -- lifted out of the world and left floating on the table.
+    -- what the model is FRAMED to fill: the view the flat screen would
+    -- have shown ordinarily, and the DISC itself while a fight is staged
+    -- -- a disc left at map scale is a coin on a table across the room.
+    local frame = vh
+    if battle then
+      pivot = VRRig.dioramaPivot(battle.mid[1], battle.mid[2])
+      local cut = Diorama.pillar(battle)
+      if cut then frame = cut.r * 2.6 end
+    else
+      pivot = VRRig.dioramaPivot(ow.camera.x + vw / 2, ow.camera.y + vh / 2)
+      Diorama.viewport(pivot[1], pivot[3], vh)
+    end
+    anchor = VRRig.dioramaAnchor(Voxel.angle, Diorama.offset)
+    scale = VRRig.dioramaScale(frame, Voxel.FOCAL) / zoom
+    if Diorama.yaw ~= 0 then mountYaw = Diorama.yaw end
+  elseif battle then
     -- the over-the-shoulder seat the flat battle shot stands in, pulled
     -- close enough for a headset's own lens (see VRRig.battleMount), at
     -- life scale, turned to face the arena
@@ -332,8 +415,11 @@ local function renderWorld(views, ctl)
   -- seat, where its screen is the fight's own 2D scene. The diorama
   -- does without: a hand-sized device hovering over a tabletop town is
   -- clutter, and the panel serves there. No hand tracked, no device.
+  -- (`not dio` for the same reason the diorama never had one: a hand-sized
+  -- device hovering over a tabletop town is clutter, and that is as true
+  -- of a tabletop FIGHT -- the panel serves both.)
   local hand = ctl and ctl.handl or nil
-  if hand and (battle or fp) then
+  if hand and not dio and (battle or fp) then
     Pokedex.place(hand, pivot, anchor, scale, mountYaw)
     if uiShowing() then
       local scr = dexScreen()
@@ -380,11 +466,25 @@ local function renderWorld(views, ctl)
     end
   end
 
+  -- THE WORLD CURVE, for the diorama modes alone. Standing inside a bent
+  -- world is what first person declines on the flat screen too, and the
+  -- battle mount is a placed shot -- but a diorama is a model being looked
+  -- AT, so the bend turns it into a little globe curling over its own
+  -- horizon, which is the whole point of the throw the left stick's click
+  -- makes. Measured against the FLAT view height, so a rung's bend is the
+  -- same bend the flat screen would have drawn.
+  --
+  -- It bends about the scene centre, which for these eyes is the pivot --
+  -- the model's own middle -- so the globe is centred on the model rather
+  -- than on wherever a head happens to be standing.
+  local curveK = dio and V.require("WorldCurve").k(vh) or 0
+
   local eyes = {}
   for i = 1, 2 do
     local v = views[i]
     eyes[i] = {
-      camera = VRRig.eyeCamera(v.pose, v.fov, pivot, anchor, scale, mountYaw),
+      camera = VRRig.eyeCamera(v.pose, v.fov, pivot, anchor, scale, mountYaw,
+                               curveK),
       w = v.w, h = v.h,
       slot = i == 1 and "vrL" or "vrR",
       -- the battle seat is a placed shot, not the first-person rig: the
@@ -518,6 +618,13 @@ end
 --                 and moving that hand up or down drags the whole table
 --                 with it.
 --
+-- The DIORAMA modes rebind two of those, because in them there is no
+-- ladder to step and no table-height to be the only thing worth dragging:
+--
+--   left stick click   throws V-CURVE to its top rung and back.
+--   grips              one carries the model anywhere in the room; both
+--                      turn it and open the viewport out (Diorama.gesture).
+--
 -- Leaving VR is the VR row's job alone (OPTIONS menu or the manager) --
 -- no controller button does it. VR.leave below stays as the API for it.
 
@@ -537,6 +644,61 @@ function VR.stepView()
   end)
 end
 
+-- Put the VOXEL ladder on a given rung, for the one caller that needs to
+-- rather than to step: a DIORAMA mode holding the ladder off 2D and off
+-- both free-roam rungs (see dioramaRung). Handed over by main.lua next to
+-- cycleVoxel and for the same reason.
+VR.setVoxelLevel = nil          -- setVoxelLevel(game, level), set by main.lua
+
+-- The rung a diorama mode holds the ladder on when it finds it somewhere
+-- the mode cannot present: 35 degrees, the standard view's own angle.
+VR.DIORAMA_RUNG = 3
+
+-- 2D is not a diorama and neither is standing inside the world, so while a
+-- diorama mode is live the ladder is held on an orbit rung. Cheap enough to
+-- ask every frame: it is a table read and, almost always, no write.
+local function dioramaRung()
+  pcall(function()
+    if not VR.setVoxelLevel then return end
+    local Pipelines = require("src.render.Pipelines")
+    local level = Pipelines.level("voxel") or 0
+    if level == 0 or Voxel.isFreeCam(level) then
+      VR.setVoxelLevel(require("src.core.Game"), VR.DIORAMA_RUNG)
+    end
+  end)
+end
+
+-- The V-CURVE row, thrown to its top rung and back -- what the left stick's
+-- click does in a diorama, where there is no ladder for it to step.
+--
+-- A toggle rather than a cycle, because in a headset the curve is not a
+-- taste setting with four values: it is the one control that decides
+-- whether the model is a flat slab of map or a little world curling away
+-- over its own horizon, and the player wants to see both, now, without
+-- counting clicks. The rung it was on is remembered so the click gives it
+-- back rather than dropping the row to OFF.
+--
+-- It changes the CUT with it (see lib/Diorama): flat world, square box,
+-- hard edge; curved world, ball, dissolve. One click swaps the whole
+-- reading of the model, which is why it is the click worth having here.
+local curveWas = nil
+
+function VR.toggleCurve()
+  pcall(function()
+    local Game = require("src.core.Game")
+    local WorldCurve = V.require("WorldCurve")
+    local top = WorldCurve.setting.values[#WorldCurve.setting.values]
+    if WorldCurve.setting:get() == top then
+      WorldCurve.setting:setValue(curveWas or WorldCurve.setting.values[1],
+                                  Game)
+      curveWas = nil
+    else
+      curveWas = WorldCurve.setting:get()
+      WorldCurve.setting:setValue(top, Game)
+    end
+  end)
+end
+
 -- Leave VR: the VR row toggled back off and persisted, exactly as if
 -- stepped on the OPTIONS menu, so the next update tears the session down
 -- and the flat screen takes the picture back. Deliberately bound to NO
@@ -545,7 +707,9 @@ end
 function VR.leave()
   pcall(function()
     local Game = require("src.core.Game")
-    VR.setting:setIndex(VR.setting:read() + 1, Game)
+    -- OFF by VALUE, not by stepping the row: the row is a ladder now, and
+    -- one step off STANDARD is DIORAMA rather than the way out
+    VR.setting:setValue(false, Game)
   end)
 end
 
@@ -559,9 +723,10 @@ local function setGB(inp, btn, down)
   end
 end
 
-local function driveControls(ctl, dt, fp)
+local function driveControls(ctl, dt, fp, dio)
   if not ctl then
     releaseInputs()
+    Diorama.releaseGrab()
     return
   end
   local ok, Game = pcall(require, "src.core.Game")
@@ -595,11 +760,18 @@ local function driveControls(ctl, dt, fp)
   inp:gamepadaxis(nil, "leftx", ctl.moveX or 0)
   inp:gamepadaxis(nil, "lefty", -(ctl.moveY or 0))
 
-  -- the left stick click: the VOXEL ladder ordinarily, and the way out of
-  -- horde mode while it runs (the rung is locked there, so the click has
-  -- nothing else to do, and a headset has no ESCAPE key)
+  -- the left stick click: the VOXEL ladder ordinarily, the V-CURVE throw in
+  -- a diorama (where the ladder is held on one rung and the click would
+  -- otherwise do nothing), and the way out of horde mode while it runs (the
+  -- rung is locked there too, and a headset has no ESCAPE key)
   if ctl.toggleChanged and ctl.toggle then
-    if Horde.active then Horde.askExit() else VR.stepView() end
+    if Horde.active then
+      Horde.askExit()
+    elseif dio then
+      VR.toggleCurve()
+    else
+      VR.stepView()
+    end
   end
 
   -- first person's turn on the right stick. SMOOTH TURN ON makes it a
@@ -634,6 +806,20 @@ local function driveControls(ctl, dt, fp)
     end
   end
 
+  -- THE DIORAMA'S GRIPS take the model itself: one hand carries it through
+  -- the room, both turn it and open the viewport out (see Diorama.gesture).
+  -- The stick's zoom still sizes the model under all of that -- the two
+  -- are different questions, "how big is it" and "how much of it is there".
+  if dio then
+    lastHandY = nil
+    local zy = ctl.lookY or 0
+    if math.abs(zy) > 0.15 then
+      zoom = math.max(0.35, math.min(4, zoom * math.exp(zy * (dt or 0) * 1.6)))
+    end
+    Diorama.gesture(ctl)
+    return
+  end
+
   if not fp and camMode ~= "battle" then
     local zy = ctl.lookY or 0
     if math.abs(zy) > 0.15 then
@@ -659,7 +845,8 @@ end
 -- ------- the per-frame drive
 
 function VR.update(dt)
-  local on = VR.enabled()
+  local mode = VR.mode()
+  local on = mode ~= "off"
   if not on then
     if wasOn then
       shutdown("off")
@@ -703,6 +890,12 @@ function VR.update(dt)
     pcall(love.window.setVSync, 0)
   end
 
+  -- Which VR this frame is, before anything reads it: the diorama's own
+  -- fields (the viewport, the chroma key) are open for the length of the
+  -- frame and shut with the session. The rung guard rides it -- there is
+  -- no 2D diorama and no first-person one.
+  if Diorama.begin(mode) then dioramaRung() end
+
   -- the battle camera holds still for as long as a headset is watching:
   -- its drift is a flat screen's depth cue, and a swaying picture inside
   -- VR reads as the world lurching
@@ -727,8 +920,9 @@ function VR.update(dt)
   -- flips rungs on should be the frame that renders the new rig. The
   -- state is kept in hand for renderWorld too -- the pokedex stands on
   -- the same frame's left-hand pose.
+  local dio = VR.dioramaMode()
   local ctl = VRXR.input(time)
-  driveControls(ctl, dt, FirstPerson.engaged())
+  driveControls(ctl, dt, (not dio) and FirstPerson.engaged(), dio)
 
   local worldUp = false
   if should then
@@ -737,7 +931,9 @@ function VR.update(dt)
       worldUp = renderWorld(views, ctl)
     end
   end
-  local quadPose = updateQuad(worldUp, FirstPerson.engaged())
+  -- the diorama's panel is the tabletop one whatever the rung says: there
+  -- is no first person in the mode to float it closer for
+  local quadPose = updateQuad(worldUp, (not dio) and FirstPerson.engaged())
   VRXR.endFrame(time, worldUp or nil, quadPose)
 end
 
@@ -778,6 +974,7 @@ function VR.invalidate()
   if dexCanvas and dexCanvas.release then pcall(dexCanvas.release, dexCanvas) end
   dexCanvas = nil
   Pokedex.invalidate()
+  Diorama.invalidate()      -- the base's mesh and its cave-floor texture
   V.require("HordeGun").invalidate()
   V.require("HordeHud").invalidate()
   for k in pairs(fboCache) do fboCache[k] = nil end
