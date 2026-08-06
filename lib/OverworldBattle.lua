@@ -698,15 +698,11 @@ function OverworldBattle.update(dt)
     -- reason the scene is: it binds a canvas of its own. After the frost, so
     -- the glass is frosted from the world alone and never from the glyphs
     -- about to sit on it.
-    local ios = isIOS()
-    local okHud, up = false, false
-    if not ios then
-      okHud, up = pcall(OverworldBattle.snapHUDs, session.battle, shot)
-    end
+    local okHud, up = pcall(OverworldBattle.snapHUDs, session.battle, shot)
     session.snapped = (okHud and up) and true or false
     -- once per battle, not once per frame: a driver that cannot do this cannot
     -- do it sixty times a second either, and the fallback is silent and fine
-    if not ios and not okHud and not session.hudWarned then
+    if not okHud and not session.hudWarned then
       session.hudWarned = true
       V.mod.log:warn("overworld battle HUD snap failed: %s -- the HUDs draw "
                      .. "in the battle frame this battle", tostring(up))
@@ -1278,7 +1274,6 @@ function OverworldBattle.install()
   local innerText = BattleState.drawTextArea
   function BattleState:drawTextArea()
     if not self.dramaticShapeShot then return innerText(self) end
-    if isIOS() then return innerText(self) end
     return withoutBoxFill(self, innerText)
   end
 
@@ -1450,14 +1445,19 @@ function OverworldBattle.snapHUDs(battle, shot)
   local slide = (battle.introSlide or 0) * 4
   local rects, bandX = OverworldBattle.snapRects(shot)
   local enemy, player = OverworldBattle.hudLive(battle, slide)
-  local live = {}
-  if enemy then live.enemy = rects.enemy end
-  if player then live.player = rects.player end
-  -- and the text box's own glass, on the same pass. It stays in the middle of
-  -- the frame where the engine draws it -- only the HUDs were snapped out --
-  -- so its GB rect is mapped into the letterbox rather than to an edge.
-  for key, rect in pairs(OverworldBattle.textRects(battle)) do
-    live[key] = toWorld(rect, shot)
+  local live = {}
+  if not isIOS() then
+    if enemy then live.enemy = rects.enemy end
+    if player then live.player = rects.player end
+  end
+  -- The text box's frost panel normally goes into this same world-canvas pass.
+  -- On iOS that panel is mirrored upward by the Canvas-to-Canvas path, creating
+  -- the large ghost rectangle behind the Pokemon. Keep the box border/text but
+  -- skip only this frosted backing on iOS.
+  if not isIOS() then
+    for key, rect in pairs(OverworldBattle.textRects(battle)) do
+      live[key] = toWorld(rect, shot)
+    end
   end
   local layer = OverworldBattle.hudTexture(battle, slide)
   if not layer then return false end
@@ -1473,8 +1473,24 @@ function OverworldBattle.snapHUDs(battle, shot)
     for side, band in pairs(OverworldBattle.HUD_BAND) do
       local quad = g.newQuad(band[1], band[2], band[3], band[4],
                              BattleScene.GB_W, BattleScene.GB_H)
-      g.draw(layer, quad, bandX[side] + band[1] * shot.scale,
-             shot.ly + band[2] * shot.scale, 0, shot.scale, shot.scale)
+      local x = bandX[side] + band[1] * shot.scale
+      local targetY = shot.ly + band[2] * shot.scale
+
+      if isIOS() then
+        -- Keep the player's HUD exactly where it currently appears on the
+        -- right. Only the enemy band needs its mirrored destination corrected.
+        local y = targetY
+        if side == "enemy" then
+          y = shot.ph - targetY - band[4] * shot.scale
+        end
+
+        -- iOS presents this Canvas-to-Canvas HUD texture upside down.
+        g.draw(layer, quad, x, y, 0,
+               shot.scale, -shot.scale, 0, band[4])
+      else
+        g.draw(layer, quad, x, targetY, 0,
+               shot.scale, shot.scale)
+      end
     end
   end)
   if prevCanvas then g.setCanvas(prevCanvas) else g.setCanvas() end
@@ -1494,16 +1510,6 @@ end
 function OverworldBattle.drawHudPanels(battle)
   local shot = battle.dramaticShapeShot
   if not shot then return end
-  if isIOS() then
-    local slide = (battle.introSlide or 0) * 4
-    local enemy, player = OverworldBattle.hudLive(battle, slide)
-    local rect = OverworldBattle.HUD_RECT
-    love.graphics.setColor(1, 1, 1, 0.84)
-    if enemy then love.graphics.rectangle("fill", rect.enemy[1], rect.enemy[2], rect.enemy[3], rect.enemy[4]) end
-    if player then love.graphics.rectangle("fill", rect.player[1], rect.player[2], rect.player[3], rect.player[4]) end
-    love.graphics.setColor(1, 1, 1, 1)
-      return
-  end
   if snapped() then
     return
   end
