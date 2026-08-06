@@ -168,6 +168,10 @@ return {
     -- a round drawing stacked two cells high on one cell of plot (the
     -- Centers' potted plants): 32px of hull standing in its lower cell
     planter = 32,
+    -- the little trees (Celadon Gym's garden, the overworld's cuttable
+    -- tree): the round hull squashed front to back, 16px of drawn
+    -- elevation like every other one-cell tree drawing
+    sapling = 16,
     relief = 3,
     bookcase = 32,
     stair_e = 16,
@@ -197,7 +201,27 @@ return {
       -- cutouts both read wrong for them; the cylinder archetype carves
       -- one voxel ball per 16x16 cell from the canopy's darkest-pixel
       -- outline, round in depth, so tree rows become rows of real canopies
+      --
+      -- The cuttable tree ($2D/$2E/$3D/$3E, the four tiles Cut deletes)
+      -- takes the same hull SQUASHED: it is Celadon Gym's little tree
+      -- redrawn pixel-for-pixel on this atlas (same 146/256 silhouette,
+      -- only canopy highlight texels differ), so the two must stay one
+      -- model -- the scraggly canopy revolves into a gapped ball, the
+      -- 2-4px trunk into a thin round column, the root flare into a
+      -- round mound.  It used to sit in the `prop` pool as a 5-voxel
+      -- standee; see GYM's sapling entry for the reading and for what
+      -- sapling_squash does.  Scanned: the 2x2 grid
+      -- occurs 32 times on this atlas across the towns and routes, and
+      -- per-tile counts equal the grid count (32 hits for $2D alone),
+      -- so no stray occurrence renders as a lone hull.  The same four
+      -- ids form grids on FOREST (8, Safari Zone ground art), HOUSE,
+      -- MANSION, SHIP_PORT and REDS_HOUSE_2 -- different drawings, id
+      -- collisions, none of this entry's business.  Cut itself only
+      -- swaps the map block to plain grass, so the pin never sees a
+      -- cut stump.
       cylinder = { 42, 43, 58, 59, 64, 65, 80, 81 },
+      sapling = { 45, 46, 61, 62 },
+      sapling_squash = 50,
       -- the town sign (blockset 8's SE cell): a standing per-pixel slab
       -- 2 voxels thin, transparency respected -- never a solid box
       signpost = { 70, 71, 86, 87 },
@@ -220,15 +244,11 @@ return {
       -- instead -- see there.)
       wall = { 2, 36 },
 
-      -- the cuttable bush ($2D/$2E/$3D/$3E, the four tiles Cut deletes
-      -- -- across the whole tileset they appear only in the five
-      -- cut-tree blocks): a standing per-pixel cutout 5 voxels deep,
-      -- black-outline segmented with the pixels the outline encloses
-      -- kept, its drawn grass dither flooding away as background
-      prop = { 45, 46, 61, 62 },
-      -- the ground painted under those pinned props, by the prop tile's
-      -- own id: the bush stands on plain grass ($2C) -- the very tile
-      -- Cut leaves behind (field.cutTreeSwaps' after-blocks) -- rather
+      -- (the cuttable tree $2D/$2E/$3D/$3E moved to the cylinder hull
+      -- above)
+      -- the ground painted under the claimed tree cells, by tile id:
+      -- the tree stands on plain grass ($2C) -- the very tile Cut
+      -- leaves behind (field.cutTreeSwaps' after-blocks) -- rather
       -- than whatever flat tile its neighbours vote
       prop_ground = { [45] = 44, [46] = 44, [61] = 44, [62] = 44 },
     },
@@ -345,6 +365,38 @@ return {
       -- the pin is not copied there.
       cylinder = { 44, 45, 46, 47,
                    7, 8, 23, 24 },
+      -- Celadon's three little trees ($40/$41 canopy over $50/$51
+      -- trunk): a scraggly canopy over a 2-4px trunk flaring into a
+      -- round root mound.  Every drawn row states its own width, which
+      -- is exactly what the hull revolves -- the canopy turns into a
+      -- ball with its drawn gaps kept, the trunk into a thin round
+      -- column, the mound into a round foot.  They used to sit in the
+      -- `prop` pool ("a trunk is not round"), but the standee rendered
+      -- as the whole 16x16 cell extruded, background and all -- the
+      -- extruded picture -- and the trunk IS round; the hull reads it
+      -- right.  The same drawing is the overworld's cuttable tree (see
+      -- OVERWORLD's sapling entry); one drawing, one model.
+      --
+      -- sapling_squash 50 is the one AUTHORED number and the only knob
+      -- taste moves: the percent of its revolved depth every chord
+      -- keeps.  A full revolve (100) assumes the drawing's width is
+      -- also its depth, which is honest for the hedge balls and
+      -- boulders in the `cylinder` pool above but not for a tree --
+      -- the trunk is a stick, the crown is more air than wood, and at
+      -- full width the tree filled a whole cell of depth and read as a
+      -- boulder wearing bark.  50 halves it to an ellipse in plan;
+      -- the model stays round in section and centred on the cell.
+      -- The height is NOT authored: the class's 16 (see the `heights`
+      -- table at the top of this file) is the drawn elevation, which
+      -- is also the model's top plane, so anything riding a tree cell
+      -- lands right.
+      -- Scanned: the 2x2 grid occurs 3 times on this atlas and only
+      -- in CELADON_GYM -- cells (2,4), (7,5), (5,7) -- and per-tile
+      -- counts equal the grid count (3 hits for $40 alone), so no
+      -- stray occurrence renders as a lone hull.  DOJO shares gym.png
+      -- and places none, so the pin is not copied there.
+      sapling = { 64, 65, 80, 81 },
+      sapling_squash = 50,
       -- Vermilion Gym's trash cans ($0B/$0C over $1B/$1C), the switch
       -- puzzle's fifteen cans plus the sixteenth beside the leader's
       -- platform.  An open galvanised bin in the 3/4 view, and its plan is
@@ -405,13 +457,9 @@ return {
       can_well = 5,
       can_taper = 4,
       heights = { can = 9 },
-      -- The statues and Celadon's three little trees ($40/$41 canopy over
-      -- $50/$51 trunk).  A trunk is not round, so the tree cannot be a
-      -- ball like the shrubs beside it -- it takes the thin standee pool
-      -- every interior plant takes, which is also a pool apart from the
-      -- cylinders it touches.
-      prop = { 2, 56, 18, 19,
-               64, 65, 80, 81 },
+      -- The statues.  (Celadon's trees $40/$41/$50/$51 lived here
+      -- too until they moved to the sapling hull above.)
+      prop = { 2, 56, 18, 19 },
       -- The Hall of Fame's recording machine, the one piece of real
       -- furniture in the tileset.  It is drawn 32px wide and THREE tile
       -- rows tall against the north band, and the detector made a mess
@@ -685,7 +733,15 @@ return {
       -- per-cell hulls rather than boxes
       canopy = { 4 },
       cylinder = { 5, 6, 7, 21, 22, 23,
-                   35, 36, 37, 38, 39, 53, 54 },
+                   35, 36, 37, 38, 39, 53, 54,
+                   -- the Safari Zone's small round trees ($54/$55/$56/$57,
+                   -- one cell, 376 placements across the four safari maps
+                   -- and nowhere else on this tileset): drawn as a canopy
+                   -- ball like the overworld's lone tree, and the detector
+                   -- was boxing them into 16px dither-textured crates.
+                   -- One voxel ball per cell, the same hull the big trees'
+                   -- quarter tiles degrade to
+                   84, 85, 86, 87 },
       -- the stumps ($02/$03/$12/$13): a hull whose drawn top is a CUT
       -- FACE.  The body builds from the bark rows alone, and the drawn
       -- ellipse of growth rings projects onto the hull's round flat
@@ -1488,9 +1544,14 @@ return {
       --               terrace: their north rim (9/25 = $09/$19) and the
       --               pedestal course at the south (85/86/87).
       --
-      -- THE ROUND TABLES in full, because the shape is a compromise.  The
-      -- drawing (block 29, and the same four rows split across blocks 45
-      -- and 49 in the diner) is
+      -- THE ROUND TABLES in full, because the shape is a compromise.
+      -- (The `diner_round_table` template under `buildings` below now
+      -- models all four placements in full -- octagonal top on its
+      -- pedestal -- by matching the whole 4x4 grid, which is what a
+      -- per-tile pin can never do.  Everything here stays as its
+      -- degradation path and as the record of why the pins look the
+      -- way they do.)  The drawing (block 29, and the same four rows
+      -- split across blocks 45 and 49 in the diner) is
       --      $09 $27 $27 $19      an octagonal top seen from above, with
       --      $36 $37 $37 $39      a pedestal drawn below its southern
       --      $46 $37 $37 $47      rim
@@ -1511,7 +1572,7 @@ return {
       -- 8px is the FAR rim (9/25, and the shared 39/54/57) and the
       -- pedestal (85/86/87): the far rim is occluded by the 16px top in
       -- front of it, and the pedestal is meant to sit low.  16px is also
-      -- the right height against the 8px `stool` chairs drawn around it
+      -- the right height against the seat-high `stool` chairs around it
       -- -- a terrace table you sit at, not a footstool.
       counter = { 9, 21, 25, 36, 37, 38, 39, 41, 48, 49, 52, 53, 54,
                   57, 85, 86, 87 },
@@ -1541,7 +1602,15 @@ return {
       -- drawing carries a full black outline with the floor dither
       -- showing at all four corners, so the standee segments cleanly --
       -- and `stool` keeps its own pool, apart from anything it touches.
+      -- The `diner_stool` template (see `buildings` below) now models
+      -- every placement in full, like the house stool it copies; these
+      -- pins are its degradation path.
       stool = { 7, 8, 23, 24 },
+      -- the `diner_stool` template stands 5 voxels (the drawn
+      -- elevation: the seat's front edge at row 10 over legs 11-14),
+      -- as the house stool does: whoever sits on a stool cell rides
+      -- this height, not the 8px class default
+      heights = { stool = 5 },
       -- Deliberately NOT pinned:
       --   $37 (55) is three different things -- the light half of the
       --     checkerboard floor, the interior of the round tables, and
@@ -1827,6 +1896,18 @@ return {
       -- 18/19) sitting in a WALKABLE cell, so flat floor until pinned.
       -- The 8px standee pool, seat height, as in Red's rooms.
       stool = { 2, 3, 18, 19 },
+      -- ...and the height a figure riding that cell stands at, which is
+      -- the SEAT and not the backrest: the chair's seat is drawn rows
+      -- 26-31, six of them, so 6.  All three Game Freak developers are
+      -- placed ON their chair cell (CELADON_MANSION_3F objects at (0,4),
+      -- (3,4) and (0,7)), and VoxelScene.groundAt reads this pin, not
+      -- the `mansion_computer_desk` model that now draws the chair -- at
+      -- the class default 8 they floated two voxels over the seat.  The
+      -- same reading INTERIOR's `stool = 5` carries for Bill's chair,
+      -- which is this drawing with one white margin column instead of
+      -- two; these four ids are the mansion desks' chairs and nothing
+      -- else on this atlas, so the override reaches only them.
+      heights = { stool = 6 },
       -- the potted palms: two cells of drawing (68/69 crown, 8/9 fronds,
       -- 70/71 stem, 24/25 pot), mostly silhouette, so the THIN standee
       -- pool -- the same numbers the generic HOUSE entry uses, and the
@@ -4169,6 +4250,109 @@ return {
         roofRows = 28, roofBack = 24, roofFront = 0, roofCycle = { 2, 23 },
         slab = 3, frontEave = 0, ledge = nil,
       },
+      -- F07b: the SQUARE table of CELADON_MANSION_1F cells (0,6):(1,7)
+      -- (1 placement, scan.lua) -- the long table (F07) at two cells
+      -- wide, the same drawing to the tile everywhere but the interior
+      -- column count, and the same read to the row: 0-23 the tabletop
+      -- seen from above, 24-26 the slab's black/#555/black front edge,
+      -- 27 the #555 shadow that closes it (slab = 3, folded into the
+      -- band), 28-30 the base with the legs stopping one row short of
+      -- the grid.  Family numbers unchanged; the `table` pin stays as
+      -- the degradation path, neutralized where this stamps.
+      {
+        id = "mansion_square_table",
+        tiles = {
+          { 38, 39, 39, 41 },
+          { 54, 55, 55, 57 },
+          { 54, 55, 55, 57 },
+          { 60, 58, 58, 59 },
+        },
+        roofRows = 28, roofBack = 24, roofFront = 0, roofCycle = { 2, 23 },
+        slab = 3, frontEave = 0, ledge = nil,
+      },
+      -- F07c: the Game Freak office's COMPUTER DESK -- the writing desks
+      -- of CELADON_MANSION_2F cell (0,5) and CELADON_MANSION_3F cells
+      -- (0,3), (3,3) and (0,6).  scan.lua on the 4x4 grid returns those
+      -- four and nothing else, and each of the four ids that carry the
+      -- apron and chair rows (2/3/85/86, 18/19) occurs on this atlas ONLY
+      -- inside them -- so no stray cell can pick this model up.  (The
+      -- same ids are furniture on the HOUSE and FACILITY atlases; those
+      -- are different images and none of this entry's business.)
+      --
+      -- Rows 0-15 are BILL'S DESK, byte for byte.  A whole-crop diff of
+      -- these tiles against the interior atlas's 11/12/13/14 over
+      -- 27/28/29/30 comes back empty for all 512 pixels: the same
+      -- tabletop seen from above -- black rim, white highlight course,
+      -- grey field -- with the same terminal, cord and 2:1 isometric
+      -- computer drawn into it.  One drawing is one model, so the four
+      -- parts below are `bills_desk`'s verbatim; that entry carries the
+      -- readings (paper is flat, the keyboard's keys ride its top face,
+      -- `plan` = rx makes the computer a cube turned 45 and not a slab).
+      --
+      -- Only the FRONT is redrawn, and it is 6 rows where Bill's is 7:
+      --   15      the top's own black front edge.  This is the row the
+      --           lid replaces, so it opens the fascia exactly the way
+      --           Bill's row 16 does, and the desk stands 7 voxels to
+      --           his 8 -- measured, not chosen.
+      --   16-17   the #555 edge lip and the black seam under it: the
+      --           desktop's own rim, which is why they are `fascia` --
+      --           that band wraps every side, and a desktop's edge is
+      --           visible from all four.
+      --   18-21   the base: the left leg (the black/#555/black at
+      --           x0-x2), the open apron between, and the DRAWER
+      --           PEDESTAL at x20-x31 -- two #555 drawer fronts (rows
+      --           16-17 and 19-20) inside a black frame.  Each is a
+      --           non-black region sealed behind its own black outline
+      --           and under 24px, so the measured recess pass sinks it
+      --           one voxel and the frame stays proud: the drawer gaps
+      --           come off the pixels, nothing is authored.
+      -- Row 21 is the ground line and 22 is the measured one.  Rows
+      -- 22-23 are the desk's cast SHADOW, dithered into the checker
+      -- floor of the walkable cell in front, so the model builds none of
+      -- them -- they are floor, not furniture.
+      --
+      -- The chair is Bill's chair REDRAWN rather than the same pixels
+      -- (two white margin columns round the backrest panel where his
+      -- has one, and it sits at x4-x15 rather than x2-x13), but the same
+      -- object band for band -- rows 20-21 the backrest top seen from
+      -- above, 22-31 its elevation -- so it takes his part table with x
+      -- and `rise` moved: `rise` is the whole plane back down, because
+      -- the chair stands on the FLOOR and not on the desk.
+      --
+      -- Why the grid runs two tile rows past the desk: the artist drew
+      -- the apron into the WALKABLE cell in front (2/3 + 85/86), and
+      -- 2/3 also carry the chair's back.  A template claims whole TILES,
+      -- so reading the apron takes the chair with it -- which is what
+      -- makes the template owe it, exactly as at Bill's.  `desk.depth`
+      -- stops the desk box at its own two cells; the chair keeps the
+      -- front one.  The `table` pin on the top tiles and the `stool` pin
+      -- on 2/3/18/19 both stay as the degradation path, neutralized
+      -- wherever this stamps.
+      {
+        id = "mansion_computer_desk",
+        tiles = {
+          { 36, 37, 52, 53 },
+          { 64, 65, 66, 67 },
+          {  2,  3, 85, 86 },
+          { 18, 19, 17, 17 },
+        },
+        roofRows = 0, roofBack = 0, roofFront = 0, roofCycle = { 0, 0 },
+        slab = 0, frontEave = 0, ledge = nil, depth = 4,
+        -- the desk's own plot is its two cells; the grid runs on because
+        -- its apron and the CHAIR share tiles 2/3
+        desk = { fascia = { 15, 17 }, base = { 18, 21 }, depth = 2 },
+        parts = {
+          { kind = "flat", x = { 2, 15 }, rows = { 3, 7 } },   -- the notes
+          { kind = "upright", x = { 4, 15 }, top = { 8, 12 },
+            facade = { 12, 13 }, z = 8, depth = 6 },           -- keyboard
+          { kind = "upright", x = { 16, 19 }, top = { 8, 8 },
+            facade = { 8, 9 }, z = 8, depth = 2 },             -- the cord
+          { kind = "iso", x = { 19, 30 }, rows = { 1, 13 },
+            plan = 6, z = 9 },                                 -- the computer
+          { kind = "upright", x = { 4, 15 }, top = { 20, 21 },
+            facade = { 22, 31 }, rise = -7, z = 22, depth = 10 }, -- chair
+        },
+      },
     },
 
     HOUSE = {
@@ -4477,6 +4661,94 @@ return {
           { kind = "upright", x = { 2, 13 }, top = { 5, 10 },
             facade = { 11, 15 }, z = 3, depth = 11,
             stretch = true },                             -- the stool
+        },
+      },
+    },
+
+    LOBBY = {
+      -- F09 on the lobby atlas: the Celadon department store's stools
+      -- -- the diner's chairs, the roof terrace's, the Game Corner's
+      -- six rows and the four on 1F (58 placements, the scan's only
+      -- matches on this atlas).  A DIFFERENT drawing from the house
+      -- stool -- it sits one row HIGHER in the tile (seat top rows 4-9
+      -- over its front edge at 10 and the legs at 11-14, with a clear
+      -- floor row below) and its leg detail differs -- but the same
+      -- object band for band, so it takes the house part table with
+      -- the bands shifted up one row.  The measured ground line (15
+      -- here, 16 in the house) shifts with them, so the stand is the
+      -- same 5 voxels, and the tileset's `stool = 5` height override
+      -- keeps whoever sits here ON the seat.  The old stool standee
+      -- pins stay as the degradation path.
+      {
+        id = "diner_stool",
+        tiles = {
+          { 7, 8 },
+          { 23, 24 },
+        },
+        roofRows = 0, roofBack = 0, roofFront = 0, roofCycle = { 0, 0 },
+        slab = 0, frontEave = 0, ledge = nil,
+        panes = false,
+        parts = {
+          { kind = "upright", x = { 2, 13 }, top = { 4, 9 },
+            facade = { 10, 14 }, z = 3, depth = 11,
+            stretch = true },                             -- the stool
+        },
+      },
+      -- F11: the ROUND TABLE of the diner and the roof terrace -- 4
+      -- placements, all on this atlas (CELADON_DINER cells (0,2) and
+      -- (0,5), CELADON_MART_ROOF (4,2) and (8,4); scan
+      -- "9,39,39,25;54,55,55,57;70,55,55,71;85,86,87,55" matches
+      -- nowhere else). This is the drawing the long `counter` note
+      -- above calls a compromise -- its four interior tiles are $37,
+      -- unpinnable, so the flat treatment let the whole top BE a 16px
+      -- disc. The template matches the exact 4x4 grid instead, which
+      -- is what a per-tile pin can never do, and un-projects the three
+      -- facings: rows 0-23 the OCTAGONAL top seen from above (24
+      -- top-view rows = 24 depth rows, so the plan is the silhouette
+      -- itself, a `plan` slab 32x24), rows 24-25 the slab's #555/black
+      -- fascia folded down its rim, rows 26-31 the PEDESTAL seen under
+      -- the front edge -- two flattened circles, i.e. horizontal discs:
+      -- the base (diameter 16, drawn cols 8-23, side rows 30-31, its
+      -- top wearing the drawn shadow-and-white rows 26-29) and the dark
+      -- column (diameter 6, cols 13-18, rows 26-27 repeating up the
+      -- shaft), both on the drawn centre x 16 / plan centre z 12.
+      -- MEASURED: plan, diameters, centres, slab 3. AUTHORED: tabletop
+      -- plane 8 -- counter height, developer-tuned (the first cut
+      -- stood it at the flat compromise's 16px and it read too tall)
+      -- -- plus base height 2 and the 3-voxel column between. `depth`
+      -- 3 keeps the plot to the drawn plan; the grid's 4th tile row is
+      -- the pedestal's own drawing plus one floor tile ($37 again, at
+      -- the southeast corner), which the claim paints as ground.
+      -- `scrub` repoints the top's interior field -- the four $37
+      -- tiles, ALSO the checkerboard floor's light half, which carry
+      -- the floor's palette in a colorized atlas -- at the same grey
+      -- sourced from the rim's own field, so the whole top wears the
+      -- table's palette (the drawn field there is uniform grey;
+      -- nothing drawn is lost). The old wall/counter pins on the rim
+      -- tiles stay as the degradation path, and `support` carries the
+      -- top plane so anything the standee scan finds on these cells
+      -- rides the tabletop.
+      {
+        id = "diner_round_table",
+        tiles = {
+          { 9, 39, 39, 25 },
+          { 54, 55, 55, 57 },
+          { 70, 55, 55, 71 },
+          { 85, 86, 87, 55 },
+        },
+        roofRows = 0, roofBack = 0, roofFront = 0, roofCycle = { 0, 0 },
+        slab = 0, frontEave = 0, ledge = nil, depth = 3,
+        panes = false, support = 8,
+        scrub = { { 8, 8, 23, 23 } },
+        parts = {
+          { kind = "disc", cx2 = 32, cz2 = 24, r = 8, rise = 0, h = 2,
+            side = { rows = { 30, 31 }, x = { 13, 18 } },
+            cap = { rows = { 26, 29 }, x = { 9, 22 } } },   -- the base
+          { kind = "disc", cx2 = 32, cz2 = 24, r = 3, rise = 2, h = 3,
+            side = { rows = { 26, 27 }, x = { 14, 17 } } }, -- the column
+          { kind = "plan", x = { 0, 31 }, rows = { 0, 23 },
+            fascia = { 24, 25 }, fasciaX = { 8, 23 },
+            rise = 5 },                                     -- the top
         },
       },
     },

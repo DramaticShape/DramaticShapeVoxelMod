@@ -457,7 +457,8 @@ local function deskSetModel(sp, pr, t)
   local function buildParts(plane)
     for _, p in ipairs(t.parts) do
       Budget.tick()
-      local x0, x1 = p.x[1], p.x[2]
+      local x0 = p.x and p.x[1] or 0
+      local x1 = p.x and p.x[2] or (W - 1)
       if p.kind == "flat" then
         -- drawn row = depth row by default; `z` renames the origin when
         -- the flat sits below the desk's own drawn top span (the Center
@@ -578,6 +579,94 @@ local function deskSetModel(sp, pr, t)
                 if sy >= pr0 and sy <= pr1 and inside[i] then
                   put(sx, plane + y, z, i)
                 end
+              end
+            end
+          end
+        end
+      elseif p.kind == "plan" then
+        -- A PLAN part is a slab whose plan IS the drawn top view: the
+        -- band's silhouette becomes the footprint pixel for pixel
+        -- (drawn row = depth row, the same 1:1 every tabletop is drawn
+        -- with), so an octagonal top stands as an octagon rather than
+        -- the box no rectangular band can escape. The top layer wears
+        -- the band itself, outline and all; the rim layers below wear
+        -- the drawn fascia rows folded down the edge (x clamped into
+        -- the drawn fascia's span), and the slab's unseen interior the
+        -- field's dark texel.
+        local r0, r1 = p.rows[1], p.rows[2]
+        local f0, f1 = p.fascia[1], p.fascia[2]
+        local fx0, fx1 = p.fasciaX[1], p.fasciaX[2]
+        local rise = p.rise or 0
+        local h = (f1 - f0 + 1) + 1
+        if rise + h > ytop then ytop = rise + h end
+        local function drawn(sx, z)
+          return sx >= x0 and sx <= x1 and z >= 0 and z <= r1 - r0
+                 and inside[(r0 + z) * W + sx]
+        end
+        for z = 0, r1 - r0 do
+          if z >= 0 and z < D then
+            local sy = r0 + z
+            for sx = x0, x1 do
+              if inside[sy * W + sx] then
+                put(sx, rise + h - 1, z, sy * W + sx)
+                local edge = not (drawn(sx - 1, z) and drawn(sx + 1, z)
+                                  and drawn(sx, z - 1) and drawn(sx, z + 1))
+                for y = rise, rise + h - 2 do
+                  if edge then
+                    local fsx = math.max(fx0, math.min(fx1, sx))
+                    put(sx, y, z, (f0 + (rise + h - 2 - y)) * W + fsx)
+                  else
+                    put(sx, y, z, pr.shadeTexel[DARK])
+                  end
+                end
+              end
+            end
+          end
+        end
+      elseif p.kind == "disc" then
+        -- A DISC part is ROUND IN PLAN -- the pedestal column and base
+        -- the projection can only draw from the front. Centre and
+        -- radius are measured off the drawn widths (a flattened arc is
+        -- a horizontal circle seen from above); the circular footprint
+        -- is synthesized like any continued geometry, and every voxel
+        -- still wears the drawing: the side folds the drawn face-on
+        -- rows around the hull (x clamped into the drawn span, rows
+        -- repeating up the height), and `cap` lays the drawn top-view
+        -- rows over the top layer's interior, drawn north rows to the
+        -- plan's north. `cx2`/`cz2` are DOUBLED plan centres, so an
+        -- even diameter keeps its centre between two voxels instead of
+        -- limping one off.
+        local r, rise, h = p.r, p.rise or 0, p.h
+        local s0, s1 = p.side.rows[1], p.side.rows[2]
+        local sa0, sa1 = p.side.x[1], p.side.x[2]
+        local sn = s1 - s0 + 1
+        if rise + h > ytop then ytop = rise + h end
+        local function inDisc(x, z)
+          local dx = 2 * x + 1 - p.cx2
+          local dz = 2 * z + 1 - p.cz2
+          return dx * dx + dz * dz <= 4 * r * r
+        end
+        local zlo = math.floor((p.cz2 - 2 * r) / 2)
+        for x = math.floor((p.cx2 - 2 * r) / 2),
+                math.floor((p.cx2 + 2 * r) / 2) do
+          for z = math.max(0, zlo),
+                  math.min(D - 1, math.floor((p.cz2 + 2 * r) / 2)) do
+            if inDisc(x, z) then
+              local edge = not (inDisc(x - 1, z) and inDisc(x + 1, z)
+                                and inDisc(x, z - 1) and inDisc(x, z + 1))
+              for y = rise, rise + h - 1 do
+                local sx, sy
+                if p.cap and y == rise + h - 1 and not edge then
+                  local c0, c1 = p.cap.rows[1], p.cap.rows[2]
+                  sy = math.min(c1, c0 + math.floor((z - zlo)
+                                                    * (c1 - c0 + 1)
+                                                    / (2 * r)))
+                  sx = math.max(p.cap.x[1], math.min(p.cap.x[2], x))
+                else
+                  sy = s0 + (rise + h - 1 - y) % sn
+                  sx = math.max(sa0, math.min(sa1, x))
+                end
+                put(x, y, z, sy * W + sx)
               end
             end
           end

@@ -80,6 +80,14 @@ local FALLBACK_HEIGHTS = {
   -- the drawing's own straight run is only a couple of rows, because a GB
   -- cell spends most of itself on the opening
   can = 9,
+  -- the same hull SQUASHED front to back (the profile's sapling_squash,
+  -- a percent of the revolved depth): the little trees drawn one cell
+  -- wide -- Celadon Gym's garden trees and the overworld's cuttable
+  -- tree, which are the same drawing on two atlases. A tree is round in
+  -- its canopy but is not a boulder: revolved at full width it fills a
+  -- whole cell of depth, so the plan keeps its circle and shrinks toward
+  -- an ellipse
+  sapling = 16,
   -- round scenery drawn ONE cell wide and TWO cells TALL, standing on one
   -- cell of plot: the Pokemon Centers' potted plants. Carved as one
   -- 16x32x16 hull in the SOUTH (pot) cell -- the drawing's upper cell is
@@ -147,6 +155,7 @@ local ART = {
   canopy = "canopy",
   stump = "cylinder",
   can = "cylinder",
+  sapling = "cylinder",
   planter = "planter",
   billboard = "billboard",
   -- signposts share the billboard treatment but as their own pool at a
