@@ -914,6 +914,12 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
   Voxel3D.glassNight = outdoor and DayNight.windowLight() or 0
   local g = VoxelScene.glintStep(glint, cx, cy)
   Voxel3D.glassPhase, Voxel3D.glassGlint = g.phase, g.amp
+  -- and the map's atmosphere, if it has one (see ForestAtmos): the haze
+  -- the scene shader folds every surface into, in the hour's colour.
+  -- nil for every map without an entry -- a clear day, exactly as before.
+  local ForestAtmos = V.require("ForestAtmos")
+  local atmos = ForestAtmos.frame(state.map)
+  Voxel3D.fog = atmos and atmos.fog or nil
 
   local function atlasFor(map)
     return TerrainAtlas.forMap(map, modeColors(paletteFor, map))
@@ -1151,6 +1157,14 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
                  Mat4.translate(nb.ox, 0, nb.oy), fpull,
                  ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
   end
+
+  -- The map's atmosphere -- god rays down from the invisible canopy, and
+  -- whatever drifts through them (see ForestAtmos). Additive over the
+  -- finished depth buffer, so the trees occlude the light and the light
+  -- writes nothing; here in the prop slot, after everything the beams
+  -- should fall across and inside drawScene so VR gets them per eye. On
+  -- the one map that has any, today.
+  ForestAtmos.draw(state.map)
 
   -- The VR pokedex in the player's left hand, last of all: a prop over
   -- the world drawn with real depth, so leaning it into a wall still
