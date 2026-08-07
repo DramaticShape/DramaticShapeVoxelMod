@@ -55,7 +55,7 @@ Voxel3D.GRASS_FORMAT = {
   { "VertexPosition", "float", 3 },
   { "VertexTexCoord", "float", 2 },
   { "VertexShade", "float", 1 },
-  { "VertexGrass", "float", 3 }, -- phase, clump centre x, clump centre z
+  { "VertexGrass", "float", 4 }, -- phase, clump centre x/z, effect kind
 }
 
 Voxel3D.GRASS_WIND_PIXELS = 1.15
@@ -88,6 +88,8 @@ local SHADER = [[
   varying float vShade;
   varying vec3 vSun;          // this fragment's place in the sun's view
   varying float vFog;         // how deep into the map's haze it stands
+  varying float vFirefly;     // zero normally, night glow on firefly cards
+  uniform float fireflyNight; // shared safely by vertex and pixel stages
 #ifdef VOXEL_CULL
   // where this fragment stands in the FLAT world, for the diorama's
   // viewport to measure. Same precision reasoning as vGrid below: a
@@ -115,9 +117,10 @@ local SHADER = [[
   uniform vec4 grassPlayer;   // world x, world z, radius, push pixels
   uniform vec2 grassPrevious; // previous player world xz for swept contact
   attribute float VertexShade;
-  attribute vec3 VertexGrass;
+  attribute vec4 VertexGrass;
   vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vShade = VertexShade;
+    vFirefly = 0.0;
 #ifdef VOXEL_GRID
     // MODEL space, deliberately: every mesh here is built a unit per
     // voxel in its own frame, so the seams ride the model however it is
@@ -144,23 +147,51 @@ local SHADER = [[
       float bend = clamp(vertex_position.y / 8.0, 0.0, 1.0);
       bend *= bend;
       float wave = sin(grassWind.y * grassWind.w + VertexGrass.x);
-      vec2 offset = vec2(wave * grassWind.z, 0.0);
-
-      // Move each touched tuft rigidly a little to the left or right. The
-      // baked clump centre is identical for all its vertices, preventing
-      // stretching, twisting and the ugly crushed-grass silhouette.
-      vec2 clump = VertexGrass.yz;
-      float bodyDist = length(clump - grassPlayer.xy);
-      float touch = 1.0 - smoothstep(grassPlayer.z * 0.45,
-                                     grassPlayer.z, bodyDist);
-      float side = clump.x < grassPlayer.x ? -1.0 : 1.0;
-      if (abs(clump.x - grassPlayer.x) < 0.5)
-        side = sin(VertexGrass.x) < 0.0 ? -1.0 : 1.0;
-
-      // Preserve the existing wind bend. Player contact is only a small,
-      // uniform X translation, just enough to suggest the grass parting.
-      w.xz += offset * bend;
-      w.x += side * touch * grassPlayer.w;
+      if (VertexGrass.w > 1.5) {
+        // One-pixel firefly with a full behaviour loop: a long rest on the
+        // grass, smooth take-off, an irregular short flight, descent, landing
+        // and another pause. The baked phase keeps every insect independent.
+        float cycle = fract(grassWind.y * 0.052 + VertexGrass.x * 0.173);
+        float takeoff = smoothstep(0.30, 0.39, cycle);
+        float landing = 1.0 - smoothstep(0.68, 0.79, cycle);
+        float airborne = takeoff * landing;
+        float drift = grassWind.y * 0.83 + VertexGrass.x * 3.7;
+        float wander = sin(drift) * 2.8 + sin(drift * 0.37 + 1.3) * 1.5;
+        float lift = 2.5 + sin(drift * 1.19) * 1.1
+                     + sin(drift * 0.53 + 0.8) * 0.7;
+        w.x += airborne * wander;
+        w.y += airborne * lift;
+        // Mostly dim while resting, visibly brighter in flight, with a soft
+        // asynchronous pulse rather than a hard on/off blink.
+        float blink = 0.68 + 0.32 * (sin(drift * 2.11) * 0.5 + 0.5);
+        vFirefly = fireflyNight * blink * mix(0.14, 0.92, airborne);
+      } else if (VertexGrass.w > 0.5) {
+        // The first 72% of the cycle is airborne. A leaf gets an initial
+        // upward lift, travels with the wind, then gravity accelerates it
+        // down to the ground. It rests there for the remainder before a new
+        // leaf is emitted. Z remains fixed, preserving sprite depth order.
+        float life = fract(grassWind.y * 0.085 + VertexGrass.x * 0.159);
+        float fall = min(life / 0.72, 1.0);
+        float travel = fall * 44.0 - 6.0;
+        float flutter = grassWind.y * 3.0 + VertexGrass.x * 4.7;
+        float lift = sin(fall * 3.14159265) * 5.0;
+        float gravity = 9.0 * fall * fall;
+        float flutterFade = 1.0 - smoothstep(0.62, 1.0, fall);
+        w.x += travel + sin(flutter) * 1.2 * flutterFade;
+        w.y += lift - gravity
+               + sin(flutter * 0.61) * 0.8 * flutterFade;
+      } else {
+        vec2 offset = vec2(wave * grassWind.z, 0.0);
+        vec2 clump = VertexGrass.yz;
+        float bodyDist = length(clump - grassPlayer.xy);
+        float touch = 1.0 - smoothstep(grassPlayer.z * 0.45,
+                                       grassPlayer.z, bodyDist);
+        float side = clump.x < grassPlayer.x ? -1.0 : 1.0;
+        if (abs(clump.x - grassPlayer.x) < 0.5)
+          side = sin(VertexGrass.x) < 0.0 ? -1.0 : 1.0;
+        w.xz += offset * bend;
+        w.x += side * touch * grassPlayer.w;
+      }
     }
     // THE MAP'S HAZE (see ForestAtmos): how much fog stands between the
     // eye and this vertex -- distance dissolves into it, altitude climbs
@@ -389,6 +420,9 @@ local SHADER = [[
     // solid silhouette. Last in the chain, so neither the sun nor a voxel
     // seam can mottle it.
     rgb = mix(rgb, ghostColor, ghost);
+    // Emissive but still coloured: increasingly visible as Lua raises the
+    // night factor, without adding more insects or washing the scene white.
+    rgb = mix(rgb, vec3(0.82, 1.00, 0.22), vFirefly);
     // the viewport's rim is an ALPHA, so the last of the model blends into
     // whatever the frame opened with -- the sky, or the chroma key. 1
     // everywhere without the cut compiled in, which is every flat frame.
@@ -1116,6 +1150,7 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
   pcall(sh.send, sh, "ghostColor", Voxel3D.GHOST_COLOR)
   -- the hour's light, as the caller last set it (see Voxel3D.tint)
   pcall(sh.send, sh, "dayTint", Voxel3D.tint or { 1, 1, 1 })
+  pcall(sh.send, sh, "fireflyNight", Voxel3D.fireflyNight or 0)
   -- and the map's haze (see Voxel3D.fog), density 0 when there is none
   local fog = Voxel3D.fog
   pcall(sh.send, sh, "fogColor", (fog and fog.color) or { 0, 0, 0 })

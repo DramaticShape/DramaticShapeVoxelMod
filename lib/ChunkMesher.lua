@@ -821,7 +821,9 @@ local function quadsMesh(quads, grass)
       local uv = q.uv and q.uv[i] or { q.u, q.v }
       local v = { c[1], c[2], c[3], uv[1], uv[2], q.shade }
       if grass then
-        v[7], v[8], v[9] = q.sway or 0, q.cx or 0, q.cz or 0
+        v[7], v[8], v[9], v[10] = q.sway or 0, q.cx or 0,
+                                     q.cz or 0,
+                                     q.firefly and 2 or (q.leaf and 1 or 0)
       end
       verts[#verts + 1] = v
     end

@@ -3521,6 +3521,38 @@ function Structures.buildGrass(S, map, x0, x1, y0, y1, data)
             cx = wx + 4, cz = wz + 4,
           }
         end
+
+        -- Sparse wind-borne leaf. It reuses one opaque grass texel and is
+        -- animated entirely on the GPU, so no per-frame Lua particles exist.
+        if #tpl > 0 and ((tx * 13 + ty * 7) % 11 == 0) then
+          local src = tpl[1]
+          local uv = src.uv and src.uv[1] or { src.u, src.v }
+          local lx = wx + 2 + ((tx * 5 + ty * 3) % 5)
+          local lz = wz + 4
+          local ly, size = 9 + ((tx + ty) % 3), 1.25
+          quads[#quads + 1] = {
+            { lx - size, ly,        lz }, { lx + size, ly,        lz },
+            { lx + size, ly + size, lz }, { lx - size, ly + size, lz },
+            uv = { uv, uv, uv, uv }, shade = 1, sway = sway + 0.73,
+            cx = lx, cz = lz, leaf = true,
+          }
+        end
+
+        -- Rarer one-pixel firefly. Geometry exists all day, but the shader
+        -- gives it zero glow outside outdoor night.
+        if #tpl > 0 and ((tx * 17 + ty * 11) % 29 == 0) then
+          local src = tpl[1]
+          local uv = src.uv and src.uv[1] or { src.u, src.v }
+          local fx = wx + 2 + ((tx * 3 + ty * 5) % 5)
+          local fz = wz + 4
+          local fy, half = 9 + ((tx + ty) % 4), 0.5
+          quads[#quads + 1] = {
+            { fx - half, fy,     fz }, { fx + half, fy,     fz },
+            { fx + half, fy + 1, fz }, { fx - half, fy + 1, fz },
+            uv = { uv, uv, uv, uv }, shade = 1, sway = sway + 1.37,
+            cx = fx, cz = fz, firefly = true,
+          }
+        end
       end
     end
   end

@@ -913,6 +913,9 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
   local GlassMask = V.require("GlassMask")
   Voxel3D.glassMask = outdoor and GlassMask.texture(state.map.tileset) or nil
   Voxel3D.glassNight = outdoor and DayNight.windowLight() or 0
+  -- The existing day/night ramp is also a darkness factor. Fireflies fade
+  -- in naturally at dusk and reach full contrast only at deepest night.
+  Voxel3D.fireflyNight = outdoor and DayNight.windowLight() or 0
   local g = VoxelScene.glintStep(glint, cx, cy)
   Voxel3D.glassPhase, Voxel3D.glassGlint = g.phase, g.amp
   -- and the map's atmosphere, if it has one (see ForestAtmos): the haze
