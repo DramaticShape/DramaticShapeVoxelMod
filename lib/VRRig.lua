@@ -62,13 +62,25 @@ VRRig.VIEW_DIST = 0.95
 -- and (-d sin a) ahead of the resting head reproduces exactly that line
 -- of sight -- step onto the 35 rung and the table presents at 35 degrees,
 -- onto 75 and it rises toward eye level, easing between them as the rung
--- tween runs. `heightOff` is the grab-drag adjustment, in metres of world
--- travel (positive drags the world up).
-function VRRig.dioramaAnchor(angleRad, heightOff)
+-- tween runs.
+--
+-- `off` is the grab-drag adjustment, in metres of LOCAL travel -- where
+-- the player has carried the model to. A bare number is the height alone,
+-- which is what the standard mode's one-axis drag has always sent; the
+-- DIORAMA modes hand over all three (see lib/Diorama). Positive Y drags
+-- the world up: the anchor is the LOCAL point pinned to the pivot, so
+-- moving it moves the model with the hand rather than against it.
+function VRRig.dioramaAnchor(angleRad, off)
   local d = VRRig.VIEW_DIST
-  return { 0,
-           -d * math.cos(angleRad or 0) + (heightOff or 0),
-           -d * math.sin(angleRad or 0) }
+  local ox, oy, oz = 0, 0, 0
+  if type(off) == "table" then
+    ox, oy, oz = off[1] or 0, off[2] or 0, off[3] or 0
+  elseif type(off) == "number" then
+    oy = off
+  end
+  return { ox,
+           -d * math.cos(angleRad or 0) + oy,
+           -d * math.sin(angleRad or 0) + oz }
 end
 
 -- The diorama's scale, in world px per metre: the one that makes the
@@ -133,12 +145,26 @@ VRRig.FAR = 400
 --   yaw     optional turn of the whole mapping about +Y, radians: the
 --           battle mount faces the resting head at the arena with it.
 --           worldFromXr(p) becomes pivot + s * Ry(yaw) * (p - anchor).
+--   curveK  the world curve this eye is to be drawn with (see WorldCurve);
+--           omitted is 0, the curve DECLINED.
+--
+-- Off by default because standing inside a bent world is what first person
+-- already declines on the flat screen, and the battle mount is a placed
+-- shot. The DIORAMA modes are the case that wants it and asks for it: the
+-- model is a thing being looked AT, so bending it into a little globe is
+-- the whole point rather than a broken tabletop -- and it is what the left
+-- stick's click throws (see lib/VR). Passed in rather than read here
+-- because a rig has no business deciding what a row means.
+--
+-- Beware the shape of the answer: Voxel3D reads `camera.curve` with `or`,
+-- and 0 is TRUE in Lua, so a 0 here really does pin the bend off -- which
+-- is exactly why the diorama's curve did nothing until this became a
+-- parameter.
 --
 -- Returns a table shaped for Voxel3D.camera: raw view + proj, the world
 -- eye and focus (for setLook, the water's lean, the sky), fov as a
--- vertical span, and the curve declined -- a bent tabletop reads as a
--- broken model, and first person already declines it on the flat screen.
-function VRRig.eyeCamera(pose, fov, pivot, anchor, scale, yaw)
+-- vertical span, and that curve.
+function VRRig.eyeCamera(pose, fov, pivot, anchor, scale, yaw, curveK)
   local px, py, pz = pose.pos[1], pose.pos[2], pose.pos[3]
   local q = pose.quat
   local R = Mat4.fromQuat(q[1], q[2], q[3], q[4])
@@ -199,7 +225,7 @@ function VRRig.eyeCamera(pose, fov, pivot, anchor, scale, yaw)
     eye = { ex, ey, ez },
     focus = { ex + fx * scale, ey + fy * scale, ez + fz * scale },
     fov = fov.angleUp - fov.angleDown,
-    curve = 0,
+    curve = curveK or 0,
     skyRay = skyRay,
   }
 end
