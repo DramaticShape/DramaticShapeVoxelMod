@@ -1,5 +1,7 @@
 # Dramatic Shape Voxel Mod
 
+Redistribution of non-derivative code is expressly prohibited after v1.6.0 without permission.
+
 A mod for the [Pokémon Gen 1 Recompilation
 Project](https://github.com/bryanthaboi/pokemon-gen1-recomp-project).
 
