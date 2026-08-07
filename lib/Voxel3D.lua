@@ -48,6 +48,21 @@ Voxel3D.FORMAT = {
   { "VertexShade", "float", 1 },
 }
 
+-- Tall grass carries one extra value: a stable phase shared by every
+-- vertex in a tuft. Keeping it constant prevents the two ends of a blade
+-- from shearing apart while the gust travels across the map.
+Voxel3D.GRASS_FORMAT = {
+  { "VertexPosition", "float", 3 },
+  { "VertexTexCoord", "float", 2 },
+  { "VertexShade", "float", 1 },
+  { "VertexGrass", "float", 3 }, -- phase, clump centre x, clump centre z
+}
+
+Voxel3D.GRASS_WIND_PIXELS = 1.15
+Voxel3D.GRASS_WIND_SPEED = 2.35
+Voxel3D.GRASS_INTERACT_RADIUS = 12
+Voxel3D.GRASS_INTERACT_PIXELS = 2.5
+
 -- Face shading by direction id: top faces stay
 -- full brightness, sides step down so an extruded block reads as solid
 -- instead of a flat sticker, and the faces turned away from the sun are
@@ -96,7 +111,11 @@ local SHADER = [[
   uniform float pull;
   uniform vec3 curve;         // xy = the focus in world XZ, z = k; 0 = off
   uniform vec4 fogInfo;       // density, start, heightK; density 0 = clear
+  uniform vec4 grassWind;     // enabled, time, wind pixels, speed
+  uniform vec4 grassPlayer;   // world x, world z, radius, push pixels
+  uniform vec2 grassPrevious; // previous player world xz for swept contact
   attribute float VertexShade;
+  attribute vec3 VertexGrass;
   vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vShade = VertexShade;
 #ifdef VOXEL_GRID
@@ -117,6 +136,32 @@ local SHADER = [[
     // answered. (The pull below is excluded for the same reason: it is a
     // depth trick aimed at the camera's own buffer.)
     vSun = (sunVP * (sunModel * vertex_position)).xyz;
+
+    // Wind and player contact are applied in world space, before the curved
+    // world and camera pull. vertex y is 0..8 for these tuft meshes, which
+    // pins the root and lets the tip receive the full displacement.
+    if (grassWind.x > 0.5) {
+      float bend = clamp(vertex_position.y / 8.0, 0.0, 1.0);
+      bend *= bend;
+      float wave = sin(grassWind.y * grassWind.w + VertexGrass.x);
+      vec2 offset = vec2(wave * grassWind.z, 0.0);
+
+      // Move each touched tuft rigidly a little to the left or right. The
+      // baked clump centre is identical for all its vertices, preventing
+      // stretching, twisting and the ugly crushed-grass silhouette.
+      vec2 clump = VertexGrass.yz;
+      float bodyDist = length(clump - grassPlayer.xy);
+      float touch = 1.0 - smoothstep(grassPlayer.z * 0.45,
+                                     grassPlayer.z, bodyDist);
+      float side = clump.x < grassPlayer.x ? -1.0 : 1.0;
+      if (abs(clump.x - grassPlayer.x) < 0.5)
+        side = sin(VertexGrass.x) < 0.0 ? -1.0 : 1.0;
+
+      // Preserve the existing wind bend. Player contact is only a small,
+      // uniform X translation, just enough to suggest the grass parting.
+      w.xz += offset * bend;
+      w.x += side * touch * grassPlayer.w;
+    }
     // THE MAP'S HAZE (see ForestAtmos): how much fog stands between the
     // eye and this vertex -- distance dissolves into it, altitude climbs
     // out of it. Worked out on the FLAT world like the shadow lookup
@@ -490,6 +535,15 @@ end
 function Voxel3D.newMesh(verts, map)
   if #verts == 0 then return nil end
   local ok, mesh = pcall(love.graphics.newMesh, Voxel3D.FORMAT, verts,
+                         "triangles", "static")
+  if not ok then return nil end
+  if map and #map > 0 then pcall(mesh.setVertexMap, mesh, map) end
+  return mesh
+end
+
+function Voxel3D.newGrassMesh(verts, map)
+  if #verts == 0 then return nil end
+  local ok, mesh = pcall(love.graphics.newMesh, Voxel3D.GRASS_FORMAT, verts,
                          "triangles", "static")
   if not ok then return nil end
   if map and #map > 0 then pcall(mesh.setVertexMap, mesh, map) end
@@ -1089,6 +1143,10 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
   pcall(sh.send, sh, "glassGlint", Voxel3D.glassGlint or 0)
   -- on until a sprite pass says otherwise, reset per frame like `ghost`
   pcall(sh.send, sh, "glassOn", 1)
+  -- still until the dedicated grass pass enables it
+  pcall(sh.send, sh, "grassWind", { 0, 0, 0, 0 })
+  pcall(sh.send, sh, "grassPlayer", { -100000, -100000, 1, 0 })
+  pcall(sh.send, sh, "grassPrevious", { -100000, -100000 })
   -- the curved world bends about the camera's focus, so the horizon keeps
   -- a fixed distance ahead of the player rather than sitting on the map.
   -- A placed camera may decline it outright (Voxel3D.camera.curve = 0).
@@ -1366,6 +1424,24 @@ end
 function Voxel3D.glass(on)
   if not (active and activeShader) then return end
   pcall(activeShader.send, activeShader, "glassOn", on and 1 or 0)
+end
+
+-- Enable wind only around tall-grass draws. px/pz are the current player's
+-- feet in world pixels; previous values make collision continuous per frame.
+function Voxel3D.grassWind(on, px, pz, previousX, previousZ)
+  if not (active and activeShader) then return end
+  if not on then
+    pcall(activeShader.send, activeShader, "grassWind", { 0, 0, 0, 0 })
+    return
+  end
+  local now = love.timer and love.timer.getTime and love.timer.getTime() or 0
+  pcall(activeShader.send, activeShader, "grassWind",
+        { 1, now, Voxel3D.GRASS_WIND_PIXELS, Voxel3D.GRASS_WIND_SPEED })
+  pcall(activeShader.send, activeShader, "grassPlayer",
+        { px or -100000, pz or -100000,
+          Voxel3D.GRASS_INTERACT_RADIUS, Voxel3D.GRASS_INTERACT_PIXELS })
+  pcall(activeShader.send, activeShader, "grassPrevious",
+        { previousX or px or -100000, previousZ or pz or -100000 })
 end
 
 function Voxel3D.endGhost()

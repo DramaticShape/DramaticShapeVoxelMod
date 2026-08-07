@@ -812,18 +812,23 @@ function ChunkMesher.build(map, bodyOnly, masks, split)
   return sink.finish(), waterSink and waterSink.finish() or nil
 end
 
-local function quadsMesh(quads)
+local function quadsMesh(quads, grass)
   if #quads == 0 then return nil end
   local verts, indices, n = {}, {}, 0
   for _, q in ipairs(quads) do
     for i = 1, 4 do
       local c = q[i]
       local uv = q.uv and q.uv[i] or { q.u, q.v }
-      verts[#verts + 1] = { c[1], c[2], c[3], uv[1], uv[2], q.shade }
+      local v = { c[1], c[2], c[3], uv[1], uv[2], q.shade }
+      if grass then
+        v[7], v[8], v[9] = q.sway or 0, q.cx or 0, q.cz or 0
+      end
+      verts[#verts + 1] = v
     end
     Voxel3D.pushQuad(indices, n)
     n = n + 1
   end
+  if grass then return Voxel3D.newGrassMesh(verts, indices) end
   return Voxel3D.newMesh(verts, indices)
 end
 
@@ -832,7 +837,7 @@ end
 -- walker's feet (characters stamp over terrain, Gen 1 style, so ordinary
 -- terrain could never do this).
 local function buildGrassMesh(map)
-  return quadsMesh(Structures.forMap(map).grassQuads)
+  return quadsMesh(Structures.forMap(map).grassQuads, true)
 end
 
 -- The flower billboards as their own mesh, for the same reason as the

@@ -3508,13 +3508,17 @@ function Structures.buildGrass(S, map, x0, x1, y0, y1, data)
           templates[tileId] = tpl
         end
         local wx, wz = tx * 8, ty * 8
+        -- Stable diagonal phase per tuft. Both ends of every quad receive
+        -- the same value, so a gust bends the slab without shearing it.
+        local sway = wx * 0.050 + wz * 0.031
         for _, q in ipairs(tpl) do
           quads[#quads + 1] = {
             { q[1][1] + wx, q[1][2], q[1][3] + wz },
             { q[2][1] + wx, q[2][2], q[2][3] + wz },
             { q[3][1] + wx, q[3][2], q[3][3] + wz },
             { q[4][1] + wx, q[4][2], q[4][3] + wz },
-            uv = q.uv, shade = q.shade,
+            uv = q.uv, shade = q.shade, sway = sway,
+            cx = wx + 4, cz = wz + 4,
           }
         end
       end

@@ -1141,11 +1141,28 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
   -- so the tuft rows keep exactly the characters' own depth handicap
   local lean = math.max(leanAngle(), 0.05)
   local pull = VoxelScene.pull(lean)
+  -- Character px/py is anchored on the 16 px card. Its world centre/feet
+  -- contact used by the camera code is +8,+8, so use the same point here.
+  -- Keep the prior rendered point so fast steps sweep through every tuft.
+  local gx, gz = -100000, -100000
+  if me then gx, gz = me.px + 8, me.py + 8 end
+  VoxelScene._grassPrevX = VoxelScene._grassPrevX or gx
+  VoxelScene._grassPrevZ = VoxelScene._grassPrevZ or gz
+  -- A warp/map transition is not a walk. Do not sweep one enormous contact
+  -- segment across the new map when the player jumps more than two tiles.
+  local gdx, gdz = gx - VoxelScene._grassPrevX, gz - VoxelScene._grassPrevZ
+  if gdx * gdx + gdz * gdz > 32 * 32 then
+    VoxelScene._grassPrevX, VoxelScene._grassPrevZ = gx, gz
+  end
+  Voxel3D.grassWind(true, gx, gz,
+                    VoxelScene._grassPrevX, VoxelScene._grassPrevZ)
   Voxel3D.draw(ChunkMesher.grass(state.map), atlasFor(state.map), nil, pull)
   for _, nb in ipairs(state.neighbors or {}) do
     Voxel3D.draw(ChunkMesher.grass(nb.map), atlasFor(nb.map),
                  Mat4.translate(nb.ox, 0, nb.oy), pull)
   end
+  Voxel3D.grassWind(false)
+  VoxelScene._grassPrevX, VoxelScene._grassPrevZ = gx, gz
   -- flower billboards: pulled like the characters and the grass, MINUS
   -- the depth of 8 world pixels along the view (8 sin a -- the camera
   -- looks along (0, -cos a, -sin a), so that is exactly one tile row of
