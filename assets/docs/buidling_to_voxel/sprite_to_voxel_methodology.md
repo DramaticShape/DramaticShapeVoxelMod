@@ -61,6 +61,10 @@ cues generalize:
 | Band containing window/door frames | Vertical facade | Straight extrusion |
 | Full-width band with a black underline sitting above an inset band | Ledge / awning overhang | Extrusion + protrusion |
 | Dark `#555` runs beside a facade under a taper | Shadow on the wall beneath an eave | Leave as wall — the geometry above produces the shadow's meaning |
+| Scattered light shapes on a dark field, bracketed by TWO full-width black rims, shallow band below the lower rim | The **inside of an open container** seen from above, with contents lying in it | Hollow tray: walls to the rims, floor slab, air between — never an extrusion |
+| Ellipse drawn wider than tall (e.g. 9x5) | A horizontal circle seen from above — a mouth, a lid, a pot rim | Cut face of a round hull; the aspect ratio is the proof of the top view |
+| Arcs above/below a round object's straight flanks, lowest point at the centre column, often a 1px #555 halo outside | The SAME circles seen curving — ground contact and mouth back-edge, i.e. depth, not narrowing | Strip them from the revolve; run the last body row's disc to the floor |
+| A side band shearing sideways as it descends (¾-view) | The projection sliding a receding wall, not the wall's position | Un-project: the wall goes where the plan says |
 
 The band table for Red's house, which Blue's house shares verbatim:
 
@@ -156,9 +160,12 @@ Tooling: `voxel_build_verify.py` (builds, asserts, renders previews).
 
 1. Obtain the sprite; sample to native resolution via block centers.
 2. Extract palette + silhouette (light-only flood fill, threshold 130);
-   review the ASCII mask.
-3. Segment rows into bands using the Stage-2 cues; write the band table
-   before writing any geometry code.
+   review the ASCII mask — rendered large, not hand-counted.
+3. Name the real object first (including whether it is hollow, round or
+   thin — see "Beyond the house"), then segment rows into bands using the
+   Stage-2 cues; write the band table as prose, one line per row range
+   with where each band lands, before writing any geometry code. The
+   correct reading makes the row arithmetic land exactly.
 4. Measure taper rates from the mask; derive `T(x)`, `YTOP`, overhangs, `D`.
 5. Build: extrude verticals (de-outlined interiors) → ledges → recesses →
    flat top (mid-row cycling) → sloped solids (overwrite, then trim) →
@@ -214,3 +221,75 @@ right for the raw GB palette but comes out white once the atlas is
 recoloured, turning every sloped end into a black-and-white zip. The
 drawing's own eave is black / `#555` / black, and using that reads correctly
 under every palette.
+
+## Beyond the house: the forms later objects added
+
+The house is all solid masses — every band either lies flat or extrudes.
+Later objects forced the taxonomy open, and each addition came from the
+same root move: **name the real 3D form first, then ask which surfaces the
+drawing shows.** The recurring failure at every step was the *extruded
+picture* — and it has a second-order form that survives re-segmentation.
+The Bike Shop's toolbox was re-read from "a prop" into "a cabinet with a
+pump beside it": named parts, correct plot, de-outlined sides, and still
+wrong, because the region read as a cabinet *front* was the inside of an
+open box seen from above. Naming the parts is not enough; every REGION
+must answer "what surface of the real object is this?" The reliable
+arbiter is arithmetic: the correct reading makes the drawn row counts land
+exactly (the toolbox: 1 back-wall rim + 6 interior rows + 1 front rim = 8
+= the one-tile plot depth). Forcing rows to fit means the reading is wrong.
+
+**Hollow forms.** An open container is the one shape whose model must
+contain AIR, which no band table or extrusion can produce. The tray
+treatment builds four walls to the drawn rims, lays the top-view band on
+the floor of the cavity (its contents — a wrench — come along free, since
+they are just pixels of that band), and leaves the space between empty.
+Two rules only containers hit: the pane-recess pass must never run on a
+one-voxel wall (it deletes the front voxel to expose the one behind, and
+there is nothing behind — the wall becomes a hole), and the hollowness
+needs its own verification assert, because a later change that refills the
+cavity leaves every count looking plausible.
+
+**Round forms.** A drawn ellipse wider than tall is a horizontal circle
+seen from above — that one aspect-ratio measurement settles the whole
+reading. Straight flanks give diameter and height at once (round in plan,
+so drawn width IS depth — the one depth never authored). The arcs above
+and below the straight run are the same top and base circles seen curving:
+ground contact and mouth edge, not narrowing — revolving them puts the
+object on a stem. The hull's chord representation stores one z-interval
+per column/row, so a taper is expressible (re-cut the chords, squeeze the
+art into the narrowed span so the rim outline survives) but a hollow ring
+needs a second chord. Voxel resolution bounds taste: on an 11-wide object
+a one-step taper reads as damage and two steps as a cone; pick the step
+count and derive the amount.
+
+**Thin forms.** A line drawing cannot be thick. The air inside a bicycle's
+frame is what makes it read as a bicycle; extrude each stroke 5 voxels and
+the side faces of neighbouring strokes close every gap off-axis — six
+bikes become one dark mass. Standee thickness is a vocabulary
+(`PINNED_DEPTH`: 1 for paper, 2 for plates and side-on vehicles, 5 for
+silhouettes, 10 for objects with a body), and when a standee looks wrong
+the first move is to dump the detector's mask — if the mask is a clean
+object, thickness is the problem, not segmentation.
+
+**Authored masks.** When a drawing shares its tiles and shades with what
+it is painted into, nothing automatic can separate them; the profile
+carries a pixel mask instead. A person becomes a `figures` card (flat,
+leaning with the camera, standing on its feet — because GB character art
+is face-on iconography); an object becomes a `mounted` slab (fixed in the
+world, holding the wall's plane, keeping its drawn elevation — because a
+side-on drawing is a plane parallel to the wall). And when the backdrop is
+a *regular* pattern, the mask should be MEASURED, not hand-drawn:
+composite the plain backdrop tile over the same grid and flood from the
+border through pixels that still match it — what the flood cannot reach is
+the object, sprite-pure and exact.
+
+**Verification, extended.** Isometric previews miss what only the game
+shows: shoot in-game at both the ¾ rung and the low rung (front-face holes
+and proportion errors are invisible from above), crop and NEAREST-upscale
+before judging, and remember the flat rung renders no model at all. Two
+cheap renders beat argument: the front-most voxel per (x, y) laid beside
+the composited drawing catches anchoring and texel leaks instantly, and
+the same render with sunk voxels flagged turns the recess pass into
+something you look at. When shared builder code moves, a saved count
+baseline diffed after every edit (mind the line endings) is what proves a
+generalization is an identity for every model that already shipped.

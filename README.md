@@ -17,7 +17,7 @@ menu.
 | `SELECT` (pad / touch) | the same step as `3` — for the machines with no number row |
 | `5`, or the **V-GRID** options row | OFF / ON — a one-pixel wireframe on every voxel |
 | `6`, or the **T-SHIFT** options row | OFF → 1 → 2 → 3 → OFF (miniature blur) |
-| `7`, or the **V-CURVE** options row | OFF → 1 → 2 → 3 — bend the world over the horizon |
+| `7`, or the **V-CURVE** options row | OFF → 1 → 2 → 3 → 4 → 5 — bend the world over the horizon; 5 is a half sphere |
 | `8`, or the **3D-BTL** options row | 2D-3D A / 2D-3D B / STADIUM A / STADIUM B / OFF — fight in 3D instead of on a white field. **A** stages it on the map, **B** on two discs against the sky; **2D-3D** uses the game's own battle pics and **STADIUM** the Pokémon Stadium battle models |
 | `9`, or the **WATER** options row | FULL / SKY / OFF — waves and reflections on water. **SKY** gives the surface its pixel-tall wave columns and puts the sky, the sun, the moon and the cast in them; **FULL** adds a screen-space ray march that also reflects the shoreline, the trees and the buildings standing behind it |
 | the **BACK SPRITES** options row | OFF / ON — keep your own Pokémon on the battle menu, seen from behind in its classic slot, instead of standing it on the map; the foe is still out there. Only on the menu while **3D-BTL** is on, because it decides nothing without it |
@@ -185,13 +185,43 @@ identical.
 
 ## VR
 
-The **VR** options row (OFF / ON, off by default) drives a PCVR headset
-through OpenXR on Windows — SteamVR, Oculus or WMR.
+The **VR** options row (OFF / STANDARD / DIORAMA / DIORAMA-MR, off by
+default) drives a PCVR headset through OpenXR on Windows — SteamVR,
+Oculus or WMR.
 
-Both free-roam rungs put the headset in the player's *head*: a boom that
-seats its wearer three cells behind their own body is a reliable way to make
-people ill, so **3RD** in VR is **1ST** in VR. The rung still changes the
-walk and the sprites the same way.
+**STANDARD** follows the VOXEL ladder. Both free-roam rungs put the
+headset in the player's *head*: a boom that seats its wearer three cells
+behind their own body is a reliable way to make people ill, so **3RD** in
+VR is **1ST** in VR. The rung still changes the walk and the sprites the
+same way.
+
+### DIORAMA
+
+**DIORAMA** is one presentation instead of a ladder: the world is always a
+model on the table, and the model is a *thing in the room*.
+
+- **A viewport.** Everything outside an invisible **box** centred on the
+  view is not drawn — a square slab of Kanto sitting in the air rather
+  than a map running off to a horizon, cut with a hard edge, because a
+  flat world is a thing with sides and the sides are what say so. The sky
+  behind is the same one the flat screen has.
+- **V-CURVE changes its shape.** With the bend on the world is not flat
+  any more, and a square cut through a little globe is a lie about what is
+  being looked at — so the box becomes a **ball** whose rim is a
+  **gradient** dissolving into the sky. One click of the left stick throws
+  the row and swaps between the two readings of the same model.
+- **A staged fight** ignores both and cuts a vertical pillar about the
+  arena, always with the dissolved rim, which lifts the fight out of the
+  map as a floating disc.
+- **The grips** take hold of it: one hand carries the model anywhere in
+  the room, both hands turn it and open the viewport out to whatever you
+  spread your hands to.
+- **The left stick's click** throws **V-CURVE** to its top rung and back,
+  rather than stepping views — there is no 2D diorama and no first-person
+  one, so the ladder is held on an orbit rung while the mode runs.
+
+**DIORAMA-MR** is the same mode with the background keyed pure green, for
+a mixed-reality capture that composites the model into your own room.
 
 ### VR controls
 
@@ -204,10 +234,11 @@ alongside.
 | left stick | move — grid-walks the diorama, free-walks 1ST |
 | A / B (X / Y on the left hand) | A / B |
 | either trigger | START |
-| left stick click | step the VOXEL angle ladder (same as the "3" key) |
-| right stick up / down | *diorama only* — zoom the model |
+| left stick click | *STANDARD* — step the VOXEL angle ladder (same as the "3" key); *DIORAMA* — throw **V-CURVE** to its top rung and back |
+| right stick up / down | *tabletop* — zoom the model |
 | right stick left / right | *1ST only* — snap-turn 45°, or turn smoothly with **SMOOTH TURN** on |
-| grip squeeze + raise / lower that hand | *diorama only* — drag the table's height |
+| one grip squeezed | *STANDARD* — drag the table's height; *DIORAMA* — carry the model wherever that hand goes |
+| both grips squeezed | *DIORAMA only* — turn the model with your hands, and open or close the viewport by spreading them |
 | head | *1ST and battles* — look; FreeMove walks where you look |
 | left hand | *1ST and battles* — the Pokédex: menus, dialogs and the 2D battle screen on its screen |
 

@@ -56,11 +56,28 @@ WorldCurve.LABEL = "V-CURVE"
 -- of the town -- which stops being a look and starts being an occlusion
 -- bug, since what has rolled away is still there to walk into. (The first
 -- cut ran 0.18/0.35/0.60 and every rung of it was a marble.)
-WorldCurve.AMOUNTS = { 0, 0.05, 0.10, 0.18 }
+--
+-- 4 AND 5 ARE PAST THAT LINE ON PURPOSE, and they are for the DIORAMA:
+-- once the world is a model being looked at from outside rather than a
+-- place being walked around in, "the horizon has closed over the next
+-- block" stops being a bug and becomes the entire effect -- the town on
+-- top of a little planet.
+--
+-- 5 is the HALF SPHERE, and it is not eyeballed. The drop is a parabola,
+-- y = k d^2 with k = amount / vh, and the parabola that osculates a sphere
+-- of radius R at its pole is y = d^2 / 2R -- so k = 1 / 2R, and an amount
+-- of 1.0 gives R = vh / 2. The diorama's box is cut at exactly half a view
+-- height (Diorama.BOX_FRAC), so at amount 1.0 the model's own rim is that
+-- sphere's EQUATOR: the ground turns 45 degrees by the edge of the cut and
+-- is falling vertically a view-height out. A dome, ending where the model
+-- ends. 4 is the step between it and 3, geometrically rather than
+-- arithmetically -- the effect goes as the square of distance, so even
+-- steps in `amount` would bunch the whole ladder at the bottom.
+WorldCurve.AMOUNTS = { 0, 0.05, 0.10, 0.18, 0.42, 1.00 }
 
 WorldCurve.setting = ModSetting.new(WorldCurve.KEY, WorldCurve.LABEL,
-                                    { 0, 1, 2, 3 },
-                                    { "OFF", "1", "2", "3" })
+                                    { 0, 1, 2, 3, 4, 5 },
+                                    { "OFF", "1", "2", "3", "4", "5" })
 
 function WorldCurve.level()
   return WorldCurve.setting:get() or 0

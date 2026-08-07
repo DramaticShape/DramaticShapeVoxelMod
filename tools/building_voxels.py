@@ -680,6 +680,80 @@ TEMPLATES = {
         roof_rows=28, roof_back=24, roof_front=0, roof_cycle=(2, 23),
         slab=3, front_eave=0, ledge=None, tileset="mansion",
     ),
+    # F07b: the SQUARE table of CELADON_MANSION_1F cells (0,6):(1,7)
+    # (1 placement) -- the long table (F07) at two cells wide, the same
+    # drawing to the tile everywhere but the interior column count, and
+    # the same read to the row: 0-23 the tabletop seen from above, 24-26
+    # the slab's black/#555/black front edge, 27 the #555 shadow that
+    # closes it (slab = 3, folded into the band), 28-30 the base with the
+    # legs stopping one row short of the grid. Family numbers unchanged.
+    "mansion_square_table": dict(
+        tiles=[
+            [38, 39, 39, 41],
+            [54, 55, 55, 57],
+            [54, 55, 55, 57],
+            [60, 58, 58, 59],
+        ],
+        roof_rows=28, roof_back=24, roof_front=0, roof_cycle=(2, 23),
+        slab=3, front_eave=0, ledge=None, tileset="mansion",
+    ),
+    # F07c: the Game Freak office's computer desk -- CELADON_MANSION_2F
+    # cell (0,5) and CELADON_MANSION_3F cells (0,3), (3,3) and (0,6)
+    # (4 placements, scan.lua, and the four ids of its apron and chair
+    # row occur nowhere else on this atlas).
+    #
+    # Rows 0-15 are BILL'S DESK, byte for byte: the same tabletop seen
+    # from above with the same terminal, cord and isometric computer
+    # drawn into it (a whole-crop diff against the interior atlas's
+    # 11/12/13/14 + 27/28/29/30 comes back empty for every one of the
+    # 512 pixels). One drawing = one model, so those four parts are
+    # bills_desk's verbatim -- see that entry for the readings.
+    #
+    # Only the FRONT differs, and it is drawn 6 rows where Bill's is 7:
+    #   15      the top's own black front edge -- the row the lid
+    #           replaces, so it opens the fascia the way Bill's row 16
+    #           does and the desk stands 7 voxels rather than 8
+    #   16-17   the #555 edge lip and the black seam under it: the
+    #           desktop's own rim, so `fascia` (it wraps every side)
+    #   18-21   the base -- the left leg (the @#@ at x0-x2), the open
+    #           apron between, and the DRAWER PEDESTAL at x20-x31: two
+    #           #555 drawer fronts (rows 16-17 and 19-20) in a black
+    #           frame, which the measured recess pass sinks a voxel
+    #           each because they are non-black regions sealed behind
+    #           their own black outline. Row 21 is the ground line, and
+    #           the measured 22 is where the drawing puts the cast
+    #           shadow on the floor -- 22-23 are that shadow, dithered
+    #           floor in the walkable cell, and the model builds none
+    #           of it.
+    # The chair is Bill's chair REDRAWN, not the same pixels (a 2px
+    # white margin round the backrest panel where Bill's has 1px, and
+    # it sits at x4-x15 rather than x2-x13), but the same object band
+    # for band, so it takes that part table with x and rise adjusted:
+    # rows 20-21 the backrest top seen from above, 22-31 its elevation,
+    # rise = -7 putting it back on the floor, z 22 depth 10.
+    "mansion_computer_desk": dict(
+        tiles=[
+            [36, 37, 52, 53],
+            [64, 65, 66, 67],
+            [2, 3, 85, 86],
+            [18, 19, 17, 17],
+        ],
+        roof_rows=0, roof_back=0, roof_front=0, roof_cycle=(0, 0),
+        slab=0, front_eave=0, ledge=None, tileset="mansion", depth=4,
+        # the desk's own plot is its two cells; the grid runs on because
+        # its apron and the CHAIR share tiles 2/3
+        desk=dict(fascia=(15, 17), base=(18, 21), depth=2),
+        parts=[
+            dict(kind="flat", x=(2, 15), rows=(3, 7)),       # the notes
+            dict(kind="upright", x=(4, 15), top=(8, 12), facade=(12, 13),
+                 z=8, depth=6),                              # the keyboard
+            dict(kind="upright", x=(16, 19), top=(8, 8), facade=(8, 9),
+                 z=8, depth=2),                              # the cord
+            dict(kind="iso", x=(19, 30), rows=(1, 13), plan=6, z=9),
+            dict(kind="upright", x=(4, 15), top=(20, 21), facade=(22, 31),
+                 rise=-7, z=22, depth=10),                   # the chair
+        ],
+    ),
     # F08: the dining table of the generic town house -- 18 placements,
     # every home's cells (3,3):(4,4) -- the chief's long table (F07) at
     # two cells wide. The same read to the row: 0-23 the rounded
@@ -851,6 +925,79 @@ TEMPLATES = {
         parts=[
             dict(kind="upright", x=(2, 13), top=(5, 10), facade=(11, 15),
                  z=3, depth=11, stretch=True),                # the stool
+        ],
+    ),
+    # F09 on the lobby atlas: the Celadon department store's stools --
+    # the diner's chairs, the roof terrace's, the Game Corner's six
+    # rows and the four on 1F (58 placements). A DIFFERENT drawing from
+    # the house stool -- it sits one row HIGHER in the tile (seat top
+    # rows 4-9 over front edge 10 and legs 11-14, with a clear floor
+    # row below) and its leg detail differs -- but the same object band
+    # for band, so it takes the same part table with the bands shifted
+    # up one row. The measured ground line (15 here, 16 in the house)
+    # shifts with them, so the stand is the same 5 voxels.
+    "diner_stool": dict(
+        tiles=[
+            [7, 8],
+            [23, 24],
+        ],
+        roof_rows=0, roof_back=0, roof_front=0, roof_cycle=(0, 0),
+        slab=0, front_eave=0, ledge=None, tileset="lobby",
+        panes=False,
+        parts=[
+            dict(kind="upright", x=(2, 13), top=(4, 9), facade=(10, 14),
+                 z=3, depth=11, stretch=True),                # the stool
+        ],
+    ),
+    # F11: the ROUND TABLE of the Celadon diner and the roof terrace --
+    # 4 placements, all on the lobby atlas (CELADON_DINER cells (0,2)
+    # and (0,5), CELADON_MART_ROOF (4,2) and (8,4); scan
+    # "9,39,39,25;54,55,55,57;70,55,55,71;85,86,87,55", no matches on
+    # any other atlas). The drawing packs three facings no band split
+    # can reach: rows 0-23 are the OCTAGONAL top seen from above (24
+    # top-view rows = 24 depth rows, the same 1:1 every tabletop is
+    # drawn with -- so the plan is the silhouette itself, 32 wide by 24
+    # deep), rows 24-25 the slab's own fascia (#555 over black, folded
+    # down the rim under the band's drawn outline -> slab 3), and rows
+    # 26-31 the PEDESTAL seen under the front edge: the base's top
+    # surface with the dark column rising from its middle (26-27), its
+    # lit south half (28-29), and its front arc curving to the floor
+    # (30-31). The flattened arcs are horizontal CIRCLES seen from
+    # above -- depth, not narrowing -- so the pedestal is two discs:
+    # base diameter 16 (drawn cols 8-23), column diameter 6 (the dark
+    # blob's cols 13-18), both centred on the drawn centre x=16, plan
+    # centre z=12. MEASURED: plan, diameters, centre, slab 3. AUTHORED:
+    # tabletop plane 8 -- counter height, developer-tuned (the first
+    # cut stood it at the flat compromise's 16px and it read too tall)
+    # -- plus base height 2 and the 3-voxel column between (the
+    # projection cannot state either; the drawn base arc suggests a
+    # low disc). depth 3 keeps the plot to the drawn plan's 24 rows;
+    # the grid's 4th tile row is the pedestal's own drawing and the
+    # floor tile at its southeast corner, which the claim paints as
+    # ground. `scrub` repoints the top's interior field -- the four
+    # $37 tiles, which are ALSO the checkerboard floor's light half
+    # and carry the floor's palette in a colorized atlas -- at the
+    # same grey sourced from the rim's own field, so the whole top
+    # wears the table's palette (the drawn field there is uniform
+    # grey; nothing drawn is lost).
+    "diner_round_table": dict(
+        tiles=[
+            [9, 39, 39, 25],
+            [54, 55, 55, 57],
+            [70, 55, 55, 71],
+            [85, 86, 87, 55],
+        ],
+        roof_rows=0, roof_back=0, roof_front=0, roof_cycle=(0, 0),
+        slab=0, front_eave=0, ledge=None, tileset="lobby", depth=3,
+        panes=False, scrub=[(8, 8, 23, 23)],
+        parts=[
+            dict(kind="disc", cx2=32, cz2=24, r=8, rise=0, h=2,
+                 side=dict(rows=(30, 31), x=(13, 18)),
+                 cap=dict(rows=(26, 29), x=(9, 22))),          # the base
+            dict(kind="disc", cx2=32, cz2=24, r=3, rise=2, h=3,
+                 side=dict(rows=(26, 27), x=(14, 17))),        # the column
+            dict(kind="plan", x=(0, 31), rows=(0, 23),
+                 fascia=(24, 25), fascia_x=(8, 23), rise=5),   # the top
         ],
     ),
     # F04: the Pokemon Center's PC -- every Center's northeast corner
@@ -1350,7 +1497,7 @@ def build_desk_set(sp, pr, t):
 
     def build_parts(plane):
         for p in t["parts"]:
-            x0, x1 = p["x"]
+            x0, x1 = p.get("x", (0, W - 1))
             if p["kind"] == "flat":
                 r0, r1 = p["rows"]
                 # `at` names the sheet's own height when it does not lie
@@ -1461,6 +1608,91 @@ def build_desk_set(sp, pr, t):
                             sy = oy + dzs - y
                             if pr0 <= sy <= pr1 and inside(sx, sy):
                                 put(sx, plane + y, z, sx, sy)
+                continue
+            if p["kind"] == "plan":
+                # A PLAN part is a slab whose plan IS the drawn top view:
+                # the band's silhouette becomes the footprint pixel for
+                # pixel (drawn row = depth row, the same 1:1 every
+                # tabletop is drawn with), so an octagonal top stands as
+                # an octagon rather than the box no rectangular band can
+                # escape. The top layer wears the band itself, outline
+                # and all; the rim layers below wear the drawn fascia
+                # rows folded down the edge (x clamped into the drawn
+                # fascia's span), and the slab's unseen interior the
+                # field's dark texel.
+                r0, r1 = p["rows"]
+                f0, f1 = p["fascia"]
+                fx0, fx1 = p["fascia_x"]
+                rise = p.get("rise", 0)
+                h = (f1 - f0 + 1) + 1
+                dark = shade_px.get(DARK) or shade_px[BLACK]
+
+                def drawn(sx, z):
+                    return (x0 <= sx <= x1 and 0 <= z <= r1 - r0
+                            and inside(sx, r0 + z))
+
+                for z in range(r1 - r0 + 1):
+                    if not 0 <= z < D:
+                        continue
+                    sy = r0 + z
+                    for sx in range(x0, x1 + 1):
+                        if not inside(sx, sy):
+                            continue
+                        put(sx, rise + h - 1, z, sx, sy)
+                        edge = not (drawn(sx - 1, z) and drawn(sx + 1, z)
+                                    and drawn(sx, z - 1) and drawn(sx, z + 1))
+                        for y in range(rise, rise + h - 1):
+                            if edge:
+                                put(sx, y, z, max(fx0, min(fx1, sx)),
+                                    f0 + (rise + h - 2 - y))
+                            else:
+                                put(sx, y, z, dark[0], dark[1])
+                continue
+            if p["kind"] == "disc":
+                # A DISC part is ROUND IN PLAN -- the pedestal column
+                # and base the projection can only draw from the front.
+                # Centre and radius are measured off the drawn widths
+                # (a flattened arc is a horizontal circle seen from
+                # above); the circular footprint is synthesized like any
+                # continued geometry, and every voxel still wears the
+                # drawing: the side folds the drawn face-on rows around
+                # the hull (x clamped into the drawn span, rows
+                # repeating up the height), and `cap` lays the drawn
+                # top-view rows over the top layer's interior, drawn
+                # north rows to the plan's north. `cx2`/`cz2` are
+                # DOUBLED plan centres, so an even diameter keeps its
+                # centre between two voxels instead of limping one off.
+                r, rise, h = p["r"], p.get("rise", 0), p["h"]
+                s0, s1 = p["side"]["rows"]
+                sa0, sa1 = p["side"]["x"]
+                sn = s1 - s0 + 1
+                cap = p.get("cap")
+
+                def in_disc(x, z):
+                    dx = 2 * x + 1 - p["cx2"]
+                    dz = 2 * z + 1 - p["cz2"]
+                    return dx * dx + dz * dz <= 4 * r * r
+
+                zlo = (p["cz2"] - 2 * r) // 2
+                for x in range((p["cx2"] - 2 * r) // 2,
+                               (p["cx2"] + 2 * r) // 2 + 1):
+                    for z in range(max(0, zlo),
+                                   min(D - 1, (p["cz2"] + 2 * r) // 2) + 1):
+                        if not in_disc(x, z):
+                            continue
+                        edge = not (in_disc(x - 1, z) and in_disc(x + 1, z)
+                                    and in_disc(x, z - 1)
+                                    and in_disc(x, z + 1))
+                        for y in range(rise, rise + h):
+                            if cap and y == rise + h - 1 and not edge:
+                                c0, c1 = cap["rows"]
+                                sy = min(c1, c0 + ((z - zlo)
+                                                   * (c1 - c0 + 1)) // (2 * r))
+                                sx = max(cap["x"][0], min(cap["x"][1], x))
+                            else:
+                                sy = s0 + (rise + h - 1 - y) % sn
+                                sx = max(sa0, min(sa1, x))
+                            put(x, y, z, sx, sy)
                 continue
             tr0, tr1 = p["top"]
             fr0, fr1 = p["facade"]
@@ -1960,7 +2192,7 @@ def verify_desk_set(vox, pr, t):
     # sink) -- and nothing stands anywhere else
     tops = {}
     for p in t["parts"]:
-        x0, x1 = p["x"]
+        x0, x1 = p.get("x", (0, W - 1))
         if p["kind"] == "flat":
             r0, r1 = p["rows"]
             z0 = p.get("z", r0)
@@ -2006,6 +2238,37 @@ def verify_desk_set(vox, pr, t):
                     for y in range(plane, plane + h + 1):
                         assert (x, y, z) in vox, \
                             f"iso box hole at {x},{y},{z}"
+        elif p["kind"] == "plan":
+            # its one geometric intent: the plan IS the drawn band's
+            # silhouette -- a solid slab column wherever the band draws
+            r0, r1 = p["rows"]
+            h = (p["fascia"][1] - p["fascia"][0] + 1) + 1
+            rise = p.get("rise", 0)
+            for x in range(x0, x1 + 1):
+                for z in range(min(r1 - r0 + 1, D)):
+                    if not pr["inside"](x, r0 + z):
+                        continue
+                    tops[(x, z)] = max(tops.get((x, z), 0), rise + h - 1)
+                    for y in range(rise, rise + h):
+                        assert (x, y, z) in vox, \
+                            f"plan slab hole at {x},{y},{z}"
+        elif p["kind"] == "disc":
+            # its one geometric intent: a solid circle in plan at every
+            # layer, symmetric about the authored centre
+            r, rise, h = p["r"], p.get("rise", 0), p["h"]
+            in_disc = lambda x, z: ((2 * x + 1 - p["cx2"]) ** 2
+                                    + (2 * z + 1 - p["cz2"]) ** 2
+                                    <= 4 * r * r)
+            for x in range((p["cx2"] - 2 * r) // 2,
+                           (p["cx2"] + 2 * r) // 2 + 1):
+                for z in range(D):
+                    if not in_disc(x, z):
+                        continue
+                    assert in_disc(p["cx2"] - 1 - x, z), \
+                        f"disc asymmetric at {x},{z}"
+                    tops[(x, z)] = max(tops.get((x, z), 0), rise + h - 1)
+                    for y in range(rise, rise + h):
+                        assert (x, y, z) in vox, f"disc hole at {x},{y},{z}"
         else:
             fr0, fr1 = p["facade"]
             ytp = plane + p.get("rise", 0) + (fr1 - fr0)
