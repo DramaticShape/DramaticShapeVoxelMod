@@ -5027,6 +5027,68 @@ local eyaw = select(2, VRRig.battleMount({ 150, 10, 200 }, { 100, 10, 200 }))
 T.check(near(eyaw, math.pi / 2),
   "a camera east of its focus turns the mapping a quarter toward west")
 
+-- ------- both VR seats follow the arena's quarter turn
+--
+-- `turn` promises the same composition on different ground, and every camera
+-- has to keep it or the promise is only true on the flat screen. The two VR
+-- seats keep it in different ways and both are pinned here.
+--
+-- THE STANDARD MOUNT keeps it by construction: it is built from the flat
+-- battle camera's own eye and aim, which turn with the arena, so the seat
+-- goes round with them. That is asserted rather than assumed, because the
+-- day someone builds this seat from the arena's cells instead, the picture
+-- stays plausible and starts pointing the wrong way.
+--
+-- THE DIORAMA disc does NOT get it for free: a fight arrives there as a
+-- pillar of map about the arena's midpoint, whose bearing is its bearing in
+-- the WORLD, so a turned arena landed on the table lying across the head.
+-- Diorama.battleYaw takes the turn back out; the hand-turn rides on top.
+--
+-- In its own scope: the suite's main chunk is at LuaJIT's local ceiling.
+;(function()
+  local Arena = run.loader.exports.DRAMATIC_SHAPE.lib.require("BattleArena")
+  local Cam = run.loader.exports.DRAMATIC_SHAPE.lib.require("BattleCam")
+  local Dio = run.loader.exports.DRAMATIC_SHAPE.lib.require("Diorama")
+
+  local function mountYawFor(turn)
+    Cam.reset()
+    local a = Arena.at(6, 6, "wide", turn)
+    local rig = Cam.rig(a, 0, true)
+    return select(2, VRRig.battleMount(rig.eye, rig.focus))
+  end
+
+  local base = mountYawFor(0)
+  for _, turn in ipairs({ 90, 180, 270 }) do
+    -- rotating (eye - focus) by +turn takes atan2(dx, dz) to (bearing - turn)
+    local want = (base - math.rad(turn) + math.pi) % (2 * math.pi) - math.pi
+    local got = (mountYawFor(turn) + math.pi) % (2 * math.pi) - math.pi
+    T.check(near(got, want, 1e-6),
+      ("the standard VR mount turns with a %d-degree arena: %.4f, wanted %.4f")
+      :format(turn, got, want))
+  end
+
+  -- the disc: the turn comes back out, so the fight lies the same way on the
+  -- table however the ground under it is laid
+  local hand = Dio.yaw
+  Dio.yaw = 0
+  T.eq(Dio.battleYaw({ turn = 0 }), 0,
+    "an unturned arena leaves the disc where the hands left it")
+  T.check(near(Dio.battleYaw({ turn = 90 }), -math.pi / 2, 1e-9),
+    "a quarter-turned arena counter-turns the disc a quarter")
+  T.check(near(Dio.battleYaw({ turn = 270 }), math.pi / 2, 1e-9),
+    "and three quarters comes round the other way, inside (-pi, pi]")
+  T.eq(Dio.battleYaw(nil), 0, "no arena is no turn, not an error")
+  -- and the same rule the standard mount lands on, so the two agree
+  T.check(near(Dio.battleYaw({ turn = 90 }) - Dio.battleYaw({ turn = 0 }),
+               mountYawFor(90) - mountYawFor(0), 1e-6),
+    "the disc and the standard mount answer a turn by the same amount")
+  -- the player's own hand-turn still rides on top of it
+  Dio.yaw = math.rad(30)
+  T.check(near(Dio.battleYaw({ turn = 90 }), math.rad(30) - math.pi / 2, 1e-9),
+    "the hands keep whatever they did to the model, on top of the turn")
+  Dio.yaw = hand
+end)()
+
 -- an eye seated with that yaw really faces the arena: an identity head at
 -- the seat comes out looking WEST, and the view agrees to the metre
 local seated = VRRig.eyeCamera(pose, fov, { 150, 10, 200 }, { 0, 0, 0 },

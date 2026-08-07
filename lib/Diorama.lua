@@ -113,6 +113,41 @@ function Diorama.reset()
   Diorama.release()
 end
 
+-- ------- which way a staged fight lies on the table
+--
+-- The disc's bearing while a battle is up: the player's own hand-turn, with
+-- the ARENA's quarter turn taken back out of it.
+--
+-- An arena may be laid down any of the four ways (BattleArena's `turn`), and
+-- the promise that field makes everywhere else is that turning it changes the
+-- GROUND under the fight and never the fight itself -- the two Pokemon land
+-- on the same marks, seen the same way round. Every other camera keeps that
+-- promise by construction: the flat shot and the standard VR mount are both
+-- built from BattleCam's eye, which turns with the arena, so the composition
+-- follows it round.
+--
+-- This one is not built from that eye. It is a disc of map lifted onto the
+-- table, and its bearing is the arena's bearing in the WORLD -- so a fight
+-- staged on a turned arena arrived on the table lying across the head that
+-- was looking at it, while the same fight on an unturned one faced properly.
+-- Same fight, same composition everywhere else, sideways here.
+--
+-- So the turn comes back out. Subtracted, matching the sign the standard
+-- mount already lands on: its yaw is atan2 of (eye - focus), and rotating
+-- that pair by +turn takes the bearing to (bearing - turn). One rule, two
+-- seats.
+--
+-- The hand-turn stays on top of it, because that is the player moving the
+-- model and is theirs to keep.
+function Diorama.battleYaw(arena)
+  local turn = (arena and arena.turn) or 0
+  if turn == 0 then return Diorama.yaw end
+  local yaw = Diorama.yaw - math.rad(turn)
+  -- kept in (-pi, pi] like the grips leave it, so nothing downstream has to
+  -- care which way round it came
+  return (yaw + math.pi) % (2 * math.pi) - math.pi
+end
+
 -- Open a diorama frame. `mode` is VR.mode()'s answer; anything that is
 -- not a diorama mode closes it.
 function Diorama.begin(mode)

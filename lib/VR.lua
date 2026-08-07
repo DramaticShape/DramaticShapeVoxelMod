@@ -371,7 +371,11 @@ local function renderWorld(views, ctl)
     end
     anchor = VRRig.dioramaAnchor(Voxel.angle, Diorama.offset)
     scale = VRRig.dioramaScale(frame, Voxel.FOCAL) / zoom
-    if Diorama.yaw ~= 0 then mountYaw = Diorama.yaw end
+    -- the hand-turn, and -- while a fight is staged -- the arena's own
+    -- quarter turn taken back out, so a turned arena arrives on the table
+    -- facing the head rather than lying across it (Diorama.battleYaw)
+    local dioYaw = battle and Diorama.battleYaw(battle) or Diorama.yaw
+    if dioYaw ~= 0 then mountYaw = dioYaw end
   elseif battle then
     -- the over-the-shoulder seat the flat battle shot stands in, pulled
     -- close enough for a headset's own lens (see VRRig.battleMount), at
