@@ -424,7 +424,7 @@ local function stagedBattles()
 end
 
 local SETTINGS = {
-  { VoxelGrid.setting, "One-pixel wireframe along every voxel edge." },
+  { VoxelGrid.setting, "One-pixel wireframe along every voxel edge. BTL-OFF disables it during battles." },
   { WorldCurve.setting,
     "Bend the world down over the horizon, Animal Crossing style. 1 is a "
     .. "hint of roll at the frame edges and 2 is the classic read; 3 is as "

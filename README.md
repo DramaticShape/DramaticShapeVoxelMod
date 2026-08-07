@@ -15,7 +15,7 @@ menu.
 | --- | --- |
 | `3`, or the **VOXEL** options row | OFF → 15 → 35 → 50 → 75 → 1ST → 3RD → OFF (camera pitch) |
 | `SELECT` (pad / touch) | the same step as `3` — for the machines with no number row |
-| `5`, or the **V-GRID** options row | OFF / ON — a one-pixel wireframe on every voxel |
+| `5`, or the **V-GRID** options row | OFF / ON / BTL-OFF — a one-pixel wireframe on every voxel; BTL-OFF disables it during battles |
 | `6`, or the **T-SHIFT** options row | OFF → 1 → 2 → 3 → OFF (miniature blur) |
 | `7`, or the **V-CURVE** options row | OFF → 1 → 2 → 3 → 4 → 5 — bend the world over the horizon; 5 is a half sphere |
 | `8`, or the **3D-BTL** options row | 2D-3D A / 2D-3D B / STADIUM A / STADIUM B / OFF — fight in 3D instead of on a white field. **A** stages it on the map, **B** on two discs against the sky; **2D-3D** uses the game's own battle pics and **STADIUM** the Pokémon Stadium battle models |
