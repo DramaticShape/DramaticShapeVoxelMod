@@ -104,6 +104,11 @@ local Horde = V.require("Horde")
 local HordeGun = V.require("HordeGun")
 local HordeHud = V.require("HordeHud")
 local HordeSfx = V.require("HordeSfx")
+-- LET'S GO: the flick-to-throw capture mode. LetsGo owns the row, the
+-- wraps and the experience math; CatchThrow the session (input, arc,
+-- ring, choreography); Pokeball the animated prop they throw.
+local LetsGo = V.require("LetsGo")
+local Pokeball = V.require("Pokeball")
 
 -- Forward declaration: the voxel pipeline's update hook (registered below)
 -- calls this, and it is defined further down with the settings it drives.
@@ -196,6 +201,19 @@ mod.content.render_pipelines:register("voxel", {
     -- the atmosphere's own clock (shaft shimmer, drifting motes), on the
     -- same tick so the beams keep breathing through a dialog box
     ForestAtmos.update(dt)
+    -- LET'S GO rides the same always-running tick, and BEFORE the battle's
+    -- own update on purpose: the capture session poses the Poke Ball here,
+    -- and OverworldBattle.update renders the arena a moment later -- so
+    -- the ball each frame draws is the ball that frame computed. Guarded,
+    -- and loudly: a fault in the capture game must cost the capture game,
+    -- not the whole voxel pipeline.
+    do
+      local okLG, errLG = pcall(LetsGo.update, dt)
+      if not okLG and not V.letsGoWarned then
+        V.letsGoWarned = true
+        mod.log:warn("LET'S GO update failed: %s", tostring(errLG))
+      end
+    end
     -- The overworld battle rides this hook rather than owning a pipeline of
     -- its own, because it owns no pass of the FRAME: it draws under a battle
     -- screen the engine composites, which is not a stage the registry has.
@@ -309,6 +327,7 @@ mod.content.render_pipelines:register("voxel", {
     ChunkMesher.invalidate()   -- no map id = every cached mesh
     ForestAtmos.invalidate()   -- shaft/particle meshes and shader sentinels
     VR.invalidate()            -- the mirror, and FBO ids of dead canvases
+    Pokeball.invalidate()      -- the ball's meshes and palette texture
   end,
 })
 
@@ -498,6 +517,22 @@ local SETTINGS = {
     .. "original slot, instead of standing it on the map facing the foe. "
     .. "The foe is still out there on its own tile.",
     when = function() return stagedBattles() and not VR.enabled() end,
+    full = true },
+  -- `full` like the battle rows: this is a GAMEPLAY mode, not a knob on
+  -- the diorama, so the FULL preset neither sets it nor takes it away.
+  { LetsGo.setting,
+    "Pokemon GO-style catching, staged in the 3D battle. Flick the mouse, "
+    .. "a finger or the right stick to throw the ball at the wild Pokemon "
+    .. "-- spin it first for a curve -- and land inside the shrinking "
+    .. "ring for a NICE, GREAT or EXCELLENT that raises the catch odds. "
+    .. "CATCH ONLY changes nothing else: picking a ball in battle simply "
+    .. "plays the throw. FULL is the whole Let's Go treatment: wild "
+    .. "encounters open straight in throwing mode (B backs out to the "
+    .. "classic menu), Poke/Great/Ultra Balls are half price, and a catch "
+    .. "pays the whole party experience -- scaled by throw quality, first "
+    .. "throws, new species and your running catch combo. Needs 3D-BTL "
+    .. "on; anywhere the staged fight cannot stand, balls quietly throw "
+    .. "the classic way.",
     full = true },
   { DayNight.setting,
     "What time it is outdoors: pin the sky to DAY, NIGHT, DUSK or DAWN, "
@@ -1135,6 +1170,15 @@ end
 -- is where keyboard, pad, touch and the VR controllers have all already
 -- become the same eight buttons. See lib/Horde.lua.
 Horde.install()
+
+-- ------- LET'S GO capture mode
+--
+-- After every other input seam on purpose: while a throw is being aimed
+-- the capture's mouse and touch wraps are the OUTERMOST, so the flick is
+-- read before anything else can claim the pointer -- and outside the aim
+-- they forward every byte untouched. The battle-side wraps (throwBall,
+-- safariAction) and the experience hooks install here too.
+LetsGo.install()
 
 -- ------- edge-anchored menus stay in the GB frame while a headset is live
 --

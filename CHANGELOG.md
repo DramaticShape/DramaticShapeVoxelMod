@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.8.0
+
+### Added
+
+- **LET'S GO: Pokemon GO-style catching, staged in the 3D battle.** A new
+  three-rung row. CATCH ONLY changes nothing about the game except the
+  throw: picking a Poke/Great/Ultra/Master Ball in a wild battle (or the
+  BALL row of the safari menu) opens capture mode instead of the automatic
+  toss. FULL makes wild encounters the real Let's Go article: the
+  encounter IS the catch -- it opens in throwing mode and stays there,
+  the foe never takes a turn, your own Pokemon is never sent out or
+  shown (no back pic, no model, no HUD), and B runs, which from a catch
+  encounter always works. Poke/Great/Ultra Balls are half price at every
+  mart, and EXPERIENCE works the way that game's does: every healthy
+  party member gains from every catch AND every trainer knockout, each
+  one measured against its OWN level through the Gen VII scaled formula
+  -- which is why Let's Go ships no EXP.ALL, and why a level 5 party
+  member takes several times what a level 45 one does from the very same
+  fight. A catch adds the throw stack on top: grade, first ball of the
+  encounter, new species, and a persistent catch combo. CATCH ONLY
+  leaves experience exactly as the original game had it.
+
+  **The throw.** The camera locks HEAD ON with the wild Pokemon -- its
+  own seat on the arena's axis, no drift, no steer -- and a real 3D Poke
+  Ball (modelled and animated for this: hinged lid, capture beam,
+  squash-click, decaying wobble, caught stars, breakout burst; GREAT
+  blue, ULTRA's yellow band, MASTER purple, SAFARI olive) hangs at the
+  bottom of the frame. The ball rides UNDER the finger -- mouse, touch,
+  or the right stick -- and releasing throws it with the swipe's own
+  velocity: forward from how hard, height from its rise, side from its
+  slant, gravity and collision deciding the rest, with a bearing-and-
+  range assist trimming honest errors. Circling the ball WINDS it -- the
+  spin visibly builds with the gesture to a cap and bleeds off when the
+  hand pauses -- and only a ball at the cap flies with the late-biting
+  curve. Contact is against the creature's own GEOMETRY: a pic foe is
+  its sprite's opaque pixels (a ball through the gap under a wing flies
+  on), a STADIUM foe its model's measured height, girth and hover. The
+  timing ring pulses on the creature, coloured by the Gen 1 odds, and is
+  judged AT the moment of contact: inside earns NICE / GREAT /
+  EXCELLENT, which multiplies the engine's own Gen 1 catch roll; the
+  shakes the roll answers are the rocks the ball plays on the ground.
+
+  **What it stands on.** The outcome is exactly a Gen 1 ball throw: same
+  catch math (status, HP and ball factors intact), same outcome texts,
+  same caught flow -- dex page, nickname, box overflow -- and a missed
+  ball is a spent ball. Outside FULL, a failed throw still costs the
+  turn it always did. Needs the staged 3D battle standing (3D-BTL on, a
+  depth-capable driver, no headset); anywhere it cannot stand, balls
+  quietly take the engine's classic toss.
+
 ## 1.7.1
 
 ### Added

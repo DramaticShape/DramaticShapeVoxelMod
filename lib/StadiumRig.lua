@@ -728,6 +728,36 @@ function StadiumRig:skin(yaw)
   end
 end
 
+-- What this POSE actually occupies, in the rig's own posed space: the
+-- vertical span of every skinned vertex, and the furthest any of them
+-- stands from the model's vertical axis.
+--
+-- Read off the skinned rows rather than off the pack's bind-pose figures,
+-- because the two are not the same claim. The bind measurements say how
+-- big the model is; a caller placing something ON the Pokemon needs to
+-- know where the Pokemon IS, and for a flying species the standby
+-- animation carries it a third of its own height off the floor -- a lift
+-- that exists only in the posed bones and appears in no static field.
+--
+-- Answers nil before the first skin(), which is the caller's cue to fall
+-- back to the bind figures.
+function StadiumRig:posedBounds()
+  local lo, hi, r2 = nil, nil, 0
+  for _, part in ipairs(self.parts) do
+    local rows, n = part.rows, part.prim.vertCount
+    for k = 1, n do
+      local row = rows[k]
+      local y = row[2]
+      if not lo or y < lo then lo = y end
+      if not hi or y > hi then hi = y end
+      local d = row[1] * row[1] + row[3] * row[3]
+      if d > r2 then r2 = d end
+    end
+  end
+  if not lo then return nil end
+  return lo, hi, math.sqrt(r2)
+end
+
 -- ------- which texture each part wears this frame
 --
 -- The eyes. A primitive whose display list carried geo command 0x23 with a

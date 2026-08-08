@@ -391,6 +391,13 @@ function Stadium.update(dt, battle, groundY)
     if mon.species then StadiumPack.keep(mon.species) end
     mon.visible = (mon.rig ~= nil) and onField(battle, side, mon)
                   and not (battler and battler.substituteHP)
+    -- LET'S GO capture mode: the player's model is out of the shot the
+    -- same way its card and back pic are (the shrink half of the story is
+    -- below, AFTER the grow block, which reassigns mon.scale every frame)
+    local cap = V.require("BattleScene").capture
+    if side == "player" and cap and cap.hidePlayer then
+      mon.visible = false
+    end
     -- cleared up front, so a side that has just lost its rig cannot leave
     -- last frame's matrix behind it
     mon.model_matrix = nil
@@ -424,6 +431,16 @@ function Stadium.update(dt, battle, groundY)
       else
         local okG, grow = pcall(battle.growInScale, battle, battler)
         mon.scale = (okG and grow) or 1
+      end
+      -- LET'S GO capture: the foe drinking into the ball. AFTER the grow
+      -- block on purpose -- that block reassigns mon.scale every frame,
+      -- and the first cut of this hook sat above it and was silently
+      -- clobbered: the model stood at full size over a ball that had
+      -- supposedly swallowed it. The session's fraction owns the scale
+      -- for as long as it exists; the frame it clears, the grow block
+      -- above is already putting the engine's own answer back.
+      if side == "enemy" and cap and cap.shrink then
+        mon.scale = cap.shrink
       end
       mon:update(dt or 0)
       if mon.visible and arena then
@@ -489,6 +506,34 @@ function Stadium.guard(side, mon, what, fn)
   if session then session.broken = session.broken or {} end
   if session then session.broken[side] = what end
   return false
+end
+
+-- The foe's body for the capture mode's collision and ring, when a MODEL
+-- is standing there instead of a pic: its own measured height and
+-- footprint, in world pixels. A model stands on the ground, so the body's
+-- centre is half its height up. nil whenever no model covers the foe,
+-- which sends CatchThrow to its pic measurement instead.
+function Stadium.captureBody()
+  if not session then return nil end
+  local mon = session.enemy
+  if not (mon and mon.rig and mon.visible) then return nil end
+  local okH, h = pcall(mon.worldHeight, mon)
+  if not (okH and h and h > 0) then return nil end
+  -- The POSED body, when there is one: a flying Pokemon is nowhere near
+  -- the mark its cell projects to, and only the pose knows where it went
+  -- (StadiumMon:bodySpan). The bind-pose figures stand in until the
+  -- first skin, which is right for everything that keeps its feet down.
+  local okS, centre, half, girth = pcall(mon.bodySpan, mon)
+  if okS and centre then
+    return { r = math.max(5, math.min(16, math.max(girth or 0, half * 0.8))),
+             yOff = centre,
+             hh = math.max(4, half) }
+  end
+  local okR, r = pcall(mon.worldRadius, mon)
+  local rr = (okR and r and r > 0) and r or h * 0.4
+  return { r = math.max(5, math.min(16, math.max(rr, h * 0.5))),
+           yOff = h * 0.5,
+           hh = math.max(4, h * 0.55) }
 end
 
 function Stadium.draw(pull)

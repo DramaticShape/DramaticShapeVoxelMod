@@ -64,6 +64,14 @@ function Mat4.rotateX(a)
            0, 0, 0, 1 }
 end
 
+function Mat4.rotateZ(a)
+  local c, s = math.cos(a), math.sin(a)
+  return { c, -s, 0, 0,
+           s, c, 0, 0,
+           0, 0, 1, 0,
+           0, 0, 0, 1 }
+end
+
 -- The rotation a unit quaternion describes, row-major. The VR rig is what
 -- needs it: an OpenXR eye pose arrives as position + orientation
 -- quaternion, and both the eye's transform and its inverse (the view) are

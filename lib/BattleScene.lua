@@ -48,6 +48,29 @@ local Map = require("src.world.Map")
 
 local BattleScene = {}
 
+-- ------- LET'S GO capture mode's stake in this scene
+--
+-- One table while a capture session runs, nil otherwise (see
+-- lib/CatchThrow.lua, which owns it):
+--
+--   hidePlayer   the player's side stays out of the shot entirely -- no
+--                card here, no model (Stadium reads this same table), no
+--                pinned back pic (OverworldBattle reads it too)
+--   shrink       the foe's scale while the ball drinks it in, applied
+--                about its chest so it collapses toward the beam
+--   draw(pull)   the Poke Ball, drawn after the Stadium models -- same
+--                depth buffer, same flash window, same camera
+--   cast(sm)     the same ball into the sun's pass
+--   sig()        a term for the cached shadow signature, so a ball in
+--                flight re-casts and a resting scene does not
+--   drawGB(b)    the 2D layer (ring, labels), drawn by OverworldBattle's
+--                BattleState:draw wrap in the GB frame
+--
+-- It lives HERE, not on OverworldBattle, because every consumer below
+-- already requires BattleScene and the one file that writes it requires
+-- both -- this is the spot with no require cycle.
+BattleScene.capture = nil
+
 -- The GB frame the battle screen is drawn in, and the frame BattleCam's rig
 -- is solved against.
 BattleScene.GB_W = 160
@@ -195,14 +218,29 @@ end
 local function monCards(arena, groundY, textures)
   local out = {}
   if not textures then return out end
+  local cap = BattleScene.capture
   for _, side in ipairs({ "enemy", "player" }) do
     local tex = textures[side]
     local cell = (side == "player") and arena.player or arena.enemy
+    -- capture mode: the player's side is out of the shot (the seat looks
+    -- over an empty shoulder), and OverworldBattle.textures already
+    -- skipped rendering it -- this is the belt to that suspender
+    if side == "player" and cap and cap.hidePlayer then tex = nil end
     if tex and tex.canvas and cell then
       local mirror = (side == "player") and not tex.trainer
-      out[#out + 1] = { tex = tex.canvas,
-                        model = monMatrix(tex, cell[1], groundY, cell[2],
-                                          mirror) }
+      local model = monMatrix(tex, cell[1], groundY, cell[2], mirror)
+      -- the foe drinking into the ball: scaled about its own chest, in
+      -- world space so the composed card matrix needs no decomposition
+      if side == "enemy" and cap and cap.shrink then
+        local k = cap.shrink
+        local ax, ay, az = cell[1], groundY + 8, cell[2]
+        model = Mat4.mul(
+          Mat4.mul(Mat4.translate(ax, ay, az),
+                   Mat4.mul(Mat4.scale(k, k, k),
+                            Mat4.translate(-ax, -ay, -az))),
+          model)
+      end
+      out[#out + 1] = { tex = tex.canvas, model = model }
     end
   end
   return out
@@ -313,6 +351,14 @@ local function shadowSignature(state, arena, terrain, nbMesh, token)
                   -- from somewhere new must be re-cast from there
                   math.floor(ShadowMap.KX * 128),
                   math.floor(ShadowMap.KZ * 128) }
+  -- a capture session's ball moves through the sun's world too; its term
+  -- is quantised inside sig() so the cache re-renders on real movement
+  -- and not on every frame the ball rests
+  local cap = BattleScene.capture
+  if cap and cap.sig then
+    local okSig, sig = pcall(cap.sig)
+    parts[#parts + 1] = okSig and sig or "cap"
+  end
   for i = 1, #nbMesh do parts[#parts + 1] = tostring(nbMesh[i]) end
   return table.concat(parts, ",")
 end
@@ -377,6 +423,10 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
   -- the water. Un-snugged for the same reason: snug is a bias for a card
   -- rooted to the ground plane, and a model has thickness of its own.
   pcall(function() V.require("Stadium").cast(ShadowMap) end)
+  -- the capture session's ball, by the same reasoning: real geometry, its
+  -- shadow is half of what sells the arc
+  local cap = BattleScene.capture
+  if cap and cap.cast then pcall(cap.cast, ShadowMap) end
 
   ShadowMap.finish(sig)
 end
@@ -520,7 +570,18 @@ function BattleScene.render(state, arena, textures, token)
   end
 
   local groundY = BattleScene.groundY(host, arena)
-  local cam, pitch = BattleCam.rig(arena, groundY)
+  -- A capture session brings a camera of its own: the head-on seat, on
+  -- the arena's axis looking straight at the foe, in place of the solved
+  -- over-the-shoulder shot. Everything downstream -- the letterbox fov,
+  -- the pins, the sun, the cards yawing to the eye -- is generic over
+  -- whichever camera this is.
+  local cam, pitch, capFrameH
+  local cap = BattleScene.capture
+  if cap and cap.rig then
+    local okRig, c, p, fh = pcall(cap.rig, arena, groundY)
+    if okRig and c then cam, pitch, capFrameH = c, p or 0.15, fh end
+  end
+  if not cam then cam, pitch = BattleCam.rig(arena, groundY) end
   cam.fov = BattleScene.letterboxFov(cam.fov, ph, s)
 
   local cx, cy = arena.mid[1], arena.mid[2]
@@ -529,7 +590,8 @@ function BattleScene.render(state, arena, textures, token)
   -- the player's zoom is part of this: the sun's box is fitted to what the
   -- frame holds, so a shot pulled wide has to light the ground it just
   -- brought into view rather than the ground the rig alone would have
-  local vh = BattleCam.frameH(arena) * ph / (BattleScene.GB_H * s)
+  local vh = (capFrameH or BattleCam.frameH(arena)) * ph
+             / (BattleScene.GB_H * s)
   local vw = vh * pw / ph
 
   -- the cards need the camera's eye to face it, so the rig has to be live
@@ -662,6 +724,11 @@ function BattleScene.render(state, arena, textures, token)
       V.require("Stadium").draw(BattleBillboard.PULL)
     end)
     if not okStadium then V.require("Stadium").report(stadiumErr) end
+    -- the capture session's Poke Ball, still inside the flash window and
+    -- with the mons' own camera-ward pull, so a ball crossing in front of
+    -- a card wins the depth test the way a nearer thing should
+    local cap = BattleScene.capture
+    if cap and cap.draw then pcall(cap.draw, BattleBillboard.PULL) end
     if flashing then Voxel3D.flatten(nil) end
     -- grass and flowers ride the same camera-ward pull the free-roam pass
     -- gives them, measured against THIS camera's pitch rather than the
@@ -695,25 +762,47 @@ function BattleScene.render(state, arena, textures, token)
     -- How wide one overworld square is on screen where each mon stands, in
     -- GB pixels. This is what the pics are scaled to: a mon covers its own
     -- square and no more, at whatever the drift has done to the distance.
+    --
+    -- Measured along BOTH map axes and answered as the larger, as a full
+    -- 2D screen distance. One axis alone breaks the moment a camera looks
+    -- ALONG it: the capture seat stands on the arena's own axis, and on a
+    -- quarter-turned arena that axis is world X -- the ±X probe points
+    -- then project to the same pixel and the span reads zero, which
+    -- collapsed the ring and blew up the throw's world-per-pixel mapping.
     local half = BattleScene.CELL / 2
-    local pl = BattleScene.toGB(vp, arena.player[1] - half, groundY,
-                                arena.player[2], lx, ly, s, pw, ph)
-    local pr = BattleScene.toGB(vp, arena.player[1] + half, groundY,
-                                arena.player[2], lx, ly, s, pw, ph)
-    local el = BattleScene.toGB(vp, arena.enemy[1] - half, groundY,
-                                arena.enemy[2], lx, ly, s, pw, ph)
-    local er = BattleScene.toGB(vp, arena.enemy[1] + half, groundY,
-                                arena.enemy[2], lx, ly, s, pw, ph)
-    if not (pl and pr and el and er) then return end
+    local function cellSpan(wx, wz)
+      local x1, y1 = BattleScene.toGB(vp, wx - half, groundY, wz,
+                                      lx, ly, s, pw, ph)
+      local x2, y2 = BattleScene.toGB(vp, wx + half, groundY, wz,
+                                      lx, ly, s, pw, ph)
+      local x3, y3 = BattleScene.toGB(vp, wx, groundY, wz - half,
+                                      lx, ly, s, pw, ph)
+      local x4, y4 = BattleScene.toGB(vp, wx, groundY, wz + half,
+                                      lx, ly, s, pw, ph)
+      if not (x1 and x2 and x3 and x4) then return nil end
+      local ew = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)
+      local ns = math.sqrt((x4 - x3) ^ 2 + (y4 - y3) ^ 2)
+      return math.max(ew, ns)
+    end
+    local pSpan = cellSpan(arena.player[1], arena.player[2])
+    local eSpan = cellSpan(arena.enemy[1], arena.enemy[2])
+    if not (pSpan and eSpan) then return end
     out = {
       canvas = canvas,
       player = { pmx, pmy },
       enemy = { emx, emy },
-      playerSpan = math.abs(pr - pl),
-      enemySpan = math.abs(er - el),
+      playerSpan = pSpan,
+      enemySpan = eSpan,
       -- the letterbox, so the depth-of-field pass can put its sharp band on
       -- the two marks rather than on a fraction of the window
       lx = lx, ly = ly, scale = s, pw = pw, ph = ph,
+      -- the camera and its combined matrix, for anything that reasons
+      -- about this shot from outside the render -- the capture mode's
+      -- throw is solved in these (aim errors along this eye's own right
+      -- and forward, contact judged through this vp)
+      eye = { cam.eye[1], cam.eye[2], cam.eye[3] },
+      focus = { cam.focus[1], cam.focus[2], cam.focus[3] },
+      vp = vp,
       -- and the hour's light, for anything drawn over this shot that is NOT
       -- geometry and so never went past the shader that applied it -- the back
       -- pic pinned to the menu (see OverworldBattle.backPinned). Neutral
