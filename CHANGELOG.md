@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.7.1
+
+### Added
+
+- **RENDER DIST: stop drawing the map you cannot see.** The orbit rungs now
+  cut the world to the ground the camera actually frames, so a connected
+  map that falls entirely outside it is skipped before it is drawn --
+  terrain, water, grass, flowers and its whole shadow pass. At the high
+  rungs, where the camera is nearly overhead, that is most of the frame's
+  geometry never submitted.
+
+  **The footprint is not the window.** Tilt the camera and the ground it
+  frames stops being the flat game's own rectangle and becomes a
+  trapezoid: reaching much further north, flaring much wider out there,
+  and pulling in at the near edge. At 35 degrees a 320x288 view reaches
+  270 world pixels north where the window reaches 144, and 246 to each
+  side where the window reaches 160 -- so a window-sized cut takes a bite
+  out of a world plainly on screen, with sky showing through the top and
+  both sides. It is derived from the orbit's own basis rather than guessed
+  -- the frame's corner rays dropped on the ground plane, in closed form,
+  cross-checked against a ray cast in the suite -- and the stored
+  rectangle sits north of the view centre, because the trapezoid does.
+
+  **The row is a real render distance at 75.** Past about 63 degrees
+  (exactly `atan(2*FOCAL)`) the horizon is inside the frame and "all the
+  ground on screen" is an infinite answer, so something has to name a
+  distance. FIT is the closest of the four, WIDE through WIDEST push the
+  world's edge out, OFF stops cutting. Below that pitch the honest
+  footprint is already inside the reach and the row does nothing to the
+  picture at all.
+
+  The cut reaches the shader as the same box the headset's DIORAMA uses --
+  rectangular now, with two half-extents, and the diorama passes the same
+  number twice. Under V-CURVE the rim dissolves rather than cutting,
+  because a bent world has no straight sides. The sun and the eye ask the
+  same question about the same maps, so the light can never record a map
+  the camera did not draw.
+
+  Not on 1ST or 3RD -- the player is standing in the world there -- and
+  the box opens out and away over the rung tween rather than vanishing on
+  the frame the rung changed. FULL sets it to FIT.
+
 ## 1.7.0
 
 ### Added
@@ -45,41 +87,6 @@
   rather than falling to OFF. The viewport is compiled into the scene
   shader as its own variant, so a flat frame -- and a phone above all --
   builds and binds exactly what it always did.
-
-- **RENDER DIST: stop drawing the map you cannot see.** The orbit rungs now
-  cut the world to the ground the camera actually frames, so a connected
-  map that falls entirely outside it is skipped before it is drawn --
-  terrain, water, grass, flowers and its whole shadow pass. At the high
-  rungs, where the camera is nearly overhead, that is most of the frame's
-  geometry never submitted.
-
-  **The footprint is not the window.** Tilt the camera and the ground it
-  frames stops being the flat game's own rectangle and becomes a
-  trapezoid: reaching much further north, flaring much wider out there,
-  and pulling in at the near edge. It is derived from the orbit's own
-  basis rather than guessed -- the frame's corner rays dropped on the
-  ground plane, in closed form, cross-checked against a ray cast in the
-  suite -- so the cut can never take a bite out of the picture. The stored
-  rectangle sits north of the view centre, because the trapezoid does.
-
-  **The row is a real render distance at 75.** Past about 63 degrees
-  (exactly `atan(2*FOCAL)`) the horizon is inside the frame and "all the
-  ground on screen" is an infinite answer, so something has to name a
-  distance. FIT is the closest of the four, WIDE through WIDEST push the
-  world's edge out, OFF stops cutting. Below that pitch the honest
-  footprint is already inside the reach and the row does nothing to the
-  picture at all.
-
-  The cut reaches the shader as the same box the headset's DIORAMA uses --
-  rectangular now, with two half-extents, and the diorama passes the same
-  number twice. Under V-CURVE the rim dissolves rather than cutting,
-  because a bent world has no straight sides. The sun and the eye ask the
-  same question about the same maps, so the light can never record a map
-  the camera did not draw.
-
-  Not on 1ST or 3RD -- the player is standing in the world there -- and
-  the box opens out and away over the rung tween rather than vanishing on
-  the frame the rung changed. FULL sets it to FIT.
 
 ## 1.6.2
 
