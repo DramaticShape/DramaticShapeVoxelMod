@@ -51,10 +51,11 @@ local floor, sqrt, min, max = math.floor, math.sqrt, math.min, math.max
 
 local ForestAtmos = {}
 
--- The diorama's viewport, as both shaders here take it (see Voxel3D.cull:
--- the field is set for a headset's diorama frame and nil for every other,
--- where kind 0 means "no cut"). Read through V.require rather than held as
--- an upvalue because this file loads before Voxel3D on some paths.
+-- The viewport, as both shaders here take it (see Voxel3D.cull: the field
+-- is set for a headset's diorama frame and for an orbit rung's window box,
+-- and nil for every other, where kind 0 means "no cut"). Read through
+-- V.require rather than held as an upvalue because this file loads before
+-- Voxel3D on some paths.
 local function cullAt()
   local c = V.require("Voxel3D").cull
   return c and { c.x, c.y, c.z } or { 0, 0, 0 }
@@ -63,6 +64,11 @@ end
 local function cullShape()
   local c = V.require("Voxel3D").cull
   return c and { c.r, c.invFade, c.kind } or { 0, 0, 0 }
+end
+
+local function cullRect()
+  local c = V.require("Voxel3D").cull
+  return c and { c.rx or c.r, c.rz or c.r } or { 0, 0 }
 end
 
 -- FULL is the point; LOW halves the march and drops the particles, for
@@ -430,24 +436,25 @@ local RAY_SHADER = [[
   uniform vec3 sunward;      // unit, toward the unseen sun
   uniform vec2 wind;         // leaf-field drift, uv per second
   uniform float time;
-  // the diorama's viewport, as the scene shader takes it (see Voxel3D):
-  // air outside the model is not air, so a sample out there contributes
-  // nothing and the beams end with the world they fall through
+  // the viewport, as the scene shader takes it (see Voxel3D): air outside
+  // the model is not air, so a sample out there contributes nothing and
+  // the beams end with the world they fall through
   uniform vec3 cullAt;
   uniform vec3 cullShape;
+  uniform vec2 cullRect;     // the box's half-extents in x and z
 
   float dioramaCull(vec3 p) {
     if (cullShape.z <= 0.5) return 1.0;
     vec3 cd = p - cullAt;
-    float d;
-    if (cullShape.z < 1.5) {
-      d = max(abs(cd.x), abs(cd.z));      // the box
+    float inside;
+    if (cullShape.z < 1.5) {                 // the box
+      inside = min(cullRect.x - abs(cd.x), cullRect.y - abs(cd.z));
     } else if (cullShape.z < 2.5) {
-      d = length(cd);                     // the ball
+      inside = cullShape.x - length(cd);     // the ball
     } else {
-      d = length(cd.xz);                  // the fight's pillar
+      inside = cullShape.x - length(cd.xz);  // the fight's pillar
     }
-    return clamp((cullShape.x - d) * cullShape.y, 0.0, 1.0);
+    return clamp(inside * cullShape.y, 0.0, 1.0);
   }
 
   float sunDepth(vec2 uv) {
@@ -621,8 +628,9 @@ local PART_SHADER = [[
 #ifdef VERTEX
   uniform mat4 vp;
   uniform vec3 curve;
-  uniform vec3 cullAt;     // the diorama's viewport (see Voxel3D.cull):
-  uniform vec3 cullShape;  // a mote outside the model is not in the air
+  uniform vec3 cullAt;     // the viewport (see Voxel3D.cull): a mote
+  uniform vec3 cullShape;  // outside the model is not in the air
+  uniform vec2 cullRect;   // the box's half-extents in x and z
   uniform vec3 axisR;      // the camera's right, world space
   uniform vec3 axisU;      // and its up: the billboard's own frame
   uniform float time;
@@ -646,15 +654,15 @@ local PART_SHADER = [[
     // rather than having to cut one in half
     if (cullShape.z > 0.5) {
       vec3 cd = base - cullAt;
-      float cdd;
+      float inside;
       if (cullShape.z < 1.5) {
-        cdd = max(abs(cd.x), abs(cd.z));
+        inside = min(cullRect.x - abs(cd.x), cullRect.y - abs(cd.z));
       } else if (cullShape.z < 2.5) {
-        cdd = length(cd);
+        inside = cullShape.x - length(cd);
       } else {
-        cdd = length(cd.xz);
+        inside = cullShape.x - length(cd.xz);
       }
-      vGlow *= clamp((cullShape.x - cdd) * cullShape.y, 0.0, 1.0);
+      vGlow *= clamp(inside * cullShape.y, 0.0, 1.0);
     }
     vCorner = AtmosData.xy;
     vec4 w = vec4(base + axisR * (AtmosData.x * size)
@@ -815,6 +823,7 @@ function ForestAtmos.draw(map)
                 Voxel3D.curveK or 0 })
         pcall(sh.send, sh, "cullAt", cullAt())
         pcall(sh.send, sh, "cullShape", cullShape())
+        pcall(sh.send, sh, "cullRect", cullRect())
         pcall(sh.send, sh, "screen", { w, h })
         pcall(sh.send, sh, "fogW",
               { f.fog.density, f.fog.heightK,
@@ -847,6 +856,7 @@ function ForestAtmos.draw(map)
                 Voxel3D.curveK or 0 })
         pcall(psh.send, psh, "cullAt", cullAt())
         pcall(psh.send, psh, "cullShape", cullShape())
+        pcall(psh.send, psh, "cullRect", cullRect())
         pcall(psh.send, psh, "axisR", axisR)
         pcall(psh.send, psh, "axisU", axisU)
         pcall(psh.send, psh, "time", ForestAtmos.time)

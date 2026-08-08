@@ -176,26 +176,35 @@ local SHADER = [[
   uniform vec3 cullAt;        // the viewport's centre, in world pixels
   uniform vec3 cullShape;     // half-size, 1/fade, kind: 1 box, 2 ball,
                               // 3 the staged fight's pillar
+  uniform vec2 cullRect;      // the BOX's half-extents in x and z, which
+                              // the round kinds have no use for. Two
+                              // numbers because the flat screen's box is
+                              // the WINDOW's own footprint and a window is
+                              // not square (lib/ViewBox); a headset's is,
+                              // and lib/Diorama sends the same half-size
+                              // twice.
 
   // 1 well inside the viewport, 0 outside it, and the rim in between --
   // which is a HARD edge for the box (its band is half a pixel wide, so
   // the ramp is just the antialiasing) and a dissolve for the other two.
   //
-  // The box and the pillar are unbounded upward and downward on purpose:
-  // what is wanted is a square (or round) piece cut OUT OF THE MAP, and a
-  // cut with a lid would take the tops off the trees standing in it.
+  // Every kind is unbounded upward and downward on purpose: what is wanted
+  // is a rectangular (or round) piece cut OUT OF THE MAP, and a cut with a
+  // lid would take the tops off the trees standing in it.
   float dioramaCull(vec3 p) {
     if (cullShape.z <= 0.5) return 1.0;
     vec3 cd = p - cullAt;
-    float d;
+    // how far INSIDE the cut this point is, in world pixels: the nearest
+    // side for the rectangle, the rim for the two round kinds
+    float inside;
     if (cullShape.z < 1.5) {
-      d = max(abs(cd.x), abs(cd.z));      // the box: a square of map
+      inside = min(cullRect.x - abs(cd.x), cullRect.y - abs(cd.z));
     } else if (cullShape.z < 2.5) {
-      d = length(cd);                     // the ball, under V-CURVE
+      inside = cullShape.x - length(cd);     // the ball, under V-CURVE
     } else {
-      d = length(cd.xz);                  // the fight's pillar
+      inside = cullShape.x - length(cd.xz);  // the fight's pillar
     }
-    return clamp((cullShape.x - d) * cullShape.y, 0.0, 1.0);
+    return clamp(inside * cullShape.y, 0.0, 1.0);
   }
 #endif
   uniform Image sunMap;
@@ -1068,13 +1077,16 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot)
   pcall(sh.send, sh, "fogInfo", fog and
         { fog.density or 0, fog.start or 0, fog.heightK or 0, 0 }
         or { 0, 0, 0, 0 })
-  -- and the diorama's viewport (see Voxel3D.cull), kind 0 when there is
-  -- none -- which is every frame that is not a headset's diorama
+  -- and the viewport (see Voxel3D.cull), kind 0 when there is none --
+  -- which is every frame that neither a headset's diorama (lib/Diorama)
+  -- nor an orbit rung's window box (lib/ViewBox) has cut
   local cull = Voxel3D.cull
   pcall(sh.send, sh, "cullAt",
         cull and { cull.x, cull.y, cull.z } or { 0, 0, 0 })
   pcall(sh.send, sh, "cullShape",
         cull and { cull.r, cull.invFade, cull.kind } or { 0, 0, 0 })
+  pcall(sh.send, sh, "cullRect",
+        cull and { cull.rx or cull.r, cull.rz or cull.r } or { 0, 0 })
   -- the window glass: the tileset's mask (or the blank -- the sampler is
   -- declared either way, and unbound is a driver-dependent crash), how lit
   -- the panes are, and the movement-fed glint as the caller last set it
