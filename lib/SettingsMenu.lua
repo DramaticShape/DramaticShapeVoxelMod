@@ -166,23 +166,28 @@ function SettingsMenu.rows(catId, game)
         }
       end
     end
+    -- ------- and the ROM import, last, on the top-level menu
+    --
+    -- An ACTION and not a setting: there is no rung to store, nothing for the
+    -- mod manager's page to persist and nothing to restore on the next boot,
+    -- so it is appended rather than living in SETTINGS.
+    --
+    -- On the ROOT menu rather than under the battles whose STADIUM rungs it
+    -- unlocks. It is a piece of one-time SETUP -- point the mod at a cartridge
+    -- and wait while it builds -- and a player who has been told to import a
+    -- ROM should find the row where the mod begins, not two levels down a
+    -- category they have no reason to open until it has worked. Last, because
+    -- the categories are what the menu is FOR.
+    local ok, importRow = pcall(function()
+      return V.require("StadiumRomPick").row()
+    end)
+    if ok and importRow then out[#out + 1] = importRow end
     return out
   end
   for _, entry in ipairs(settings) do
     if entry.cat == catId and offered(entry, full) then
       out[#out + 1] = entry[1]:row()
     end
-  end
-  -- and the ROM import, which is an ACTION and not a setting: there is no
-  -- rung to store, nothing for the mod manager's page to persist and nothing
-  -- to restore on the next boot, so it is appended here rather than living in
-  -- SETTINGS. It sits under the battles because the STADIUM rungs of 3D-BTL
-  -- are what it unlocks.
-  if catId == "battles" then
-    local ok, importRow = pcall(function()
-      return V.require("StadiumRomPick").row()
-    end)
-    if ok and importRow then out[#out + 1] = importRow end
   end
   return out
 end

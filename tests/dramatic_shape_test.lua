@@ -434,10 +434,18 @@ for key, cat in pairs(WHERE) do
       ("%s is on the %s menu"):format(key, cat))
   end
 end
--- the ROM import is an action, not a setting, and it sits with the rungs of
--- 3D-BTL it unlocks
-T.check(Menus.rows("battles")["DRAMATIC_SHAPE:stadiumRom"],
-  "and STADIUM ROM is under the battles, which is what it unlocks")
+-- the ROM import is an action, not a setting, and it is one-time SETUP, so it
+-- sits on the top-level menu where the mod begins rather than two levels down
+-- the category it unlocks
+T.check(Menus.rows(Menus.lib.ROOT)["DRAMATIC_SHAPE:stadiumRom"],
+  "and STADIUM ROM is on the top-level menu, not inside a category")
+T.check(not Menus.rows("battles")["DRAMATIC_SHAPE:stadiumRom"],
+  "and only there")
+do
+  local rootRows = Menus.lib.rows(Menus.lib.ROOT, { data = Data })
+  T.eq(rootRows[#rootRows].id, "DRAMATIC_SHAPE:stadiumRom",
+    "last on it, because the categories are what the menu is for")
+end
 end
 
 -- ------- the open menu notices when FULL is stepped onto or off

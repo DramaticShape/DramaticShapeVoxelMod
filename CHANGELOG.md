@@ -92,8 +92,11 @@
   rows it has quietly taken away. It opens VOXEL and T-SHIFT, which came off
   the engine's list with it, and four categories: **3D WORLD** (V-GRID,
   V-CURVE, RENDER DIST, WATER, DAYTIME), **BATTLES** (3D-BTL, BACK SPRITES,
-  LET'S GO, STADIUM ROM), **PERFORMANCE** (FOREST FX, SHADOWS, AA) and
-  **VR** (VR, SMOOTH TURN).
+  LET'S GO), **PERFORMANCE** (FOREST FX, SHADOWS, AA) and **VR** (VR,
+  SMOOTH TURN). STADIUM ROM stays on that top-level menu, last: it is
+  one-time setup rather than a setting, and somebody who has been told to
+  import a cartridge should find the row where the mod begins, not two
+  levels down a category they have no reason to open until it has worked.
 
   The split is not a new opinion: it is the `full` flag each row already
   carried. `full` marks a row the FULL preset does not take away, and the
