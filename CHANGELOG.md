@@ -79,6 +79,19 @@
 
 ### Fixed
 
+- **B now actually runs from capture mode -- and A throws, and L/R switch
+  balls.** The capture session read its button presses on the RENDER clock,
+  along with everything else it does per frame. Button edges do not survive
+  there: the engine rebuilds the edge table once per fixed logic step and
+  runs all of a frame's steps BEFORE the render-clock hooks, so any frame
+  carrying more than one step had already thrown the press away before
+  anything looked at it. That is not a rare race -- it is every press below
+  60fps, which is exactly where a 3D battle lives, so these buttons were
+  reliably dead on the machines that most needed them and fine on a 144Hz
+  one. They are read on the logic step now, through the engine's own
+  input.step seam, and taken rather than peeked so a press the capture used
+  does not also page the message it just queued.
+
 - **The grass moves during a staged battle.** The wind is switched on around
   the free-roam pass's grass draws and off again after them, and the battle
   pass -- which draws the same tufts, on the same map, from its own camera --

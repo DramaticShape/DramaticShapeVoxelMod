@@ -6432,6 +6432,21 @@ end)()
   -- the row answers the mode, and OFF answers false
   T.eq(LetsGo.mode(), false, "LET'S GO defaults to OFF")
 
+  -- The capture's buttons are read on the LOGIC STEP, through the engine's
+  -- input.step seam, because edges do not survive the render clock (see
+  -- CatchThrow.buttons). The hook calls it under pcall, so a rename would
+  -- be swallowed silently and B would simply stop working -- which is
+  -- exactly the failure it was written to fix. Assert the name exists, and
+  -- that it is harmless with no session, since it runs every single step.
+  do
+    local CatchThrow = lib.require("CatchThrow")
+    T.eq(type(CatchThrow.buttons), "function",
+      "the capture reads its buttons on the logic step, by name")
+    local q = { "a", "b" }
+    CatchThrow.buttons({ input = { pressQueue = q } })
+    T.eq(#q, 2, "and with no session in flight it takes nothing and does nothing")
+  end
+
   -- ------- the scripted catch tutorials are none of LET'S GO's business
   --
   -- The VIRIDIAN CITY old man and Yellow's PROF.OAK / PIKACHU intro are

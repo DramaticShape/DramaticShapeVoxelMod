@@ -67,7 +67,13 @@ return function(game)
   -- this driver has to be able to see (button edges read on the render
   -- clock instead of the logic step) lives between love.keypressed and
   -- whoever polls the edge, so a driver that writes the queue itself
-  -- jumps straight over it. "b" is the default binding for the B button.
+  -- jumps straight over it.
+  --
+  -- The B BUTTON's keyboard binding is "x" (or backspace) -- Input's
+  -- DEFAULT_BINDINGS. The `b = "b"` next to it is the GAMEPAD table, so a
+  -- driver that presses the "b" KEY presses nothing at all and reports a
+  -- dead button whatever the code does.
+  local B_KEY = "x"
   local function key(name)
     love.keypressed(name, name, false)
     U.wait(2)
@@ -88,6 +94,20 @@ return function(game)
       U.wait(6)
     end
     U.wait(30)
+  end
+
+  -- Tap the fight all the way off the stack before the next case starts.
+  -- Cases that merely tapped A a fixed number of times left the previous
+  -- battle (and its session) alive whenever an outcome ran long, and the
+  -- next case then measured the leftover -- which reads as that case
+  -- failing, at a spot nowhere near the cause.
+  local function closeOut(battle)
+    for _ = 1, 400 do
+      if not CatchThrow.session() and game.stack:top() ~= battle then break end
+      U.tap(game, "a")
+      U.wait(4)
+    end
+    U.wait(40)
   end
 
   local function describe(tag, battle)
@@ -116,7 +136,7 @@ return function(game)
   U.shot(game, DIR .. "/empty_1_aim.png")
 
   -- and B is the way out: a Let's Go wild always escapes
-  key("b")
+  key(B_KEY)
   for _ = 1, 120 do
     U.wait(2)
     if a.result then break end
@@ -126,8 +146,7 @@ return function(game)
   -- the session and the held camera are swept by battle.ended, which is the
   -- teardown BELOW this, not the moment `result` is written -- so the sweep
   -- is only worth asserting once the battle has actually left the stack
-  for _ = 1, 40 do U.tap(game, "a"); U.wait(4) end
-  U.wait(60)
+  closeOut(a)
   U.log(("A: after teardown -- session=%s veil=%s (want gone/down)")
         :format(CatchThrow.session() and "still up" or "gone",
                 BattleScene.capture and "still up" or "down"))
@@ -139,6 +158,13 @@ return function(game)
   U.log("== B: FULL with " .. ballCount() .. " ball")
   local b = BattleState.newWild(game, "PIDGEY", 5)
   b.onFinish = function() end
+  -- The outcome under test is what happens when the LAST ball MISSES, so
+  -- the roll must not be left to chance: a run where the Pidgey happened
+  -- to be caught used to cascade into every later case (the session lived
+  -- on into its epilogue, and C and D then measured that leftover instead
+  -- of their own). Forced failure, three shakes -- the roll is the
+  -- engine's business and is covered elsewhere.
+  b.catchAttempt = function() return false, 3 end
   game.overworld:pushBattle(b)
   toCapture(b)
   describe("B", b)
@@ -186,15 +212,14 @@ return function(game)
                 (sb and ("still holding " .. tostring(sb.ballId)))
                 or "SESSION GONE"))
   U.shot(game, DIR .. "/empty_2_ranout.png")
-  key("b")
+  key(B_KEY)
   for _ = 1, 120 do
     U.wait(2)
     if b.result then break end
     U.tap(game, "a")
   end
   U.log("B: after B -- result=" .. tostring(b.result) .. " (want run)")
-  for _ = 1, 40 do U.tap(game, "a"); U.wait(4) end
-  U.wait(60)
+  closeOut(b)
 
   -- ------- C: the scripted tutorial, untouched
 
@@ -256,7 +281,68 @@ return function(game)
     toCapture(d)
     local sd = describe("D" .. speed, d)
     if sd and not sd.empty then
-      key("b")
+      -- where does the key actually get to? Each stage of the chain, so a
+      -- dead B is attributed rather than guessed at
+      local top = game.stack and game.stack:top()
+      U.log(("D%dX probe: top=%s onKeyPressed=%s  fullWild=%s declinable=%s")
+            :format(speed, tostring(top and top.screenId or "?"),
+                    tostring(top and top.onKeyPressed ~= nil),
+                    tostring(sd.fullWild), tostring(sd.declinable)))
+      -- ------- the counter-factual, measured rather than argued
+      --
+      -- How many times an edge would have been visible to a poll on the
+      -- RENDER clock -- where these reads used to live. Measured on UP
+      -- rather than B: the fix TAKES B out of the queue, so B never
+      -- reaches `pressed` any more and would read as a false zero. UP is
+      -- untouched by everything while the battle is parked, and the
+      -- question is about step-vs-frame ordering, not about which button.
+      local onFrame, onStep = 0, 0
+      local innerU = CatchThrow.update
+      CatchThrow.update = function(dt)
+        if game.input.wasPressed and game.input:wasPressed("up") then
+          onFrame = onFrame + 1
+        end
+        return innerU(dt)
+      end
+      local innerB0 = CatchThrow.buttons
+      CatchThrow.buttons = function(g)
+        local q = g and g.input and g.input.pressQueue
+        if q then
+          for i = 1, #q do if q[i] == "up" then onStep = onStep + 1 end end
+        end
+        return innerB0(g)
+      end
+      love.keypressed("up", "up", false)
+      U.wait(2)
+      love.keyreleased("up", "up")
+      U.wait(2)
+      CatchThrow.buttons = innerB0
+      CatchThrow.update = innerU
+      U.log(("D%dX counter-factual: one UP press -- the logic step saw it "
+             .. "%d time(s), the RENDER clock %d time(s)%s")
+            :format(speed, onStep, onFrame,
+                    onFrame == 0 and "  <-- a frame poll misses it entirely"
+                    or ""))
+
+      local seen = 0
+      local innerB = CatchThrow.buttons
+      CatchThrow.buttons = function(g)
+        local q = g and g.input and g.input.pressQueue
+        if q and #q > 0 then
+          seen = seen + 1
+          U.log("D probe: buttons saw queue [" .. table.concat(q, ",") .. "]")
+        end
+        return innerB(g)
+      end
+      love.keypressed(B_KEY, B_KEY, false)
+      U.log(("D probe: right after keypressed -- queue=[%s] state.b=%s")
+            :format(table.concat(game.input.pressQueue, ","),
+                    tostring(game.input.state.b)))
+      U.wait(2)
+      love.keyreleased(B_KEY, B_KEY)
+      U.wait(2)
+      CatchThrow.buttons = innerB
+      U.log("D probe: buttons saw a non-empty queue " .. seen .. " time(s)")
       local ran = false
       for _ = 1, 60 do
         U.wait(2)
@@ -274,8 +360,7 @@ return function(game)
       pcall(CatchThrow.onBattleEnded)
       d.result, d.phase, d.afterQueue = "run", "messages", "finish"
     end
-    for _ = 1, 80 do U.tap(game, "a"); U.wait(4) end
-    U.wait(60)
+    closeOut(d)
     game.speedOverride = nil
   end
   U.log("done -- " .. DIR)

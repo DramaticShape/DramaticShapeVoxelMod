@@ -1228,6 +1228,16 @@ end
 
 function CatchThrow.buttons(g)
   if not (S and S.phase == "aim") then return end
+  -- This runs on EVERY logic step for the whole session, so it has to be
+  -- certain the fight it is aiming into is still the thing on screen. A
+  -- session that outlived its battle -- a script tearing the fight down, a
+  -- forced finish, an error between the throw and the sweep -- would
+  -- otherwise sit in the overworld silently eating A, B and L/R out of the
+  -- queue every step, which reads as "the buttons stopped working" and
+  -- points nowhere near here.
+  local b = S.battle
+  if not b or b.result then return end
+  if not (g and g.stack and g.stack:top() == b) then return end
   -- the same beat of deafness the drag has: the A that picked the ball out
   -- of the bag menu is still this step's edge, and must not become a throw
   if S.clock < 0.25 then return end
