@@ -207,6 +207,11 @@ end
 
 local function volume(kind, x, y, z, r, fade)
   return { x = x, y = y, z = z, r = r,
+           -- The BOX kind is rectangular in the shader, because the flat
+           -- screen's box is the WINDOW's own footprint and a window is not
+           -- square (lib/ViewBox). A headset's model has no window to be
+           -- shaped like, so this one is: the same half-size twice.
+           rx = r, rz = r,
            -- a zero band is a hard edge: half a pixel of ramp, which is
            -- one pixel of antialiasing rather than a stair
            invFade = 1 / math.max(fade or 0, 0.5), kind = kind }
