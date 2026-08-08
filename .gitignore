@@ -44,3 +44,4 @@ model_extract/viewer.html
 # extractor is diffed against (tests/stadium_extract_test.lua), rebuilt with
 # tools/stadium_pack.py whenever it is wanted
 assets/stadium/
+pocket-voxel/

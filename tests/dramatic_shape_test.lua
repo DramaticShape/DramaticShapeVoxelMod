@@ -142,6 +142,7 @@ T.check(not fullIds["pipeline:tiltshift"],
   "FULL takes T-SHIFT off the menu -- it owns the blur")
 T.check(not fullIds["DRAMATIC_SHAPE:grid"], "and V-GRID")
 T.check(not fullIds["DRAMATIC_SHAPE:curve"], "and V-CURVE")
+T.check(not fullIds["DRAMATIC_SHAPE:viewbox"], "and RENDER DIST")
 T.check(not fullIds["DRAMATIC_SHAPE:daytime"], "and DAYTIME")
 
 -- but the battle rows survive it: they are not knobs on the look, and FULL
@@ -319,7 +320,8 @@ local order = {}
 for i, row in ipairs(grouped) do order[row.id] = i end
 T.check(order["pipeline:tiltshift"] < order["DRAMATIC_SHAPE:grid"],
   "the mode's settings follow its pipeline rows")
-T.eq(order["DRAMATIC_SHAPE:battles"] - order["pipeline:tiltshift"], 5,
+-- V-GRID, V-CURVE, RENDER DIST, WATER, FOREST FX, then 3D-BTL
+T.eq(order["DRAMATIC_SHAPE:battles"] - order["pipeline:tiltshift"], 6,
   "and sit in one unbroken block, not scattered to the end of the list")
 T.check(order["void_fill"] > order["DRAMATIC_SHAPE:battles"],
   "with the engine's own later rows still after them")
@@ -404,21 +406,26 @@ local hookedRows = Runtime.call("ui.options.rows", function(_, r) return r end,
 -- (nothing to store, nothing for the mod manager to persist) and is offered
 -- on every platform, saying WHERE? rather than IMPORT where there is no file
 -- dialog to open
-T.eq(#hookedRows, 11, "the options hook added a row per setting, plus the "
+T.eq(#hookedRows, 12, "the options hook added a row per setting, plus the "
   .. "STADIUM ROM action row")
-local grid, curve, water = hookedRows[2], hookedRows[3], hookedRows[4]
-local battles, backRow, daytime = hookedRows[6], hookedRows[7], hookedRows[8]
--- the FOREST FX row is hookedRows[5] and AA hookedRows[9]; both are read
--- where they are used rather than named here, because this chunk is one
--- main function and has 200 local slots to spend
+local grid, curve, water = hookedRows[2], hookedRows[3], hookedRows[5]
+local battles, backRow, daytime = hookedRows[7], hookedRows[8], hookedRows[9]
+-- the RENDER DIST row is hookedRows[4], FOREST FX hookedRows[6] and AA
+-- hookedRows[10]; all three are read where they are used rather than named
+-- here, because this chunk is one main function and has 200 local slots to
+-- spend
+T.eq(hookedRows[4].label, "RENDER DIST", "the viewport row carries its label")
+T.eq(hookedRows[4].value(), "FIT",
+  "and defaults to FIT -- the cut IS the window the flat game already "
+  .. "framed, which is the whole claim the row makes")
 T.eq(water.label, "WATER", "the water row carries its label")
 T.eq(water.value(), "FULL",
   "and defaults to FULL -- reflections are the point of having the row")
 water.step({ save = { options = {} }, mods = { modOptions = {} } }, 1)
 T.eq(water.value(), "SKY",
   "stepping down drops the screen-space march and keeps the sky, sun and moon")
-T.eq(hookedRows[5].label, "FOREST FX", "the atmosphere row carries its label")
-T.eq(hookedRows[5].value(), "FULL",
+T.eq(hookedRows[6].label, "FOREST FX", "the atmosphere row carries its label")
+T.eq(hookedRows[6].value(), "FULL",
   "and defaults to FULL -- it only spends anything on a map with an "
   .. "atmosphere entry, which is one forest today")
 T.eq(daytime.label, "DAYTIME", "the day/night row carries its label")
@@ -517,7 +524,7 @@ do
 local AntiAlias = run.loader.exports.DRAMATIC_SHAPE.lib.require("AntiAlias")
 local VoxelGrid = run.loader.exports.DRAMATIC_SHAPE.lib.require("VoxelGrid")
 local aaGame = { save = { options = {} }, mods = { modOptions = {} } }
-local aa = hookedRows[9]
+local aa = hookedRows[10]
 T.eq(aa.label, "AA", "the anti-aliasing row carries its label")
 T.eq(aa.value(), "OFF",
   "and starts off -- supersampling is a cost knob, and a mod must not spend "
@@ -6040,6 +6047,232 @@ end
 T.eq(Pack.load(126).staticPose, false,
   "Magmar animates -- its hermite animations decode correctly now")
 T.eq(pikachu.staticPose, false, "and a packed-stream species does too")
+end)()
+
+-- ------- RENDER DIST: the orbit rungs cut to the window that frames them
+--
+-- The flat screen's answer to the same question the headset's diorama box
+-- asks. Two halves, and this asserts both: the CUT the shader takes (a
+-- rectangle, because a window is not square), and the SKIP it buys -- a
+-- connected map lying entirely outside the box is never submitted.
+;(function()
+
+local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+local VB = lib.require("ViewBox")
+local Dio = lib.require("Diorama")
+local VS = lib.require("VoxelState")
+local Curve = lib.require("WorldCurve")
+local boxWas, curveWas = VB.setting:get(), Curve.setting:get()
+local angleWas = VS.angle
+Curve.setting:sync(0)
+
+-- ------- the ladder
+T.eq(VB.setting.values[1], 0,
+  "FIT is rung 0, so an unset save lands on the cut rather than off it")
+T.eq(VB.setting.labels[1], "FIT", "and FIT is what the row calls it")
+T.eq(VB.setting.labels[#VB.setting.labels], "OFF",
+  "OFF is the TOP of the ladder -- 'how much world' ending in all of it, "
+  .. "rather than a switch beside the sizes")
+for i = 2, #VB.FRACS - 1 do
+  T.check(VB.FRACS[i] > VB.FRACS[i - 1],
+    "the ladder opens out at rung " .. (i - 1))
+end
+T.eq(VB.FRACS[1], 1.0,
+  "and FIT is exactly one window: the cut is the framing the flat game "
+  .. "already had, not one this file made up")
+
+-- ------- which rungs it is about
+VB.setting:sync(0)
+T.eq(VB.appliesTo(0), false, "OFF has no 3D pass to cut")
+T.check(VB.appliesTo(VS.FULL_LEVEL), "FULL is cut -- it IS the model read")
+T.check(VB.appliesTo(2) and VB.appliesTo(3) and VB.appliesTo(4)
+        and VB.appliesTo(5),
+  "and so is every orbit rung: 15, 35, 50 and 75")
+T.eq(VB.appliesTo(VS.FP_LEVEL), false,
+  "1ST is not: the player is standing IN the world, and a box round a "
+  .. "walking eye is a fog-of-war circle rather than a model on a table")
+T.eq(VB.appliesTo(VS.TP_LEVEL), false, "nor 3RD, which is the same rig")
+
+-- ------- the footprint IS NOT the window
+--
+-- The bug this replaced: the box was the flat game's own vw-by-vh
+-- rectangle, which is the ground a camera frames at 0 degrees and at no
+-- rung the mode actually has. Every tilted rung frames a TRAPEZOID that
+-- reaches further north and flares wider out there, and a window-sized box
+-- cut the top and both sides off a world plainly on screen -- gaps, with
+-- sky showing through them.
+--
+-- So the footprint is checked against a RAY CAST through the orbit's own
+-- basis: the frame's corner rays dropped on the ground plane. If the closed
+-- form and the rays ever disagree, the picture has a hole in it.
+local REACH = VB.MAX_REACH * 288
+local function castFootprint(a)
+  local tanY = 1 / (2 * VS.FOCAL)
+  local tanX = tanY * (320 / 288)
+  local k = VS.FOCAL * 288
+  local ca, sa = math.cos(a), math.sin(a)
+  local n, s, x = -1e18, -1e18, 0
+  for i = 0, 200 do
+    local sy = -1 + 2 * i / 200
+    -- forward (0,-ca,-sa), true up (0,sa,-ca), right (1,0,0)
+    local dy = -ca + sy * tanY * sa
+    local dz = -sa - sy * tanY * ca
+    if dy < -1e-9 then
+      local t = (k * ca) / -dy                 -- eye height over the drop
+      local wz, wx = k * sa + t * dz, t * tanX
+      if -wz > n then n = -wz end
+      if wz > s then s = wz end
+      if wx > x then x = wx end
+    end
+  end
+  return n, s, x
+end
+for _, deg in ipairs({ 0, 15, 35, 50 }) do
+  local n, s, x = castFootprint(math.rad(deg))
+  local fn, fs, fx = VB.footprint(math.rad(deg), 320, 288, REACH)
+  T.check(math.abs(fn - n) < 1 and math.abs(fs - s) < 1
+          and math.abs(fx - x) < 1,
+    ("%d degrees: the footprint is the ground the rays actually land on "
+     .. "(north %.0f/%.0f, south %.0f/%.0f, side %.0f/%.0f)")
+      :format(deg, fn, n, fs, s, fx, x))
+end
+-- straight down is the ONE case the old window-sized box got right, which
+-- is why it survived being wrong everywhere else
+do
+  local n, s, x = VB.footprint(0, 320, 288, REACH)
+  T.check(math.abs(n - 144) < 1e-6 and math.abs(s - 144) < 1e-6
+          and math.abs(x - 160) < 1e-6,
+    "at 0 degrees it reduces to the flat window, exactly")
+end
+-- and the shape of the error the gaps were: north grows with the tilt,
+-- south SHRINKS (the bottom of the frame is nearer than the focus), and
+-- the sides flare with the far field
+do
+  local n15, s15, x15 = VB.footprint(math.rad(15), 320, 288, REACH)
+  local n50, s50, x50 = VB.footprint(math.rad(50), 320, 288, REACH)
+  T.check(n15 > 144 and n50 > n15,
+    "every tilted rung reaches further north than the window did -- which "
+    .. "is the gap that used to open along the top")
+  T.check(s15 < 144,
+    "and less far south, because the bottom of the frame is nearer the eye "
+    .. "than the focus is")
+  T.check(x15 > 160 and x50 > x15,
+    "and wider at the sides, because the far field is further away -- the "
+    .. "other gap")
+  T.check(s50 < n50 * 0.5,
+    "so the picture is mostly AHEAD of the view centre, and the box has to "
+    .. "sit north of it rather than around it")
+end
+-- past atan(2*FOCAL) -- about 63 degrees -- the horizon is inside the frame
+-- and the honest answer is infinite. That is the whole reason there is a
+-- row: something has to name a distance.
+do
+  local n75 = VB.footprint(math.rad(75), 320, 288, REACH)
+  T.check(math.abs(n75 - REACH) < 1,
+    "at 75 the footprint is unbounded and the reach stands in for it")
+  local near = VB.footprint(math.rad(75), 320, 288, REACH / 2)
+  T.check(near < n75, "and a shorter reach brings the world's edge in")
+end
+
+-- ------- the cut itself
+VS.angle = math.rad(35)
+local box = VB.frame(100, 200, 320, 288, 3)
+T.eq(box.kind, Dio.BOX, "the cut is the shader's BOX kind, like the diorama's")
+T.eq(box.x, 100, "centred on the view in x, which the trapezoid is")
+T.check(box.z < 200,
+  "and NORTH of it in z, which the trapezoid also is -- a box centred on "
+  .. "the view centre is the bug that cut the top off")
+do
+  local n, s, x = VB.footprint(math.rad(35), 320, 288, REACH)
+  T.check(math.abs(box.rz - (n + s) * 0.5) < 1e-6,
+    "the half-depth spans the footprint from its south edge to its north")
+  T.check(math.abs(box.z - (200 - (n - s) * 0.5)) < 1e-6,
+    "and the centre sits exactly between them")
+  T.check(math.abs(box.rx - x) < 1e-6, "with the far field's own half-width")
+  T.check(box.rz > 144 and box.rx > 160,
+    "both bigger than the window at every tilted rung, so the cut can "
+    .. "never take a bite out of the picture")
+end
+T.check(box.rx ~= box.rz,
+  "which is the whole reason the box kind carries two half-extents: a "
+  .. "square cut on a wide frame either loses the sides or overshoots")
+T.check(1 / box.invFade <= 0.5,
+  "with a HARD edge while the world is flat: that IS the sides")
+-- and the diorama's own box still passes the same number twice, so one
+-- shader branch serves both
+local sq = Dio.viewport(0, 0, 288)
+T.eq(sq.rx, sq.r, "a headset's box is square in x")
+T.eq(sq.rz, sq.r, "and in z -- no window to be shaped like")
+
+-- the row opens it out, and OFF stops cutting entirely
+VB.setting:sync(1)
+local wide = VB.frame(100, 200, 320, 288, 3)
+T.check(wide.rx > box.rx and wide.rz > box.rz,
+  "a wider rung reaches further in both directions")
+VB.setting:sync(#VB.setting.values - 1)
+T.eq(VB.setting:get(), 4, "the top rung is OFF")
+T.eq(VB.frame(100, 200, 320, 288, 3), nil, "and OFF cuts nothing at all")
+T.eq(VB.cull, nil, "leaving no viewport on the module for a pass to inherit")
+
+-- a bent world has no straight sides, so the rim dissolves under V-CURVE --
+-- the same call Diorama.fadeFor makes for the same reason
+VB.setting:sync(0)
+Curve.setting:sync(3)
+local bent = VB.frame(0, 0, 320, 288, 3)
+T.check(1 / bent.invFade > 1,
+  "V-CURVE softens the box's rim: a hard edge across a bent world is a "
+  .. "lie about what is being looked at")
+Curve.setting:sync(0)
+
+-- ------- the coarse half: whole maps skipped before they are drawn
+VB.setting:sync(0)
+VS.angle = math.rad(35)
+local cut = VB.frame(0, 0, 320, 288, 3)
+-- a 10x9-block map (Pallet's shape) at the origin is under the box
+local here = { map = { def = { width = 10, height = 9 } }, ox = 0, oy = 0 }
+T.check(VB.showsMap(here), "the map under the box is drawn")
+-- the same map pushed a long way north-east cannot reach the picture
+local far = { map = { def = { width = 10, height = 9 } },
+              ox = 4000, oy = 4000 }
+T.eq(VB.showsMap(far), false,
+  "a connected map entirely outside the box is skipped -- no terrain, no "
+  .. "water, no grass, no flowers and no shadow pass")
+-- the test is taken against the CUT's own edge, which is the trapezoid's
+-- and not the window's -- the border ring is meshed outside a map's own
+-- rectangle, so a map that stops just short still has trees in frame
+T.check(VB.showsMap({ map = { def = { width = 1, height = 1 } },
+                      ox = cut.x + cut.rx + VB.PAD - 8, oy = cut.z }),
+  "a map just outside the edge is kept for its border ring, which is "
+  .. "meshed beyond its own rectangle")
+T.eq(VB.showsMap({ map = { def = { width = 1, height = 1 } },
+                   ox = cut.x + cut.rx + VB.PAD + 64, oy = cut.z }), false,
+  "and dropped once even the ring cannot reach")
+-- and the skip follows the trapezoid north: a map the OLD window-sized box
+-- would have thrown away is still on screen at a tilted rung
+T.check(VB.showsMap({ map = { def = { width = 4, height = 4 } },
+                      ox = -64, oy = -200 }),
+  "a map north of the view centre, past where a window-sized box ended, "
+  .. "is kept -- the camera is looking straight at it")
+VB.stop()
+T.check(VB.showsMap(far),
+  "with no box open every map is drawn, so a caller may guard "
+  .. "unconditionally -- which is every headset frame and every OFF rung")
+T.check(VB.showsMap(nil), "and a malformed neighbour is never skipped")
+
+-- ------- the sun has to notice the row
+--
+-- WHICH neighbours went into the shadow map is now a function of the box,
+-- and the box is the one input the sun's signature did not already carry.
+VB.setting:sync(0)
+local sigFit = VB.signature()
+VB.setting:sync(2)
+T.neq(VB.signature(), sigFit,
+  "opening the row out changes the sun's signature, so a map recorded "
+  .. "without a neighbour is redrawn with it")
+
+Curve.setting:sync(curveWas)
+VB.setting:sync(boxWas)
+VS.angle = angleWas
 end)()
 
 Pipelines.reset()
