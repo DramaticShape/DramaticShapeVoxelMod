@@ -355,6 +355,10 @@ end
 
 function OverworldBattle.textRects(battle)
   if not battle or battle.blankForAskName then return {} end
+  -- a capture session aiming has no text to put in the box and takes it
+  -- off the frame (see the drawTextArea wrap): no box, no glass under it
+  local cap = BattleScene.capture
+  if cap and cap.hideTextBox then return {} end
   local r = OverworldBattle.TEXT_RECT
   local out = { box = r.box }
   if battle.phase == "moveSelect" then
@@ -615,7 +619,13 @@ function OverworldBattle.update(dt)
   -- was solved for (the slow drift aside, which was always there). Polled
   -- per frame rather than latched at battle start: the row is reachable
   -- from the mod manager's page mid-session.
+  -- A LET'S GO capture session holds it too: the throw is aimed in this
+  -- exact framing, and a camera that moved under a ball in flight would
+  -- bend where the flick was pointed after the fact. (The session also
+  -- sets BattleCam.still, which is what stops the drift -- see
+  -- CatchThrow.begin.)
   BattleCam.steerable = not OverworldBattle.backPinned()
+                        and not BattleScene.capture
   -- the right stick, read as a rate before the rig is built from it: the
   -- wheel, the keys, the mouse and a drag all arrive as events and have
   -- already landed, but a stick is a HELD position and only a tick can
@@ -745,6 +755,30 @@ end
 function OverworldBattle.battle()
   if not (session and not session.broken) then return nil end
   return session.battle
+end
+
+-- The staged fight's arena and floor height, for the capture mode: the
+-- foe's world cell is the far end of the throw and the floor is what a
+-- short ball bounces on. nil whenever there is nothing staged, which is
+-- one of the gates that sends a throw back to the engine's own toss.
+function OverworldBattle.arenaInfo()
+  if not (session and session.arena and not session.broken) then return nil end
+  local host = session.arena.map or (session.state and session.state.map)
+  if not host then return nil end
+  return session.arena, BattleScene.groundY(host, session.arena)
+end
+
+-- The foe's rendered pic texture, for the capture mode's ring. The mark
+-- BattleScene pins is the CELL's ground point, but a species' art sits
+-- wherever the artist drew it in the frame -- a bird hovers half a slot
+-- above its own feet row -- and a timing ring belongs on the CREATURE,
+-- not on its patch of grass. The capture session reads this canvas back
+-- once and centres the ring on the art's opaque box. nil on the STADIUM
+-- rungs (the foe is a model, no pic is rendered) and before the first
+-- textures pass, both of which the caller treats as "use the heuristic".
+function OverworldBattle.enemyTexture()
+  if not (session and session.textures) then return nil end
+  return session.textures.enemy
 end
 
 -- The move-animation layer as a texture: the engine's own drawAnimLayer,
@@ -1103,7 +1137,12 @@ function OverworldBattle.textures(battle)
   local out = {}
   local okE, enemy = pcall(OverworldBattle.sideTexture, battle, "enemy")
   local okP, player = true, nil
-  if not OverworldBattle.backPinned() then
+  -- a LET'S GO capture session empties the player's side the same way
+  -- BACK SPRITES does: that mon is simply not in this shot, so no pic is
+  -- rendered for it and no shadow lands under it
+  local cap = BattleScene.capture
+  if not OverworldBattle.backPinned()
+     and not (cap and cap.hidePlayer) then
     okP, player = pcall(OverworldBattle.sideTexture, battle, "player")
   end
   out.enemy = okE and enemy or nil
@@ -1235,6 +1274,11 @@ function OverworldBattle.install()
     self.letterboxWhite = false
     OverworldBattle.drawHudPanels(self)
     withoutBackgroundFill(self, innerDraw)
+    -- the LET'S GO capture overlay -- the timing ring, the ball readout,
+    -- the grade splash -- drawn last in the same GB frame the engine's
+    -- own HUD drew in, so it letterboxes and chunks identically
+    local cap = BattleScene.capture
+    if cap and cap.drawGB then pcall(cap.drawGB, self) end
   end
 
   -- The mons are geometry standing on the map now, drawn in the 3D pass
@@ -1252,6 +1296,10 @@ function OverworldBattle.install()
     if not shot then
       return innerPics(self, slide, sx, sy, onlySide, skipMenuClip)
     end
+    -- a capture session shows NO player side at all -- not even the
+    -- pinned back pic BACK SPRITES would keep on the menu
+    local cap = BattleScene.capture
+    if cap and cap.hidePlayer then return end
     if OverworldBattle.backPinned() and onlySide ~= "enemy" then
       -- under the hour's own light, like everything else in the frame -- see
       -- withTint, and the tint BattleScene hands over with the shot.
@@ -1274,6 +1322,13 @@ function OverworldBattle.install()
   local innerText = BattleState.drawTextArea
   function BattleState:drawTextArea()
     if not self.dramaticShapeShot then return innerText(self) end
+    -- While a capture session is being AIMED the box is empty -- the
+    -- battle's phase is parked, so there is no message in it -- and it
+    -- covers the bottom third of the frame, which is exactly the room a
+    -- throw needs to wind up in. So it comes off entirely for those
+    -- frames and is back the instant a message has something to say.
+    local cap = BattleScene.capture
+    if cap and cap.hideTextBox then return end
     return withoutBoxFill(self, innerText)
   end
 
@@ -1445,10 +1500,10 @@ function OverworldBattle.snapHUDs(battle, shot)
   local slide = (battle.introSlide or 0) * 4
   local rects, bandX = OverworldBattle.snapRects(shot)
   local enemy, player = OverworldBattle.hudLive(battle, slide)
-  local live = {}
-  if not isIOS() then
-    if enemy then live.enemy = rects.enemy end
-    if player then live.player = rects.player end
+  local live = {}
+  if not isIOS() then
+    if enemy then live.enemy = rects.enemy end
+    if player then live.player = rects.player end
   end
   -- The text box's frost panel normally goes into this same world-canvas pass.
   -- On iOS that panel is mirrored upward by the Canvas-to-Canvas path, creating
@@ -1473,23 +1528,23 @@ function OverworldBattle.snapHUDs(battle, shot)
     for side, band in pairs(OverworldBattle.HUD_BAND) do
       local quad = g.newQuad(band[1], band[2], band[3], band[4],
                              BattleScene.GB_W, BattleScene.GB_H)
-      local x = bandX[side] + band[1] * shot.scale
-      local targetY = shot.ly + band[2] * shot.scale
-
-      if isIOS() then
-        -- Keep the player's HUD exactly where it currently appears on the
-        -- right. Only the enemy band needs its mirrored destination corrected.
-        local y = targetY
-        if side == "enemy" then
-          y = shot.ph - targetY - band[4] * shot.scale
-        end
-
-        -- iOS presents this Canvas-to-Canvas HUD texture upside down.
-        g.draw(layer, quad, x, y, 0,
-               shot.scale, -shot.scale, 0, band[4])
-      else
-        g.draw(layer, quad, x, targetY, 0,
-               shot.scale, shot.scale)
+      local x = bandX[side] + band[1] * shot.scale
+      local targetY = shot.ly + band[2] * shot.scale
+
+      if isIOS() then
+        -- Keep the player's HUD exactly where it currently appears on the
+        -- right. Only the enemy band needs its mirrored destination corrected.
+        local y = targetY
+        if side == "enemy" then
+          y = shot.ph - targetY - band[4] * shot.scale
+        end
+
+        -- iOS presents this Canvas-to-Canvas HUD texture upside down.
+        g.draw(layer, quad, x, y, 0,
+               shot.scale, -shot.scale, 0, band[4])
+      else
+        g.draw(layer, quad, x, targetY, 0,
+               shot.scale, shot.scale)
       end
     end
   end)

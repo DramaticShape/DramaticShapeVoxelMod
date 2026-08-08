@@ -456,6 +456,55 @@ function StadiumMon:matrix(x, groundY, z, faceX, faceZ)
     Mat4.translate(0, -lift, 0))
 end
 
+-- How far this Pokemon's LOWEST rendered point stands above the ground it
+-- is placed on, in world pixels -- the authored hover the matrix above
+-- gives back, actually applied.
+--
+-- Derived by repeating that matrix's own arithmetic rather than by
+-- re-deriving it in closed form: root scale, the model's floor and the
+-- hover cap interact in a way that is easy to get subtly wrong, and a
+-- caller that guessed would place things at the feet of a Pokemon that is
+-- flying. Which is exactly what a Pidgey does -- it renders a good third
+-- of its own height clear of its tile, and anything aimed at its cell
+-- mark lands under it.
+function StadiumMon:groundGap()
+  local centre, half = self:bodySpan()
+  if centre then return math.max(0, centre - half) end
+  return 0
+end
+
+-- Where this Pokemon's body actually SITS above the ground it is placed
+-- on, and how big it is: the centre height, the half height and the
+-- girth, all in world pixels.
+--
+-- Measured off the POSED vertices (StadiumRig:posedBounds) and put
+-- through this matrix's own scale and lift, so the answer is the shape
+-- the camera is about to see. That matters most for the species it is
+-- hardest to guess about: a Pidgey's standby animation flies it well
+-- clear of its tile, and anything aimed at its cell mark -- a capture
+-- ring, a thrown ball's collision -- lands under an empty patch of grass
+-- while the bird hovers above it. Nothing static says so; only the pose
+-- does.
+--
+-- nil before the first skin(), or with no rig: the caller falls back to
+-- the bind-pose height, which is right for everything that stands.
+function StadiumMon:bodySpan()
+  local model, rig = self.model, self.rig
+  if not (model and rig and rig.posedBounds) then return nil end
+  local okB, lo, hi, girth = pcall(rig.posedBounds, rig)
+  if not (okB and lo) then return nil end
+  local root = model.rootScale
+  if not (root and root > 0) then root = 1 end
+  local k = root * self:worldHeight() / math.max(model.height, 1e-6)
+  k = k * (self.scale or 1)
+  local floor = model.floor or 0
+  local hover = math.min(math.max(floor, 0),
+                         StadiumMon.HOVER_CAP * math.max(model.height, 0))
+  local lift = (floor - hover) / root
+  -- the same map the model matrix applies: world = k * (posed - lift)
+  return k * ((lo + hi) * 0.5 - lift), k * (hi - lo) * 0.5, k * (girth or 0)
+end
+
 -- Pose and skin for this frame. Separate from the draw because both the
 -- SUN and the camera -- and, in a headset, both eyes -- want the same
 -- skinned mesh, and skinning it once is the whole reason this is worth

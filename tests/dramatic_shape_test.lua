@@ -406,14 +406,14 @@ local hookedRows = Runtime.call("ui.options.rows", function(_, r) return r end,
 -- (nothing to store, nothing for the mod manager to persist) and is offered
 -- on every platform, saying WHERE? rather than IMPORT where there is no file
 -- dialog to open
-T.eq(#hookedRows, 12, "the options hook added a row per setting, plus the "
+T.eq(#hookedRows, 13, "the options hook added a row per setting, plus the "
   .. "STADIUM ROM action row")
 local grid, curve, water = hookedRows[2], hookedRows[3], hookedRows[5]
-local battles, backRow, daytime = hookedRows[7], hookedRows[8], hookedRows[9]
--- the RENDER DIST row is hookedRows[4], FOREST FX hookedRows[6] and AA
--- hookedRows[10]; all three are read where they are used rather than named
--- here, because this chunk is one main function and has 200 local slots to
--- spend
+local battles, backRow, daytime = hookedRows[7], hookedRows[8], hookedRows[10]
+-- the RENDER DIST row is hookedRows[4], FOREST FX hookedRows[6], LET'S GO
+-- hookedRows[9] and AA hookedRows[11]; all four are read where they are
+-- used rather than named here, because this chunk is one main function and
+-- has 200 local slots to spend
 T.eq(hookedRows[4].label, "RENDER DIST", "the viewport row carries its label")
 T.eq(hookedRows[4].value(), "FIT",
   "and defaults to FIT -- the cut IS the window the flat game already "
@@ -446,6 +446,9 @@ T.eq(backRow.value(), "OFF",
   .. "map, so the classic slot is opt-in")
 T.check(backRow.id ~= battles.id and backRow.id:find("battleBack", 1, true),
   "on its own key, so it persists beside 3D-BTL rather than over it")
+T.eq(hookedRows[9].label, "LET'S GO", "the capture-mode row carries its label")
+T.eq(hookedRows[9].value(), "OFF",
+  "and starts OFF -- a gameplay mode is opt-in, whatever the diorama does")
 
 -- stepping writes through to the one place both rows read
 local settingGame = { save = { options = {} }, mods = { modOptions = {} } }
@@ -524,7 +527,7 @@ do
 local AntiAlias = run.loader.exports.DRAMATIC_SHAPE.lib.require("AntiAlias")
 local VoxelGrid = run.loader.exports.DRAMATIC_SHAPE.lib.require("VoxelGrid")
 local aaGame = { save = { options = {} }, mods = { modOptions = {} } }
-local aa = hookedRows[10]
+local aa = hookedRows[11]
 T.eq(aa.label, "AA", "the anti-aliasing row carries its label")
 T.eq(aa.value(), "OFF",
   "and starts off -- supersampling is a cost knob, and a mod must not spend "
@@ -6273,6 +6276,95 @@ T.neq(VB.signature(), sigFit,
 Curve.setting:sync(curveWas)
 VB.setting:sync(boxWas)
 VS.angle = angleWas
+end)()
+
+-- ------- LET'S GO: the capture mode's arithmetic and the ball's pose
+--
+-- The throw itself is a rendered, pointer-driven thing the suite cannot
+-- fly, but everything consequential under it is plain arithmetic and runs
+-- headless: the scaled experience formula (checked against the published
+-- Let's Go table), the combo ladder, and the Pokeball prop's state
+-- machine, which must load and animate without a GPU.
+;(function()
+  local lib = run.loader.exports.DRAMATIC_SHAPE.lib
+  local LetsGo = lib.require("LetsGo")
+  local Pokeball = lib.require("Pokeball")
+  local Mat4 = lib.require("Mat4")
+
+  -- the reference points from the community-measured table: a Lv30
+  -- Chansey (base exp 395) pays 2371 to a Lv30 receiver and 5497 to a
+  -- Lv10 one, before any catch bonuses
+  T.eq(LetsGo._scaledGain({ defeatedDef = { baseExp = 395 }, level = 30,
+                            mon = { level = 30 } }, 1), 2371,
+    "the scaled formula at equal levels is b*L/5 + 1 -- the table's 2371")
+  T.eq(LetsGo._scaledGain({ defeatedDef = { baseExp = 395 }, level = 30,
+                            mon = { level = 10 } }, 1), 5497,
+    "and a Lv10 receiver pulls the table's 5497 from the same catch -- "
+    .. "the receiver's own level is in the denominator")
+  T.check(LetsGo._scaledGain({ defeatedDef = { baseExp = 40 }, level = 3,
+                               mon = { level = 100 } }, 1) >= 1,
+    "a trivial catch still pays at least one point")
+
+  -- and the same formula pays TRAINER knockouts under FULL, with the
+  -- wild/trainer 1.5 that a catch never sees (a caught Pokemon is always
+  -- wild, which is why the catch numbers above are untouched by it)
+  local wildKO = LetsGo._scaledGain({ defeatedDef = { baseExp = 395 },
+                                      level = 30, mon = { level = 30 } }, 1)
+  local trainerKO = LetsGo._scaledGain({ defeatedDef = { baseExp = 395 },
+                                         level = 30, mon = { level = 30 },
+                                         isTrainer = true }, 1)
+  T.eq(wildKO, 2371, "a wild payout is unchanged by the trainer term")
+  T.eq(trainerKO, 3556, "a trainer's Pokemon pays the same formula at 1.5")
+  T.check(trainerKO > wildKO, "which is more than the same wild one")
+  -- the receiver's own level still drives it, which is the whole point of
+  -- sharing to the party: the low member gains multiples of the high one
+  local lowKO = LetsGo._scaledGain({ defeatedDef = { baseExp = 395 },
+                                     level = 30, mon = { level = 5 },
+                                     isTrainer = true }, 1)
+  T.check(lowKO > trainerKO * 2,
+    "a level 5 party member takes several times what a level 30 one does "
+    .. "from the very same knockout")
+
+  -- the combo ladder's five tiers
+  T.eq(LetsGo._comboMult(1), 1.1, "a fresh combo is the 1.1 tier")
+  T.eq(LetsGo._comboMult(10), 1.1, "which runs to ten")
+  T.eq(LetsGo._comboMult(11), 1.5, "eleven starts the 1.5 tier")
+  T.eq(LetsGo._comboMult(21), 2.0, "twenty-one the 2.0")
+  T.eq(LetsGo._comboMult(31), 2.5, "thirty-one the 2.5")
+  T.eq(LetsGo._comboMult(41), 3.0, "and forty-one caps it at 3.0")
+  T.eq(LetsGo._comboMult(999), 3.0, "where it stays")
+
+  -- the row answers the mode, and OFF answers false
+  T.eq(LetsGo.mode(), false, "LET'S GO defaults to OFF")
+
+  -- the ball: a full open-drop-rock-click life without a GPU
+  T.eq(Mat4.rotateZ ~= nil, true, "Mat4 grew the roll the wobble rocks on")
+  do
+    local m = Mat4.rotateZ(math.pi / 2)
+    -- row-major: x' of (1,0,0) is m[1], y' is m[5]
+    T.check(math.abs(m[1]) < 1e-9 and math.abs(m[5] - 1) < 1e-9,
+      "rotateZ carries +X onto +Y, the right-handed roll")
+  end
+  local ball = Pokeball.new("GREAT_BALL")
+  T.eq(ball.lid, 0, "a fresh ball is shut")
+  ball:open()
+  for _ = 1, 60 do ball:update(1 / 60) end
+  T.eq(ball.lid, 1, "open() hinges the lid fully over its ramp")
+  T.check(ball.glow < 1, "and the mouth glow decays on its own")
+  ball:close()
+  for _ = 1, 60 do ball:update(1 / 60) end
+  T.eq(ball.lid, 0, "close() brings it back")
+  local dur = ball:rock(1)
+  T.check(dur > 0, "a rock reports its duration for the caller's cadence")
+  T.check(ball:busy(), "and the ball is busy while it rocks")
+  for _ = 1, math.ceil(dur * 60) + 2 do ball:update(1 / 60) end
+  T.check(not ball:busy(), "then settles")
+  ball:catchClick()
+  T.check(ball.stars ~= nil, "the caught click spawns its stars")
+  local matrix = ball:matrix()
+  T.eq(#matrix, 16, "the pose is one model matrix")
+  for _ = 1, 120 do ball:update(1 / 60) end
+  T.check(ball.stars == nil, "and the stars burn out on their own")
 end)()
 
 Pipelines.reset()
