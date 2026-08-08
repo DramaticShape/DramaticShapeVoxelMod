@@ -123,9 +123,11 @@ local SHADER = [[
   uniform mat4 model;
   vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vec4 c = lightVP * (model * vertex_position);
-    // the projection is orthographic, so w is 1 and clip z IS the depth,
-    // linear in world units along the sun line
-    vDepth = c.z * 0.5 + 0.5;
+    // the projection is orthographic (w is 1) and fit() maps clip z onto
+    // [0,1] directly (see Z01 there), so clip z IS the stored depth,
+    // linear in world units along the sun line -- under every clip-range
+    // convention a backend can bring
+    vDepth = c.z;
     return c;
   }
 #endif
@@ -159,11 +161,52 @@ local prevBlend, prevAlphaMode = nil, nil
 local IDENTITY = Mat4.identity()
 
 -- world -> [0,1] cube, applied on top of the clip matrix: the main pass
--- samples the map with the xy and compares against the z
-local TO_UNIT = { 0.5, 0, 0, 0.5,
-                  0, 0.5, 0, 0.5,
-                  0, 0, 0.5, 0.5,
-                  0, 0, 0, 1 }
+-- samples the map with the xy and compares against the z.
+--
+-- The V ROW's sign is the RUNTIME's to answer, which is why this is a
+-- function rather than a constant. This pass bypasses transform_projection
+-- -- the one seam where LOVE reconciles clip conventions -- and LOVE 12
+-- changed them out from under it: clip-space output is y-up there, canvas
+-- or no canvas, on every backend (the 12.0 changelog says it in as many
+-- words). So a draw this pass stores lands with clip +y at texture v 1
+-- under LOVE 11 and at v 0 under LOVE 12, and the reader's v must run the
+-- way the writer's rows actually landed or every lookup reads the map
+-- VERTICALLY MIRRORED -- the far half of the frustum's shadows stamped
+-- across the near field. probeVSign() below measures which world this is
+-- once, with a real draw, instead of trusting a version or platform list.
+--
+-- The z row is identity: fit() already maps clip z onto [0,1] (see Z01).
+local function toUnit(vSign)
+  return { 0.5, 0, 0, 0.5,
+           0, 0.5 * vSign, 0, 0.5,
+           0, 0, 1, 0,
+           0, 0, 0, 1 }
+end
+
+-- Clip z from GL's [-1,1] onto [0,1], multiplied onto the projection.
+-- Mat4.ortho emits the legacy GL range, and under LOVE 12 the sun pass
+-- keeps only what lands in [0,1]: without this the map comes back with
+-- the near half of the light frustum simply MISSING -- large regions
+-- holding nothing but the clear, cut along the straight lines where the
+-- z = 0 plane crosses the terrain mesh, and every texel that did survive
+-- packing a high byte at or above 128. Measured, not reasoned: this one
+-- matrix is the difference between that half-empty map and a full one on
+-- both of LOVE 12's backends, with everything else held still. (The
+-- camera never shows the same wound because its projection is
+-- perspective and everything it can see sits past the crossover at twice
+-- the near plane; the ortho here is linear, so it loses exactly half.)
+-- [0,1] sits inside the legacy clip volume too, so the one matrix serves
+-- LOVE 11 and 12 alike; the PACKED depth the reader compares is
+-- bit-identical to what the old scheme packed (vDepth reads clip z
+-- directly now), and only the throwaway hardware depth attachment loses
+-- range it never used.
+local Z01 = { 1, 0, 0, 0,
+              0, 1, 0, 0,
+              0, 0, 0.5, 0.5,
+              0, 0, 0, 1 }
+
+-- +1 = LOVE 11 storage orientation, -1 = LOVE 12's; nil until probed
+local vSign = nil
 
 -- world -> light clip space, for the pass that FILLS the map
 ShadowMap.clipVP = IDENTITY
@@ -217,13 +260,57 @@ local function getBlank()
   return blank or nil
 end
 
+-- Which way a bypass-projection draw lands in a canvas on THIS runtime,
+-- measured rather than assumed: draw the half of clip space above y = 0
+-- through the pass's own shader and transforms, and ask which rows of the
+-- readback it wrote. The LOVE 11 calibration everything shipped on stores
+-- that half in the image's TOP rows; LOVE 12's y-up convention stores it
+-- in the BOTTOM ones. Any failure answers +1 -- the convention every
+-- platform ran until now -- so a driver that refuses the readback merely
+-- keeps the behaviour it had.
+local function probeVSign()
+  local done, sign = pcall(function()
+    local sh = getShader()
+    local tex = getBlank()
+    if not (sh and tex) then return 1 end
+    -- dpiscale 1: the readback below indexes rows of the IMAGE, and a
+    -- dpi-scaled canvas would hand back more of them than it was asked for
+    local c = love.graphics.newCanvas(4, 4, { dpiscale = 1 })
+    -- the quad IS clip space: standard mesh, positions already in clip
+    -- units, uv pointed at the 1x1 blank so the alpha discard passes
+    local mesh = love.graphics.newMesh(
+      { { -1, 0, 0, 0 }, { 1, 0, 1, 0 }, { 1, 1, 1, 1 }, { -1, 1, 0, 1 } },
+      "fan", "static")
+    mesh:setTexture(tex)
+    love.graphics.setCanvas(c)
+    love.graphics.clear(1, 1, 0, 1)
+    love.graphics.setShader(sh)
+    love.graphics.setColor(1, 1, 1, 1)
+    -- the production writer's own frame -- the y-flip and the z packing --
+    -- with no view or ortho underneath
+    pcall(sh.send, sh, "lightVP", "row",
+          Mat4.mul(Z01, Mat4.scale(1, -1, 1)))
+    pcall(sh.send, sh, "model", "row", IDENTITY)
+    pcall(sh.send, sh, "sprite", 0)
+    love.graphics.draw(mesh)
+    love.graphics.setShader()
+    love.graphics.setCanvas()
+    local data = c:newImageData()
+    local w, h = data:getDimensions()
+    -- written texels carry packed depth 0.5 (red ~0.5); the clear is red 1
+    local topR = data:getPixel(1, 0)
+    local botR = data:getPixel(1, h - 1)
+    if topR < 0.9 and botR > 0.9 then return 1 end
+    if botR < 0.9 and topR > 0.9 then return -1 end
+    return 1
+  end)
+  return (done and sign) or 1
+end
+
 -- Whether the sun pass can run at all. False headless, without shaders, or
 -- where the canvas cannot be made -- VoxelScene then keeps the flat decal
 -- shadows, which need nothing but a quad.
 function ShadowMap.available()
-  if love.system and love.system.getOS and love.system.getOS() == "iOS" then
-    return false
-  end
   if not (love.graphics and love.graphics.newCanvas
           and love.graphics.setDepthMode) then
     return false
@@ -356,9 +443,12 @@ local function fit(cx, cy, vw, vh)
   -- without this the map is stored upside down relative to the uv the
   -- main pass reads it with
   proj = Mat4.mul(Mat4.scale(1, -1, 1), proj)
+  -- and clip z onto [0,1] -- see Z01 for why this is load-bearing under
+  -- LOVE 12 and free under LOVE 11
+  proj = Mat4.mul(Z01, proj)
 
   ShadowMap.clipVP = Mat4.mul(proj, view)
-  ShadowMap.uvVP = Mat4.mul(TO_UNIT, ShadowMap.clipVP)
+  ShadowMap.uvVP = Mat4.mul(toUnit(vSign or 1), ShadowMap.clipVP)
   -- what the frustum ended up covering, for probes: the lateral extent in
   -- world pixels divided by RES is how fine a shadow edge can land
   ShadowMap.extent = { r - l, t - b, far - near }
@@ -429,6 +519,12 @@ end
 function ShadowMap.begin(cx, cy, vw, vh)
   local sh = getShader()
   if not sh then return false end
+  -- the runtime's storage orientation, measured once before the first map
+  -- is fitted (see probeVSign); exposed for the probes and the suite
+  if vSign == nil then
+    vSign = probeVSign()
+    ShadowMap.vSign = vSign
+  end
   -- fit first: it is what decides which resolution rung this view wants
   fit(cx, cy, vw, vh)
   local c = getCanvas(ShadowMap.res)
