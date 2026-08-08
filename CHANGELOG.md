@@ -79,6 +79,28 @@
 
 ### Fixed
 
+- **A building's back no longer wears its own front door.** Every voxelized
+  building is its drawing extruded straight through the footprint, so the
+  far wall is the facade again -- and read from behind, the facade mirrored:
+  a door on the back of every house, a POKe sign readable backwards on
+  every Center, MART on every mart and GYM painted across the back of every
+  gym. Those tiles are now named per tileset (`frontOnly` in
+  `data/voxel_heights.lua` -- the doorways, the hanging shop signs and the
+  gyms' lettering) and every cell wearing one takes the art of the nearest
+  ordinary cell beside it in the same tile row instead. The donor is picked
+  per RUN, so a two-tile doorway comes out as two tiles of the same wall
+  rather than borrowing left from one side and right from the other, and
+  between the two neighbours the one that row uses more often wins -- which
+  is what reaches past a gable's sloped corner for the wall behind it. At
+  the base course the donor lifts one row with the model, because the
+  drawing's last row is the black threshold a door stands on and the wall
+  beside it does not paint; without that the doorway kept its own foot and
+  the back's bottom course had a notch in it. Windows are deliberately left
+  alone: a back wall with windows is right. The generic volume path folds
+  the same drawing up all four sides and had the same bug on its back AND
+  its flanks, so it takes the same substitution -- only the south face,
+  which IS the drawing, keeps every tile of it.
+
 - **B now actually runs from capture mode -- and A throws, and L/R switch
   balls.** The capture session read its button presses on the RENDER clock,
   along with everything else it does per frame. Button edges do not survive

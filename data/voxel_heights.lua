@@ -2976,6 +2976,32 @@ return {
     },
   },
 
+  -- Tiles that are FRONT art: they belong on the drawn facade and nowhere
+  -- else.  A building's back is the same drawing extruded straight through
+  -- the footprint (lib/Buildings.lua `model`, and the volume path's north
+  -- face in lib/ChunkMesher.lua), so without this every house wears a
+  -- second door on its far wall and every Center a POKe sign readable
+  -- backwards.  A cell wearing one of these ids takes the art of the
+  -- nearest ordinary cell beside it in the same tile row instead -- left or
+  -- right, whichever tile that row uses more, which is what reaches PAST a
+  -- gable's sloped corner for the wall behind it.
+  --
+  -- Windows are deliberately absent: a back wall with windows is right.
+  -- These are the doorways, the hanging shop signs and the painted GYM
+  -- lettering -- the three things a facade has that its back does not.
+  -- Ids are per tileset, indexing that tileset's own atlas.
+  frontOnly = {
+    -- doorway 11/12 over 27/28 (27 is the tileset's own doorTile); the
+    -- POKe (66/67) and MART (68/69) signs over their bracket row 74; the
+    -- GYM lettering 47/63 painted across the gyms' upper course.
+    OVERWORLD = { 11, 12, 27, 28, 47, 63, 66, 67, 68, 69, 74 },
+    -- the Indigo Plateau and Victory Road entrances: the same doorway
+    -- block, drawn into the cliff face.
+    PLATEAU = { 11, 12, 27, 28 },
+    -- the Safari Zone gate's double door, 42/43 over 58/59.
+    FOREST = { 42, 43, 58, 59 },
+  },
+
   -- Buildings whose whole sprite is voxelized band by band (lib/Buildings.lua,
   -- the pipeline in assets/docs/buidling_to_voxel/).  A building is matched by its
   -- exact tile grid -- the drawings are catalogued in assets/docs/buildings/ -- so
