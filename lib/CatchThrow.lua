@@ -285,19 +285,55 @@ end
 -- ball at the bottom of the frame, the throw a straight shot up the
 -- middle. Handed to BattleScene.render through the capture table's `rig`;
 -- everything downstream (pins, cards, sun, fov) is camera-generic.
+-- ------- and how far back the WORLD lets it stand
+--
+-- SEAT_BACK is what the shot wants. It is not always available: this seat
+-- is low (SEAT_UP is 13 world pixels, under a single cell) where the
+-- battle's own rig stands at 37.9, and it is planted three cells behind
+-- the player wherever the encounter happened -- which on a hedged route
+-- like ROUTE 6 is inside the hedge. The eye then looks out from within
+-- the foliage and the scenery it is standing in hangs across the top of
+-- the frame, over the horizon and the distant rooftops both.
+--
+-- ThirdPerson's boom answers exactly this question for the free-roam
+-- camera, so it answers it here rather than being restated: march back
+-- from the player's cell and stop at the first thing the eye may not be
+-- inside, keeping its PAD. Its rule is the right one for a seat this low,
+-- too -- terrain height always blocks, and anything BUILT on a cell
+-- blocks below head height, so a kerb is passed over and a hedge is not.
+--
+-- Pulling in brings the foe closer in a fixed field of view, which is a
+-- composition the throw already handles: the ring, the collision and the
+-- drag are all measured from the live shot, so they follow the seat.
+local SEAT_MIN_BACK = 20     -- never nearer than this: the held ball hangs
+                             -- at the player's own cell and has to stay in
+                             -- front of the eye
+
+local function seatBack(px, pz, ax, az, eyeY)
+  local ok, ow = pcall(function() return game().overworld end)
+  if not (ok and ow) then return SEAT_BACK end
+  local ThirdPerson = V.require("ThirdPerson")
+  local okR, reach = pcall(ThirdPerson.reach, ow, { px, eyeY, pz },
+                           -ax, 0, -az, SEAT_BACK)
+  if not (okR and reach) then return SEAT_BACK end
+  return math.max(SEAT_MIN_BACK, math.min(SEAT_BACK, reach))
+end
+
 local function captureRig(arena, groundY)
   local ex, ez = arena.enemy[1], arena.enemy[2]
   local px, pz = arena.player[1], arena.player[2]
   local ax, az = ex - px, ez - pz
   local l = math.sqrt(ax * ax + az * az)
   if l < 1e-6 then ax, az = 0, -1 else ax, az = ax / l, az / l end
+  local eyeY = groundY + SEAT_UP
+  local back = seatBack(px, pz, ax, az, eyeY)
   local cam = {
-    eye = { px - ax * SEAT_BACK, groundY + SEAT_UP, pz - az * SEAT_BACK },
+    eye = { px - ax * back, eyeY, pz - az * back },
     focus = { ex, groundY + 8, ez },
     fov = SEAT_FOV,
   }
   -- the pitch VoxelScene.pull wants: how far below level the seat looks
-  local pitch = math.atan2(SEAT_UP - 8, SEAT_BACK + l)
+  local pitch = math.atan2(SEAT_UP - 8, back + l)
   return cam, math.max(pitch, 0.05), SEAT_FRAME
 end
 

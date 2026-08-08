@@ -168,6 +168,15 @@ function ModSetting:sync(value)
   self.index = indexOf(self, value)
 end
 
+-- The label of the rung actually in force, which is not the stored one when
+-- that rung has been gated away (see get). Its own entry point because a
+-- caller can want the label without wanting a row: SettingsMenu puts one
+-- setting's rung on the second line of the CATEGORY that contains it.
+function ModSetting:valueLabel()
+  local i = self:read()
+  return self.labels[self:allows(i) and i or 1]
+end
+
 -- The descriptor src/ui/OptionRows.lua renders, in the shape the
 -- ui.options.rows hook appends.
 function ModSetting:row()
@@ -175,12 +184,7 @@ function ModSetting:row()
   return {
     id = "DRAMATIC_SHAPE:" .. self.key,
     label = self.label,
-    -- the label of the rung actually in force, which is not the stored one
-    -- when that rung has been gated away (see get)
-    value = function()
-      local i = self_:read()
-      return self_.labels[self_:allows(i) and i or 1]
-    end,
+    value = function() return self_:valueLabel() end,
     step = function(game, dir)
       self_:cycle(game, dir)
       return true

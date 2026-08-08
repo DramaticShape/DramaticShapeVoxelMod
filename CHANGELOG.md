@@ -77,7 +77,73 @@
   nor takes it away, on the same reasoning as AA -- what the look costs is
   the player's question, not a preset's.
 
+### Changed
+
+- **The settings live on menus of their own now, behind one red row at the
+  top of OPTIONS.** This mod had grown to fourteen rows on the engine's
+  list, spliced in as one block. OPTIONS shows four boxes at a time, so that
+  was four screens of scrolling inside a list that already carried twenty
+  engine rows, and finding SHADOWS meant knowing it was in there somewhere
+  past the wireframe and the horizon bend.
+
+  What is on OPTIONS now is `DRAMATIC SHAPE..`, and it leads the list --
+  a mod that replaces the look of the whole game should not make the player
+  scroll to find out where its settings went, least of all past the engine
+  rows it has quietly taken away. It opens VOXEL and T-SHIFT, which came off
+  the engine's list with it, and four categories: **3D WORLD** (V-GRID,
+  V-CURVE, RENDER DIST, WATER, DAYTIME), **BATTLES** (3D-BTL, BACK SPRITES,
+  LET'S GO, STADIUM ROM), **PERFORMANCE** (FOREST FX, SHADOWS, AA) and
+  **VR** (VR, SMOOTH TURN).
+
+  The split is not a new opinion: it is the `full` flag each row already
+  carried. `full` marks a row the FULL preset does not take away, and the
+  reason written beside each one was always the same -- this is a question
+  about the HARDWARE, or about the GAME, not a knob on the diorama FULL is a
+  preset for. So 3D WORLD is exactly the rows FULL owns, and needs no rule
+  to disappear under it: every child filters itself out and an empty category
+  is not offered. Under FULL the menu is four rows on one screen with no
+  scroll arrow. The same rule retires VR where there is no VR to have.
+
+  **Nothing you had set has moved.** Every setting keeps its stored key, its
+  ladder and its row id, so `options.lua` is byte-identical across the
+  upgrade for a player who changes nothing -- and the hotkeys are untouched,
+  which is what makes the nesting affordable: 3, 5, 6, 7, 8 and 9 still put
+  every buried row one keypress away. The mod manager's own page still lists
+  all thirteen settings flat, now in category order.
+
+  The row is drawn in red, which is a palette zone rather than a color:
+  `setColor` cannot tint this text, because the glyph atlas is black ink and
+  LOVE tints multiplicatively, and because the palette shader keys on the red
+  channel alone and would send a red pixel to the lightest slot. What the
+  zone changes is which color the shade the text was drawn in comes out as.
+  It is MEWMON -- the palette the OPTIONS menu already wears -- copied with
+  only the ink slot replaced, so the paper under the row is the same white as
+  the row above it in all three ROMs, and the band covers the two text lines
+  alone rather than the cursor and the box borders beside them. SGB INV
+  reverses a palette, so there the red starts in the other slot and still
+  lands on the ink; OG, OG INV and CLASSIC substitute their own tables
+  outright, and the row simply draws monochrome, which is what asking for a
+  screen with no colors in it should get.
+
 ### Fixed
+
+- **A setting that pins another one now pins it from wherever it was
+  changed.** 3D-BTL holds BATTLE LAYOUT at OG while a fight can be staged on
+  the map, and FULL holds DAYTIME at SYNC while it owns that row. Both pins
+  used to be a side effect of the options-rows hook, which every step on the
+  OPTIONS menu happened to rerun -- so they fired whether or not the step was
+  the one that mattered, and nothing had to name them. A step made on the
+  mod's own menus reruns no hook, so the pinning is a function now, and the
+  hook, the menus and the mod manager's page all ask for it.
+
+- **An open OPTIONS menu notices a change made on a menu pushed over it.**
+  The rebuild that keeps the row list honest compared the voxel level and the
+  two battle switches across one call of `update`. The stack ticks its top
+  state only, so a step taken on one of the mod's own menus happens while
+  OPTIONS is suspended: both halves of that comparison were read after the
+  fact and always agreed, and OPTIONS came back still showing a BATTLE LAYOUT
+  row that no longer belonged there. The signature is held on the menu and
+  stamped where the rows are built, which is the thing it is a signature of.
 
 - **A building's back no longer wears its own front door.** Every voxelized
   building is its drawing extruded straight through the footprint, so the
