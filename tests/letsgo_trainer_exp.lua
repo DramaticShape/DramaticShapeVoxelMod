@@ -27,6 +27,27 @@ return function(game)
   LetsGo.setting:setValue(MODE == "off" and false or MODE, game)
   U.log("LET'S GO mode: " .. tostring(LetsGo.mode()))
 
+  -- count the summary cards at their SOURCE rather than by catching them
+  -- on the stack: the driver taps fast enough to dismiss one between two
+  -- polls, and an absence there would look like a card that never came
+  local ExpPanel = lib.require("ExpPanel")
+  local innerNew, cards = ExpPanel.new, 0
+  ExpPanel.new = function(g, rows)
+    local panel = innerNew(g, rows)
+    cards = cards + 1
+    -- read at DRAW time in the real thing; here the loop that fills it
+    -- has already run, so peeking now is honest
+    local parts = {}
+    for _, r in ipairs(rows or {}) do
+      parts[#parts + 1] = ("%s+%d%s"):format(
+        (g.data.pokemon[r.mon.species] or {}).name or "?", r.gained or 0,
+        (r.to or 0) > (r.from or 0) and ("->L" .. r.to) or "")
+    end
+    U.log(("EXP CARD #%d: %s"):format(cards, table.concat(parts, "  ")))
+    CARD_HOLD = 20        -- frames to stop tapping, so it can be shot
+    return panel
+  end
+
   -- one strong fighter and two bystanders: only the fighter gains on the
   -- engine's own rules, so the bystanders ARE the test
   game.save.party = {
@@ -82,10 +103,28 @@ return function(game)
   -- through the intro to the menu, then FIGHT + first move, over and
   -- over until the fight resolves. The enemy's HP is logged as it goes,
   -- so a fight that stalls is visibly a stall rather than a silent zero.
-  local lastHP = nil
+  local lastHP, shotPanel = nil, false
   for i = 1, 900 do
-    if battle.result then break end
-    if battle.phase == "menu" then
+    -- the fight ending does NOT end the loop until the card has been
+    -- photographed: the last knockout resolves the battle in the same
+    -- breath that queues the card, so breaking on `result` alone leaves
+    -- every run with the card built and never seen
+    if battle.result and shotPanel then break end
+    -- hold the taps while the card is up, so it can be shot rather than
+    -- dismissed on the next frame
+    if (CARD_HOLD or 0) > 0 then
+      CARD_HOLD = CARD_HOLD - 1
+      if not shotPanel then
+        local top = game.stack and game.stack:top()
+        if top and rawget(top, "rows") then
+          shotPanel = true
+          U.shot(game, (os.getenv("SHOT_DIR") or ".scratchpad")
+                       .. "/exp_panel.png")
+          U.log("shot the card")
+        end
+      end
+      U.wait(1)
+    elseif battle.phase == "menu" then
       battle.menuIndex = 1              -- FIGHT
       U.tap(game, "a")
     elseif battle.phase == "moveSelect" then
@@ -99,6 +138,15 @@ return function(game)
       lastHP = hp
       U.log(("  foe HP -> %s  (phase %s, step %d)")
             :format(tostring(hp), tostring(battle.phase), i))
+    end
+    -- photograph the summary card the moment it is on top, then let the
+    -- taps carry on and dismiss it
+    local top = game.stack and game.stack:top()
+    if top and not shotPanel and top ~= battle and rawget(top, "rows") then
+      shotPanel = true
+      U.shot(game, (os.getenv("SHOT_DIR") or ".scratchpad")
+                   .. "/exp_panel.png")
+      U.log("shot the card")
     end
     U.wait(5)
   end

@@ -324,11 +324,33 @@ function LetsGo.install()
   --
   -- Everything else -- CATCH ONLY, the row switched off, another mod's
   -- battle -- falls through to the engine's own split untouched.
+  -- ------- and it is announced ONCE, not once per Pokemon
+  --
+  -- Six party members would otherwise mean six "X gained N EXP. Points!"
+  -- boxes per knockout. The per-Pokemon lines are suppressed (the `false`
+  -- to applyShare) and one card is shown instead -- see lib/ExpPanel.lua
+  -- for why that is better than a faster wall of the same text.
+  --
+  -- The card is queued BEFORE the loop that fills it. That is not a race:
+  -- applyShare applies its experience immediately and only QUEUES its
+  -- messages, so the loop runs to completion synchronously here, while
+  -- the queue does not reach the card's factory until later -- by which
+  -- time `rows` is complete. Queueing it first is what puts the tally
+  -- ahead of the "grew to level" chatter it is a summary of.
+  local ExpPanel = V.require("ExpPanel")
   local function payParty(ctx, mult)
+    local battle = ctx.battle
+    local rows = {}
+    battle:uiNext(function() return ExpPanel.new(battle.game, rows) end)
     granting = { mult = mult }
     local okAward, err = pcall(function()
-      for _, mon in ipairs(ctx.battle.game.save.party) do
-        if mon.hp > 0 then ctx.applyShare(mon, 1, true) end
+      for _, mon in ipairs(battle.game.save.party) do
+        if mon.hp > 0 then
+          local exp0, lv0 = mon.exp, mon.level
+          ctx.applyShare(mon, 1, false)
+          rows[#rows + 1] = { mon = mon, gained = mon.exp - exp0,
+                              from = lv0, to = mon.level }
+        end
       end
     end)
     granting = nil
