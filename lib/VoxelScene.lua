@@ -15,6 +15,7 @@ local V = ...
 local Mat4 = V.require("Mat4")
 local Voxel3D = V.require("Voxel3D")
 local ShadowMap = V.require("ShadowMap")
+local Shadows = V.require("Shadows")
 local ChunkMesher = V.require("ChunkMesher")
 local SpriteBillboards = V.require("SpriteBillboards")
 local TileShape = V.require("TileShape")
@@ -1050,7 +1051,11 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor, eyes)
   -- against the terrain just drawn (a shadow behind a building stays
   -- hidden) but never depth-writing, so the grass pass at the end of the
   -- frame still wins its feet-overdraw fights.
-  if not Voxel3D.shadowsActive() then
+  --
+  -- Not with the SHADOWS row off, though: that is a player saying no
+  -- shadows, and standing the fallback in would answer a machine that
+  -- cannot have them (see lib/Shadows).
+  if Shadows.enabled() and not Voxel3D.shadowsActive() then
     Voxel3D.beginShadows()
     for _, p in ipairs(posed) do
       drawShadow(p.sprite, p.px, p.py, viewFacing(p), p.phase, p.flip, p.gh,

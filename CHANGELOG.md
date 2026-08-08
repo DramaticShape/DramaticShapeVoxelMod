@@ -42,6 +42,20 @@
   EXCELLENT, which multiplies the engine's own Gen 1 catch roll; the
   shakes the roll answers are the rocks the ball plays on the ground.
 
+  **Running out, and staying out of the way.** Under FULL an empty bag
+  does not hand the fight back to the classic menu -- there is no fight to
+  hand back, since a Let's Go wild has no Pokemon of yours in it and a foe
+  that never takes a turn, so that menu would offer a FIGHT that cannot
+  happen. The encounter keeps its own screen: the seat holds, the Pokemon
+  stands there, the readout says NO BALLS LEFT, and RUN is the way out.
+  Throwing your last ball lands in the same place rather than ending the
+  session. And the scripted catch tutorials -- the VIRIDIAN CITY old man,
+  and Yellow's PROF.OAK catching the PIKACHU -- are left alone at every
+  rung: they are cutscenes wearing a battle's clothes, where the cursor,
+  the bag and the throw are all scripted and nobody keeps the Pokemon, so
+  they play exactly as the original does with no capture screen, no held
+  camera and no experience.
+
   **What it stands on.** The outcome is exactly a Gen 1 ball throw: same
   catch math (status, HP and ball factors intact), same outcome texts,
   same caught flow -- dex page, nickname, box overflow -- and a missed
@@ -49,6 +63,46 @@
   turn it always did. Needs the staged 3D battle standing (3D-BTL on, a
   depth-capable driver, no headset); anywhere it cannot stand, balls
   quietly take the engine's classic toss.
+
+- **SHADOWS: a row that stands the sun's pass down.** Cast shadows are the
+  most expensive thing the mode draws after the geometry -- the whole world
+  rendered a second time from the light, every time the view or anybody in
+  it moves -- and on a phone or an old laptop that is the difference between
+  the diorama running and the diorama stuttering. ON by default, because a
+  world where a building throws nothing reads as flat however many voxels it
+  is made of. OFF means off rather than "fall back": the flat decal drop
+  shadows are the stand-in for a machine that WANTED shadows and could not
+  have them, so they stay down too, and the forest's light shafts go with
+  them (the beams are lit by the sun's own map). FULL neither sets the row
+  nor takes it away, on the same reasoning as AA -- what the look costs is
+  the player's question, not a preset's.
+
+### Fixed
+
+- **The grass moves during a staged battle.** The wind is switched on around
+  the free-roam pass's grass draws and off again after them, and the battle
+  pass -- which draws the same tufts, on the same map, from its own camera --
+  never switched it on: the uniform sat at the per-frame default, which means
+  no wind, so a field that was moving one frame before the encounter went dead
+  still for the whole fight and started again when it ended. A fight is staged
+  on the MAP, in that place's own weather and light; a frozen field was the one
+  thing reading as a photograph of it rather than the place. No walker-contact
+  push comes with it -- that is somebody stepping through the grass, and the
+  two mons stand still on their own tiles.
+
+- **The bottom of the frame no longer bites a row out of the scenery.**
+  RENDER DIST cut the world to where the frame's rays land on the GROUND,
+  and the ground is not what the picture is made of: a tree at the bottom of
+  the screen has its feet south of the row its top is seen on, because the
+  bottom edge's ray is still coming down as it passes them. The cut is by
+  column -- deliberately, so it never takes the tops off trees -- so a tree
+  whose base fell one pixel outside lost its whole height at once, and the
+  last row of forest along the bottom of the frame was cut through with the
+  ground behind it showing. The south edge is now walked back down that same
+  ray by the tallest thing that can stand on it (about a tile and a half at
+  35 degrees, four tiles at 50, eleven at 75), plus a tile of slack so a hard
+  edge is never decided by a rounding. FIT carries it too: it is a correction
+  to the honest answer, not margin around it.
 
 ## 1.7.1
 

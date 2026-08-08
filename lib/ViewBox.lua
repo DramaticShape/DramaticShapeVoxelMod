@@ -26,6 +26,15 @@
 -- in closed form -- see footprint() for the derivation, which is three
 -- lines of algebra and no tuning at all.
 --
+-- AND THE GROUND IS NOT THE PICTURE. The trapezoid is where the frame's
+-- rays LAND; what is drawn is what stands on it, and a tree at the bottom
+-- of the screen has its feet south of the row its top is seen on. Cut to
+-- the trapezoid alone, the box takes that tree away whole -- the cut is by
+-- column, so a base one pixel outside loses the whole height -- and the
+-- bottom of the frame reads as a bite taken out of the scenery. So the
+-- south edge is walked back down the bottom ray by the tallest thing that
+-- can stand there; see lift().
+--
 -- The CUT is still a rectangle (the shader's box kind), so what is stored
 -- is the trapezoid's bounding rect: never narrower than the picture, so it
 -- can never take a bite out of it. It is off-centre in z, because the
@@ -104,6 +113,63 @@ ViewBox.setting = ModSetting.new(ViewBox.KEY, ViewBox.LABEL,
 -- neighbourhood so the world runs out before the cut does. Multiplied by
 -- the row, so a player who can see the seam can push it away.
 ViewBox.MAX_REACH = 6
+
+-- ------- the geometry standing on the ground it frames
+--
+-- The footprint is where the frame's rays hit the GROUND, and the ground is
+-- not what the picture is made of. A tree is most of a hundred world pixels
+-- tall, and a point that high up on the BOTTOM edge's own ray sits south of
+-- where that ray lands -- nearer the eye, because the ray is coming down. So
+-- the bottom of the screen is full of things whose feet are outside the
+-- ground trapezoid, and a box cut to the trapezoid alone takes them away
+-- whole: the shader cuts a fragment by the column it stands in (Voxel3D's
+-- dioramaCull is unbounded upward, deliberately, so a cut never takes the
+-- tops off trees), so a tree one pixel south of the edge loses its whole
+-- height at once. That is a bite along the bottom of the picture -- a row of
+-- trees cut through by the frame's own edge, with the ground behind them
+-- showing.
+--
+-- HEIGHT is the tallest thing standing on that ground, and it is the sun
+-- pass's own figure for the same reason it needs one: how far outside the
+-- ground it fits can something still reach the picture? Kept here rather
+-- than read across so this file's cut does not move when the light's
+-- frustum is retuned; they answer to the same world either way.
+ViewBox.HEIGHT = 160
+
+-- And a tile of slack on top, at every pitch. The cut's south edge would
+-- otherwise land on the frame's own bottom row at the rungs where the term
+-- below is zero, which is a hard edge (see FADE_FRAC) balanced on the
+-- pixel it is drawn at -- a supersampled frame (lib/AntiAlias) resolves
+-- half of it. One tile is cheap and no cut this file makes should be
+-- decided by a rounding.
+ViewBox.SOUTH_PAD = 16
+
+-- How much further south than the ground it lands on the bottom edge of the
+-- frame can still show, in world pixels.
+--
+-- At sy = -1 the ray direction (see footprint) is
+--
+--     d = (0, -(cos a + tanY sin a), -(sin a - tanY cos a))
+--
+-- in (x, y, z) with y up and -z north, so climbing it costs
+--
+--     (sin a - tanY cos a) / (cos a + tanY sin a)
+--
+-- of south per world pixel of height. Zero at and below atan(tanY) -- about
+-- 26 degrees with FOCAL 1, where the ray is shallower than the frame's own
+-- half-angle and a RAISED point lands north of the ground hit, which no cut
+-- can lose -- a tile and a half at 35, four at 50, and a good eleven at 75,
+-- where the eye is nearly level and a tree is nearly all of what is under
+-- the bottom of the frame.
+function ViewBox.lift(a)
+  local Voxel = V.require("VoxelState")
+  local tanY = 1 / (2 * (Voxel.FOCAL or 1))
+  local ca = math.max(math.cos(a or 0), 1e-3)
+  local sa = math.max(math.sin(a or 0), 0)
+  local rise = (sa - tanY * ca) / (ca + tanY * sa)
+  if rise <= 0 then return 0 end
+  return ViewBox.HEIGHT * rise
+end
 
 -- The rim under V-CURVE, as a fraction of the shorter half-extent, and for
 -- the reason Diorama.FADE_FRAC exists: a bent world has no straight sides,
@@ -247,8 +313,14 @@ function ViewBox.frame(cx, cy, vw, vh, level)
   if left <= 0.001 then return nil end
   frac = frac / left
   local Voxel = V.require("VoxelState")
+  local angle = Voxel.angle or 0
   local north, south, side = ViewBox.footprint(
-    Voxel.angle or 0, vw, vh, ViewBox.MAX_REACH * (vh or 288))
+    angle, vw, vh, ViewBox.MAX_REACH * (vh or 288))
+  -- the ground the bottom edge lands on is not the southernmost thing under
+  -- it: what STANDS there reaches into the frame from further south (see
+  -- lift). Added before the row's multiplier, so FIT carries it too -- it is
+  -- a correction to the honest answer, not margin around it.
+  south = south + ViewBox.lift(angle) + ViewBox.SOUTH_PAD
   north, south, side = north * frac, south * frac, side * frac
   -- The rectangle around it. Off-centre in z, because the trapezoid is:
   -- the camera looks NORTH from south of its focus, so there is far more

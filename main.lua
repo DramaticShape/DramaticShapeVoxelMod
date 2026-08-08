@@ -92,6 +92,7 @@ local DayNight = V.require("DayNight")
 local DayTint = V.require("DayTint")
 local Water = V.require("Water")
 local ForestAtmos = V.require("ForestAtmos")
+local Shadows = V.require("Shadows")
 local AntiAlias = V.require("AntiAlias")
 local FirstPerson = V.require("FirstPerson")
 local FreeMove = V.require("FreeMove")
@@ -539,6 +540,21 @@ local SETTINGS = {
     .. "let CYCLE run it -- ten minutes of sun, ten of moon, with the "
     .. "shadows, the sky and the light following -- or SYNC it to the "
     .. "clock on the wall, so Kanto's evening falls when yours does." },
+  -- `full` on AA's reasoning below, and for the same reason: the sun's pass
+  -- is the most expensive thing in the frame after the geometry, so this is
+  -- a question about the machine rather than a knob on the diorama, and it
+  -- has to stay reachable from inside FULL -- which never sets it either.
+  { Shadows.setting,
+    "Real cast shadows: the scene rendered a second time from the sun, so "
+    .. "buildings, trees, ledges and people throw shadows that climb walls, "
+    .. "drape over roofs and slide across each other, following the hour on "
+    .. "the DAYTIME row. It is the most expensive pass in the mode after the "
+    .. "geometry itself -- a whole extra draw of the world every time the "
+    .. "view or anybody in it moves -- so OFF is the first thing to try on a "
+    .. "phone or an old machine. OFF is no shadow at all, the flat drop "
+    .. "shadows under characters included, and the forest's light shafts go "
+    .. "with it: the beams are lit by the sun's own map.",
+    full = true },
   -- Marked `full` for the opposite reason the battle rows are: this is not a
   -- knob on the look at all, it is what the look COSTS. FULL is a preset for
   -- the diorama, not a licence to spend four times the fill rate on the

@@ -104,10 +104,25 @@ local function vrOn()
   return ok and vr and vr.enabled and vr.enabled() or false
 end
 
+-- ------- the battles that are cutscenes wearing a battle's clothes
+--
+-- The catch tutorials -- the VIRIDIAN CITY old man, and Yellow's PROF.OAK
+-- catching the PIKACHU (both BattleState:makeOldManDemo, which is why one
+-- flag covers both) -- are scripted from the first frame: the cursor moves
+-- itself, the bag opens itself, the ball is thrown by someone who is not
+-- the player, and the throw always catches a Pokemon nobody keeps. There
+-- is no decision in them to hand a minigame, and the story beat is the
+-- point, so LET'S GO stays out of them entirely at whatever rung: no
+-- capture screen, no FULL treatment, no experience.
+function LetsGo.scripted(battle)
+  return battle and (battle.demo or battle.oakDemo) and true or false
+end
+
 function LetsGo.wantsMinigame(battle)
   if not LetsGo.mode() then return false end
   if not battle or battle.kind ~= "wild" then return false end
-  if battle.demo or battle.ghost or battle.noCatch then return false end
+  if LetsGo.scripted(battle) then return false end
+  if battle.ghost or battle.noCatch then return false end
   if not Voxel3D.available() or vrOn() then return false end
   -- the staged shot must actually be standing: this is "there is a 3D
   -- battle on screen right now", which the throw is aimed into
@@ -123,8 +138,8 @@ end
 -- from the wipe to the last message.
 function LetsGo.fullWild(battle)
   return LetsGo.mode() == "full" and battle and battle.kind == "wild"
-         and not (battle.safari or battle.demo or battle.ghost
-                  or battle.noCatch)
+         and not LetsGo.scripted(battle)
+         and not (battle.safari or battle.ghost or battle.noCatch)
          and true or false
 end
 
@@ -237,9 +252,18 @@ local function autoEnter()
   if battle.dramaticShapeDeclined then return end
   if not LetsGo.wantsMinigame(battle) then return end
   local ball = CatchThrow.pickBall()
-  if not ball then return end
+  local full = LetsGo.fullWild(battle)
+  -- An empty bag does NOT fall back to the classic menu under FULL. A
+  -- Let's Go wild has no player Pokemon in it and a foe that never takes a
+  -- turn, so the menu it would fall back to offers a FIGHT that cannot
+  -- happen -- the encounter has to keep its own screen and its own exit.
+  -- The capture screen opens empty-handed instead: the foe stands there,
+  -- the readout says there is nothing to throw, and RUN is the way out.
+  -- At CATCH ONLY there is no auto-entry to speak of and the bag is the
+  -- only route in, so no balls simply means no throw, as it always did.
+  if not (ball or full) then return end
   CatchThrow.begin(battle, ball, { consumed = false, canSwitch = true,
-                                   fullWild = LetsGo.fullWild(battle) })
+                                   fullWild = full })
 end
 
 -- ------- per frame, from the voxel pipeline's update hook
@@ -299,9 +323,17 @@ function LetsGo.install()
   end
 
   -- a catch pays experience under FULL, exactly as a knockout would
+  -- Never for a scripted demo: the old man's catch is a cutscene, nobody
+  -- keeps the Pokemon, and the party it would pay may not exist yet
+  -- (Yellow's Pallet intro runs before the lab gift). The engine's own
+  -- flow does not reach either hook for a demo today -- oldManThrow ends
+  -- the battle without storeCaughtMon or awardExp -- so this guards the
+  -- INVARIANT rather than a live bug: a demo pays nothing, whatever route
+  -- some later engine takes to get there.
   mod.hooks:wrap("battle.catch_exp", function(next_, ctx)
     if LetsGo.mode() == "full" and ctx and ctx.battle
-       and ctx.battle.kind == "wild" then
+       and ctx.battle.kind == "wild"
+       and not LetsGo.scripted(ctx.battle) then
       return true
     end
     return next_(ctx)
@@ -358,6 +390,7 @@ function LetsGo.install()
   end
 
   mod.hooks:wrap("battle.exp_award", function(next_, ctx)
+    if ctx and LetsGo.scripted(ctx.battle) then return next_(ctx) end
     local cc = expCtx
     if cc and ctx and ctx.battle == cc.battle then
       expCtx = nil
@@ -398,7 +431,8 @@ function LetsGo.install()
     local b = payload and payload.battle
     if not (b and LetsGo.fullWild(b)) then return end
     if not (Voxel3D.available() and not vrOn()) then return end
-    if not CatchThrow.pickBall() then return end
+    -- deliberately NOT gated on owning a ball: an empty bag still gets the
+    -- Let's Go encounter (see autoEnter), so the send-out still has to go
     local q = b.queue
     local n = q and #q or 0
     if n >= 6 and type(q[n]) == "table" and q[n].fn

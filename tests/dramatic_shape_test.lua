@@ -153,6 +153,11 @@ T.check(fullIds["DRAMATIC_SHAPE:battleBack"], "and BACK SPRITES with it")
 -- and AA, for the opposite reason: it is not a knob on the look at all, it is
 -- what the look COSTS, and only the player knows what their machine can carry
 T.check(fullIds["DRAMATIC_SHAPE:aa"], "and AA, which FULL neither sets nor owns")
+-- SHADOWS on the same reasoning: the sun's pass is what the look costs, and
+-- a preset for the diorama does not get to spend a second draw of the whole
+-- world on a machine that cannot carry one
+T.check(fullIds["DRAMATIC_SHAPE:shadows"],
+  "and SHADOWS, the other row that is a question about the hardware")
 -- VR survives FULL on AA's reasoning: whether a headset is on the desk is
 -- not the diorama's to decide
 T.check(fullIds["DRAMATIC_SHAPE:vr"], "and VR, likewise the hardware's question")
@@ -406,14 +411,14 @@ local hookedRows = Runtime.call("ui.options.rows", function(_, r) return r end,
 -- (nothing to store, nothing for the mod manager to persist) and is offered
 -- on every platform, saying WHERE? rather than IMPORT where there is no file
 -- dialog to open
-T.eq(#hookedRows, 13, "the options hook added a row per setting, plus the "
+T.eq(#hookedRows, 14, "the options hook added a row per setting, plus the "
   .. "STADIUM ROM action row")
 local grid, curve, water = hookedRows[2], hookedRows[3], hookedRows[5]
 local battles, backRow, daytime = hookedRows[7], hookedRows[8], hookedRows[10]
 -- the RENDER DIST row is hookedRows[4], FOREST FX hookedRows[6], LET'S GO
--- hookedRows[9] and AA hookedRows[11]; all four are read where they are
--- used rather than named here, because this chunk is one main function and
--- has 200 local slots to spend
+-- hookedRows[9], SHADOWS hookedRows[11] and AA hookedRows[12]; all five are
+-- read where they are used rather than named here, because this chunk is one
+-- main function and has 200 local slots to spend
 T.eq(hookedRows[4].label, "RENDER DIST", "the viewport row carries its label")
 T.eq(hookedRows[4].value(), "FIT",
   "and defaults to FIT -- the cut IS the window the flat game already "
@@ -527,7 +532,7 @@ do
 local AntiAlias = run.loader.exports.DRAMATIC_SHAPE.lib.require("AntiAlias")
 local VoxelGrid = run.loader.exports.DRAMATIC_SHAPE.lib.require("VoxelGrid")
 local aaGame = { save = { options = {} }, mods = { modOptions = {} } }
-local aa = hookedRows[11]
+local aa = hookedRows[12]
 T.eq(aa.label, "AA", "the anti-aliasing row carries its label")
 T.eq(aa.value(), "OFF",
   "and starts off -- supersampling is a cost knob, and a mod must not spend "
@@ -566,6 +571,49 @@ T.eq(aa.value(), "OFF", "and the ladder wraps back to off")
 AntiAlias.expand(320, 200)
 T.eq(AntiAlias.factor(), 1, "leaving nothing behind for the next pass")
 end
+
+-- ------- SHADOWS: the sun's own pass, and the row that stands it down
+--
+-- The most expensive thing in the frame after the geometry -- the whole world
+-- drawn a second time from the light, every time anything in it moves -- so
+-- the row exists for the machine that cannot carry it. What it must do is
+-- switch shadows OFF rather than down: both halves of ShadowMap (can the pass
+-- run, and is there a map to read) hang off the one gate, because the map
+-- from the last frame is still in the canvas and a row that only stopped the
+-- pass would leave every shadow frozen in the pose it was switched off in.
+--
+-- In an anonymous scope, like every section that wants more than a name or
+-- two: this file is one chunk and a chunk has 200 local slots, which the
+-- main function is already sitting on.
+;(function()
+local Shadows = run.loader.exports.DRAMATIC_SHAPE.lib.require("Shadows")
+local ShadowMap = run.loader.exports.DRAMATIC_SHAPE.lib.require("ShadowMap")
+local shadowRow = hookedRows[11]
+local shGame = { save = { options = {} }, mods = { modOptions = {} } }
+T.eq(shadowRow.label, "SHADOWS", "the shadow row carries its label")
+T.eq(shadowRow.value(), "ON",
+  "and starts ON -- cast shadows are as much of the mode as the geometry, "
+  .. "and the row is for the machine that cannot have them")
+T.eq(Shadows.enabled(), true, "which is what the pass reads")
+T.eq(ShadowMap.wanted(), true, "and the gate both halves of the sun pass ask")
+
+shadowRow.step(shGame, 1)
+T.eq(shadowRow.value(), "OFF", "stepping the row stands the sun pass down")
+T.eq(shGame.save.options.modOptions.DRAMATIC_SHAPE.shadows, false,
+  "the choice persists beside the other settings, not over them")
+T.eq(Shadows.enabled(), false, "the pass sees it")
+T.eq(ShadowMap.wanted(), false, "through the one gate")
+T.eq(ShadowMap.available(), false,
+  "so the sun pass never opens -- the frame's second draw of the world is "
+  .. "the whole thing being saved")
+T.eq(ShadowMap.active(), false,
+  "and nothing reads the map either: a pass stopped WITHOUT this would leave "
+  .. "the last frame's shadows standing forever")
+
+shadowRow.step(shGame, 1)
+T.eq(shadowRow.value(), "ON", "and the row is a toggle -- one step back on")
+T.eq(ShadowMap.wanted(), true, "with the sun asked for again")
+end)()
 
 -- ------- the animated terrain atlas survives an engine without its seams
 --
@@ -6187,6 +6235,10 @@ T.check(box.z < 200,
   .. "the view centre is the bug that cut the top off")
 do
   local n, s, x = VB.footprint(math.rad(35), 320, 288, REACH)
+  -- the south edge is the ground the bottom ray lands on PLUS what stands
+  -- there: a tree's feet are south of the row its top is seen on, and the
+  -- cut is by column (see lift)
+  s = s + VB.lift(math.rad(35)) + VB.SOUTH_PAD
   T.check(math.abs(box.rz - (n + s) * 0.5) < 1e-6,
     "the half-depth spans the footprint from its south edge to its north")
   T.check(math.abs(box.z - (200 - (n - s) * 0.5)) < 1e-6,
@@ -6196,6 +6248,49 @@ do
     "both bigger than the window at every tilted rung, so the cut can "
     .. "never take a bite out of the picture")
 end
+
+-- ------- and the geometry standing on the ground it frames
+--
+-- The bug: the box was cut to where the frame's rays hit the GROUND, and
+-- the ground is not what the picture is made of. At every rung past the
+-- frame's own half-angle the bottom of the screen shows things whose FEET
+-- are south of that line, and the shader cuts by column -- so a tree one
+-- pixel outside lost its whole height and the bottom of the frame wore a
+-- bite out of the scenery, the ground behind showing through.
+do
+  local tanY = 1 / (2 * VS.FOCAL)
+  T.eq(VB.lift(0), 0,
+    "straight down nothing is lost: a raised point lands NORTH of where its "
+    .. "own ray hits the ground, which no cut can take")
+  T.eq(VB.lift(math.atan(tanY)), 0,
+    "and up to atan(tanY) -- the frame's own half-angle -- it still is")
+  T.check(VB.lift(math.rad(35)) > 0 and VB.lift(math.rad(50)) > VB.lift(math.rad(35))
+          and VB.lift(math.rad(75)) > VB.lift(math.rad(50)),
+    "past it the lift opens with the tilt: the flatter the eye, the more of "
+    .. "a tree is what sits under the bottom of the frame")
+  -- against the ray it is derived from: a point HEIGHT up on the bottom
+  -- edge's own ray, dropped to the ground, is exactly this far south of
+  -- where that ray lands
+  for _, deg in ipairs({ 35, 50, 75 }) do
+    local a = math.rad(deg)
+    local dy = -(math.cos(a) + tanY * math.sin(a))
+    local dz = -(math.sin(a) - tanY * math.cos(a))
+    T.check(math.abs(VB.lift(a) - VB.HEIGHT * (-dz / -dy)) < 1e-9,
+      ("%d degrees: the lift is that ray walked back up by HEIGHT")
+        :format(deg))
+  end
+  -- and it is in the CUT, at FIT, which is the rung the artefact was seen on
+  VS.angle = math.rad(35)
+  local fit = VB.frame(0, 0, 320, 288, 3)
+  local n, s = VB.footprint(math.rad(35), 320, 288, REACH)
+  T.check(fit.z + fit.rz >= s + VB.lift(math.rad(35)) - 1e-6,
+    "so the box's south edge clears the feet of everything the bottom of "
+    .. "the frame can show, tree tops included")
+  T.check(fit.z + fit.rz > s and fit.z - fit.rz < -n + 1e-6,
+    "without moving the north edge, which the reach already decides")
+end
+VS.angle = math.rad(35)
+box = VB.frame(100, 200, 320, 288, 3)
 T.check(box.rx ~= box.rz,
   "which is the whole reason the box kind carries two half-extents: a "
   .. "square cut on a wide frame either loses the sides or overshoots")
@@ -6336,6 +6431,34 @@ end)()
 
   -- the row answers the mode, and OFF answers false
   T.eq(LetsGo.mode(), false, "LET'S GO defaults to OFF")
+
+  -- ------- the scripted catch tutorials are none of LET'S GO's business
+  --
+  -- The VIRIDIAN CITY old man and Yellow's PROF.OAK / PIKACHU intro are
+  -- the same makeOldManDemo cutscene: the cursor, the bag and the throw
+  -- are all scripted, and nobody keeps the Pokemon. Every rung has to
+  -- leave them exactly as the engine plays them.
+  T.eq(LetsGo.scripted({ demo = true }), true,
+    "the old man's tutorial is a scripted battle")
+  T.eq(LetsGo.scripted({ demo = true, oakDemo = true }), true,
+    "and so is PROF.OAK catching the PIKACHU")
+  T.eq(LetsGo.scripted({ kind = "wild" }), false,
+    "an ordinary wild encounter is not")
+  T.eq(LetsGo.scripted(nil), false, "and no battle at all is not either")
+  do
+    -- the predicates that gate every FULL behaviour, read at FULL
+    local realMode = LetsGo.mode
+    LetsGo.mode = function() return "full" end
+    T.eq(LetsGo.fullWild({ kind = "wild" }), true,
+      "FULL owns an ordinary wild encounter")
+    T.eq(LetsGo.fullWild({ kind = "wild", demo = true }), false,
+      "but never the old man's demo, whatever the row says")
+    T.eq(LetsGo.fullWild({ kind = "wild", oakDemo = true }), false,
+      "nor PROF.OAK's")
+    T.eq(LetsGo.wantsMinigame({ kind = "wild", demo = true }), false,
+      "and a scripted throw is never handed the minigame")
+    LetsGo.mode = realMode
+  end
 
   -- the ball: a full open-drop-rock-click life without a GPU
   T.eq(Mat4.rotateZ ~= nil, true, "Mat4 grew the roll the wobble rocks on")

@@ -217,10 +217,27 @@ local function getBlank()
   return blank or nil
 end
 
+-- Whether the player asked for shadows at all (the SHADOWS row, see
+-- lib/Shadows). Asked through a pcall because this module is loaded by
+-- probes and by the suite with no mod namespace around it, where the answer
+-- is simply yes.
+--
+-- ONE gate for both halves of the module -- can the pass run, and is there
+-- a map to read -- because they must never disagree: available() alone
+-- would leave the LAST map standing (`ready` is still true), and every
+-- surface would go on wearing shadows frozen in the pose the row was
+-- switched off in.
+function ShadowMap.wanted()
+  local ok, on = pcall(function() return V.require("Shadows").enabled() end)
+  return (not ok) or on
+end
+
 -- Whether the sun pass can run at all. False headless, without shaders, or
 -- where the canvas cannot be made -- VoxelScene then keeps the flat decal
--- shadows, which need nothing but a quad.
+-- shadows, which need nothing but a quad -- and false with the row off,
+-- where nothing stands in (see lib/Shadows).
 function ShadowMap.available()
+  if not ShadowMap.wanted() then return false end
   if love.system and love.system.getOS and love.system.getOS() == "iOS" then
     return false
   end
@@ -241,9 +258,12 @@ function ShadowMap.texture()
   return getBlank()
 end
 
--- True while the map holds a frame the main pass can read.
+-- True while the map holds a frame the main pass can read. The row's OFF
+-- lands here as well as on available(): a map drawn a frame ago is still in
+-- the canvas, and every reader (the scene shader's sunDark, the water's,
+-- the forest's beams) hangs off this one answer.
 function ShadowMap.active()
-  return ready and canvas ~= nil and canvas ~= false
+  return ready and canvas ~= nil and canvas ~= false and ShadowMap.wanted()
 end
 
 -- The direction the light TRAVELS, normalized. The shear is the shadow a

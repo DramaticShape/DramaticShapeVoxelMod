@@ -913,6 +913,19 @@ local function drawGB(battle)
   local g = love.graphics
   g.push("all")
 
+  -- The empty hand: no ring (nothing will be graded) and no ball readout
+  -- (there is no ball) -- just what happened and the way out. On the two
+  -- rows the aim HUD already uses, NOT side by side on one: at the GB font
+  -- these two strings are ~110 and ~56 pixels wide in a 160 pixel frame,
+  -- so a single row draws the second plate straight over the end of the
+  -- first ("OUT OF BALL|A/B:RUN").
+  if S.phase == "aim" and S.empty then
+    label("NO BALLS LEFT", 8, 119)
+    label("A/B:RUN", 158, 131, "right")
+    g.pop()
+    return
+  end
+
   if S.phase == "aim" or S.phase == "flight" then
     local cx, cy, outer = ringGeometry(shot)
     local rho = ringRho(S.ringT)
@@ -945,7 +958,10 @@ local function drawGB(battle)
     -- enough at the GB font to run under the B:BACK plate opposite
     ballGlyph(8, 137, S.ballId)
     label(("%s x%d"):format(name:gsub("%s*BALL%s*", ""), count), 15, 131)
-    label("B:BACK", 158, 131, "right")
+    -- and what B does, which is not the same thing in both modes: under
+    -- FULL there is no classic menu behind the throw to back out TO, so B
+    -- is the encounter's RUN and the label has to say so
+    label(S.fullWild and "B:RUN" or "B:BACK", 158, 131, "right")
     if S.canSwitch then label("L/R:BALL", 15, 119) end
 
     -- the wind-up readout: sparks orbit the ball as it charges, dim and
@@ -1042,10 +1058,12 @@ end
 
 -- opts: consumed (the bag already took the ball), safari (safari flow),
 -- canSwitch (aim-time ball cycling), declinable (B backs out / runs),
--- fullWild (Let's Go rules: no foe turns, stay in throw mode, B flees)
+-- fullWild (Let's Go rules: no foe turns, stay in throw mode, B flees),
+-- empty (ballId is nil -- the out-of-balls hand, see rearm below)
 function CatchThrow.begin(battle, ballId, opts)
   if S then return false end
   opts = opts or {}
+  local empty = opts.empty or ballId == nil
   local ok = pcall(function()
     local arena, groundY = OB().arenaInfo()
     local shot = OB().shot()
@@ -1056,8 +1074,9 @@ function CatchThrow.begin(battle, ballId, opts)
       ballId = ballId,
       safari = opts.safari or false,
       fullWild = opts.fullWild or false,
+      empty = empty,
       consumed = opts.consumed or false,
-      canSwitch = opts.canSwitch or false,
+      canSwitch = (opts.canSwitch and not empty) or false,
       declinable = opts.declinable ~= false,
       phase = "aim",
       clock = 0, t = 0, ringT = 0,
@@ -1072,6 +1091,7 @@ function CatchThrow.begin(battle, ballId, opts)
       handGB = { 80, 110 },
     }
     ball.pos = handPos()
+    ball.visible = not empty
     S.body = { r = 10, yOff = 8, hh = 8 }  -- until a measurement lands
     measureBody()
   end)
@@ -1080,7 +1100,7 @@ function CatchThrow.begin(battle, ballId, opts)
     return false
   end
   battle.phase = CatchThrow.PHASE
-  CatchThrow.lastBall = ballId
+  if ballId then CatchThrow.lastBall = ballId end
   -- the capture seat, HELD: still drops the drift, the steer and the lift
   -- inside the rig itself, and OverworldBattle's per-frame steerable gate
   -- closes every input that could move it. The player's own steered angle
@@ -1089,13 +1109,27 @@ function CatchThrow.begin(battle, ballId, opts)
   return true
 end
 
--- the next ball into the hand, without tearing the seat down: FULL's
--- "always in throw mode" between one throw and the next
+-- The next ball into the hand, without tearing the seat down: FULL's
+-- "always in throw mode" between one throw and the next.
+--
+-- A NIL ball is not a failure to rearm -- it is the empty hand, and it is
+-- still capture mode. Running out mid-encounter does not hand the fight
+-- back to the classic menu (there is no fight: a Let's Go wild has no
+-- player Pokemon in it and the foe never takes a turn, so the menu would
+-- offer a FIGHT that cannot happen against a foe that cannot answer).
+-- The seat holds, the Pokemon stands there, and the readout says so with
+-- the one move that is left.
 local function rearm(ballId)
   S.ballId = ballId
-  CatchThrow.lastBall = ballId
-  S.ballInst = Pokeball.new(ballId)
-  S.ballInst.pos = handPos()
+  S.empty = ballId == nil
+  if ballId then
+    CatchThrow.lastBall = ballId
+    S.ballInst = Pokeball.new(ballId)
+    S.ballInst.pos = handPos()
+  else
+    S.ballInst.visible = false
+    S.canSwitch = false
+  end
   S.battle.phase = CatchThrow.PHASE   -- park the engine's menu again
   S.phase = "aim"
   S.clock = 0
@@ -1135,8 +1169,12 @@ local function winToGB(x, y)
   return (px - shot.lx) / shot.scale, (py - shot.ly) / shot.scale
 end
 
+-- An EMPTY hand is not aimable: with no ball there is nothing to drag, so
+-- the pointer seams stand down entirely and the mouse/finger goes back to
+-- whatever owned it -- rather than the player wrestling an invisible ball
+-- around a screen that can never throw it.
 local function aiming()
-  return S ~= nil and S.phase == "aim"
+  return S ~= nil and S.phase == "aim" and not S.empty
 end
 
 local function pointer(kind, x, y, id)
@@ -1154,11 +1192,77 @@ local function pointer(kind, x, y, id)
   end
 end
 
+-- ------- the BUTTONS, read on the LOGIC STEP rather than the frame
+--
+-- Everything else in this file is presentational and rides the render
+-- frame (Pipelines.update). Button EDGES cannot: Input:step rebuilds
+-- `pressed` from scratch once per FIXED step, and Game:update runs the
+-- fixed steps for the frame FIRST and Pipelines.update after -- so a
+-- frame that runs two steps has already thrown the first step's edges
+-- away by the time anything on the render clock looks at them.
+--
+-- Which is not a rare race. It is every frame below 60fps: the key is
+-- queued between frames, the frame's FIRST step promotes it, the SECOND
+-- wipes it, and the poll never sees it at all. A 3D battle is exactly
+-- where the frame rate goes under, so B-to-run, A-to-throw and the L/R
+-- ball switch were all reliably dead on the machines that most needed
+-- them and fine on a 144Hz one (where most frames run no step at all and
+-- the edge lingers). Read from the pressQueue on the engine's own
+-- input.step seam instead: it fires once per logic step, never skipped,
+-- with this step's presses still in the queue.
+--
+-- Taken rather than peeked, so a press the capture consumed does not also
+-- page the message it just queued.
+local function take(g, btn)
+  local q = g and g.input and g.input.pressQueue
+  if not q then return false end
+  local hit = false
+  for i = #q, 1, -1 do
+    if q[i] == btn then
+      table.remove(q, i)
+      hit = true
+    end
+  end
+  return hit
+end
+
+function CatchThrow.buttons(g)
+  if not (S and S.phase == "aim") then return end
+  -- the same beat of deafness the drag has: the A that picked the ball out
+  -- of the bag menu is still this step's edge, and must not become a throw
+  if S.clock < 0.25 then return end
+  if S.empty then
+    -- A as well as B: nothing here can be confirmed, so the confirm button
+    -- should get the player out rather than do nothing at all
+    local b, a = take(g, "b"), take(g, "a")
+    if b or a then CatchThrow.cancel(true) end
+    return
+  end
+  if S.declinable and take(g, "b") then
+    CatchThrow.cancel(true)
+    return
+  end
+  if take(g, "a") then tapThrow() end
+  if take(g, "left") then switchBall(-1) end
+  if take(g, "right") then switchBall(1) end
+end
+
 function CatchThrow.installInput()
   if installed then return end
   installed = true
 
   local Game = require("src.core.Game")
+
+  -- the logic-step seam for the buttons (see above). next_ first, so a
+  -- tool mod injecting presses on this hook is read like a controller.
+  local mod = V.mod
+  if mod and mod.hooks then
+    mod.hooks:wrap("input.step", function(next_, g, dt)
+      local r = next_(g, dt)
+      pcall(CatchThrow.buttons, g)
+      return r
+    end)
+  end
 
   -- ------- mouse
   --
@@ -1340,6 +1444,18 @@ function CatchThrow.update(dt)
   end
 
   if S.phase == "aim" then
+    -- ------- the empty hand
+    --
+    -- No ball, so no drag, no wind-up, no throw and no ring: the seat and
+    -- the Pokemon are all that is left, and the only input that means
+    -- anything is leaving. A runs as well as B on purpose -- there is no
+    -- second choice for it to be confused with, and a player mashing the
+    -- confirm button at a screen that cannot confirm anything should get
+    -- out rather than get stuck.
+    if S.empty then
+      if BattleScene.capture then BattleScene.capture.hideTextBox = true end
+      return                      -- A/B are read on the logic step, below
+    end
     -- the foe's body, if no measurement landed at begin (the texture pass
     -- and the session race on the entry frame; a model needs its pack
     -- warm): retried while aiming, briefly -- the default torso covers a
@@ -1407,36 +1523,17 @@ function CatchThrow.update(dt)
     if BattleScene.capture then BattleScene.capture.hideTextBox = true end
 
     stickInput(dt)
-
-    -- a beat of deafness on entry: the A that picked the ball in the bag
-    -- menu is still this frame's edge, and it must not become the throw
-    if S.clock < 0.25 then return end
-    local input = game().input
-    if input and input.wasPressed then
-      if S.declinable and input:wasPressed("b") then
-        CatchThrow.cancel(true)
-        return
-      end
-      if input:wasPressed("a") then tapThrow() end
-      if input:wasPressed("left") then switchBall(-1) end
-      if input:wasPressed("right") then switchBall(1) end
-    end
+    -- B, A and the L/R ball switch are NOT read here: button edges do not
+    -- survive the render clock (CatchThrow.buttons, on the logic step)
     return
   end
 
   -- FULL, between throws: the miss text is playing, the seat is held, and
   -- the moment the engine offers the menu the next ball is in the hand
-  -- instead. Out of balls, the hold releases and the classic menu takes
-  -- over -- there is nothing left to be in throw mode WITH.
+  -- instead -- or, when that was the last ball, the empty hand is (rearm
+  -- takes nil for exactly this). Either way the capture screen stays up.
   if S.phase == "await" then
-    if S.battle.phase == "menu" then
-      local ball = CatchThrow.pickBall()
-      if ball then
-        rearm(ball)
-      else
-        endSession()
-      end
-    end
+    if S.battle.phase == "menu" then rearm(CatchThrow.pickBall()) end
     return
   end
 

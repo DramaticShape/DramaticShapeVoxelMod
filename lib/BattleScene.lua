@@ -736,11 +736,29 @@ function BattleScene.render(state, arena, textures, token)
     -- pull is also what keeps a tuft from z-fighting the floor it stands on
     local pull = VoxelScene.pull(math.max(pitch, 0.05))
     if not discs then
+      -- and the WIND blowing through it, exactly as the free-roam pass
+      -- switches on around its own grass draws (VoxelScene). Without this
+      -- the uniform sits at the per-frame default beginScene sends -- zero,
+      -- meaning "no wind" -- and the tall grass a fight is standing in goes
+      -- dead still for the length of the battle while the same tufts one
+      -- frame earlier, and one frame after, were moving. A staged fight is
+      -- shot on the MAP, in that place's own weather and light; a frozen
+      -- field is the one thing that reads as a photograph of it rather than
+      -- the place itself.
+      --
+      -- No contact point goes with it (grassWind's px/pz are left nil, which
+      -- sends the far-away sentinel): that push is a WALKER parting the grass
+      -- they are stepping through, and there is nobody walking here -- the
+      -- two mons stand still on their own tiles for the whole shot.
+      Voxel3D.grassWind(true)
       Voxel3D.draw(ChunkMesher.grass(host), atlasFor(host), nil, pull)
       for _, nb in ipairs(neighbors) do
         Voxel3D.draw(ChunkMesher.grass(nb.map), atlasFor(nb.map),
                      Mat4.translate(nb.ox, 0, nb.oy), pull)
       end
+      -- off again before the flowers, which are not grass and have no sway
+      -- of their own -- the same order the free-roam pass draws them in
+      Voxel3D.grassWind(false)
       local fpull = math.max(0, pull - 8 * math.sin(math.max(pitch, 0.05)))
       Voxel3D.draw(ChunkMesher.flowers(host), atlasFor(host), nil, fpull,
                    ShadowMap.snug(nil))
